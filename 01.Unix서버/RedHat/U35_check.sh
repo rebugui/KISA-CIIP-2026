@@ -29,7 +29,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-35"
 ITEM_NAME="공유 서비스에 대한 익명 접근 제한 설정"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보 (제시된 리스트 기준 반영)
 GUIDELINE_PURPOSE="공유 서비스의 익명 접근을 제한하여 중요 정보의 노출을 방지하기 위함"

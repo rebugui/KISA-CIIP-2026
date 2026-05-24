@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-03"
 ITEM_NAME="계정 잠금 임계값 설정"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="계정 탈취 목적의 무차별 대입 공격 시 해당 계정을 잠금으로써 인증 요청에 응답하는 리소스 낭비를 차단하고 대입 공격으로 인한 비밀번호 노출 공격을 무력화하기 위함"

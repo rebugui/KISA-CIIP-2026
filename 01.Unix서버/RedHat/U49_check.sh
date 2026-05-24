@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-49"
 ITEM_NAME="DNS 보안 버전 패치"
-SEVERITY="(상)"
+SEVERITY="상"
 
 GUIDELINE_PURPOSE="취약점이 발표되지 않은 BIND 버전을 사용하여 시스템 보안성을 높이기 위함"
 GUIDELINE_THREAT="취약점이 내포된 BIND 버전을 사용할 경우, DoS 공격, 버퍼 오버 플로우(Buffer Overflow) 및 DNS 서버 원격 침입 등의 위험이 존재함"

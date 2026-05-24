@@ -29,7 +29,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-23"
 ITEM_NAME="SUID, SGID, Sticky bit 설정 파일 점검"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보 (PDF 50페이지 내용 반영)
 GUIDELINE_PURPOSE="불필요한 SUID, SGID, Stickybit 설정 제거로 악의적인 사용자의 권한 상승을 방지하기 위함"

@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-37"
 ITEM_NAME="crontab 설정파일 권한 설정 미흡"
-SEVERITY="(상)"
+SEVERITY="상"
 
 GUIDELINE_PURPOSE="관리자 외에는 서비스를 사용할 수 없도록 설정하고 있는지 점검하기 위함"
 GUIDELINE_THREAT="일반 사용자가 crontab 및 at 서비스를 사용할 수 있을 경우, 고의 또는 실수로 불법적인 예약 파일 실행으로 시스템 피해를 일으킬 수 있는 위험이 존재함"

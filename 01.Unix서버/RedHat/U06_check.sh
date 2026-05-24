@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-06"
 ITEM_NAME="사용자 계정 su 기능 제한"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="su 관련 그룹만 su 명령어 사용 권한이 부여되어 있는지 점검하여 su 그룹에 포함되지 않은 일반 사용자의 su 명령 사용을 원천적으로 차단하는지 확인하기 위함"

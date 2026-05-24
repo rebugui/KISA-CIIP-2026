@@ -29,7 +29,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-01"
 ITEM_NAME="root 계정 원격 접속 제한"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="관리자 계정 탈취로 인한 시스템 장악을 방지하기 위해 외부 비인가자의 root 계정 접근 시도를 원천적으로 차단하기 위함"

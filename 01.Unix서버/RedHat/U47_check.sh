@@ -29,7 +29,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-47"
 ITEM_NAME="스팸 메일 릴레이 제한"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="스팸메일 서버로의 악용 방지 및 서버 과부하를 방지하기 위함"

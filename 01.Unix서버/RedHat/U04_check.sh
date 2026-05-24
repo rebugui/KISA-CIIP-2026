@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-04"
 ITEM_NAME="패스워드 파일 보호"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="일부 오래된 시스템의 경우 /etc/passwd 파일에 비밀번호가 평 문으로 저장되므로 사용자 계정 비밀번호가 암호화되어 저장되어 있는지 점검하여 비인가자의 비밀번호 파일 접근 시에도 사용자 계정 비밀번호가 안전하게 관리되고 있는지 확인하기 위함"

@@ -29,7 +29,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-28"
 ITEM_NAME="접속 IP 및 포트 제한"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보 (PDF 55페이지 내용 반영)
 GUIDELINE_PURPOSE="허용한 호스트만 서비스를 사용하게하여 서비스 취약점을 이용한 외부자 공격을 방지하기 위함"

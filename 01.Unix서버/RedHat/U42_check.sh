@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-42"
 ITEM_NAME="불필요한 RPC 서비스 비활성화"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보 (PDF 내용 반영)
 GUIDELINE_PURPOSE="많은 취약점(버퍼 오버 플로우, DoS, 원격 실행 등)이 존재하는 RPC 서비스를 비활성화하여 시스템의 보안성을 높이기 위함"

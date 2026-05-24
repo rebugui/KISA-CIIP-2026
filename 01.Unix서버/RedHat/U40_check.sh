@@ -29,7 +29,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-40"
 ITEM_NAME="NFS 접근 통제"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="접근 권한이 없는 비인가자의 접근을 통제하기 위함"

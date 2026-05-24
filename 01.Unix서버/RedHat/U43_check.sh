@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-43"
 ITEM_NAME="NIS, NIS+ 점검"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보 (PDF 내용 반영)
 GUIDELINE_PURPOSE="안전하지 않은 NIS 서비스를 비활성화하고 안전한 NIS + 서비스를 활성화하여 시스템의 보안성을 높이기 위함"

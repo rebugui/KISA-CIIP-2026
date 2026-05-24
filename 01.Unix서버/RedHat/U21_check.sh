@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-21"
 ITEM_NAME="/etc/syslog.conf 파일 소유자 및 권한 설정"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보 (PDF 가이드 내용 반영)
 GUIDELINE_PURPOSE="/etc/(r)syslog.conf 파일의 권한 적절성을 점검하여, 비인가자의 임의적인 /etc/(r)syslog.conf 파일 변조를 방지하기 위함"

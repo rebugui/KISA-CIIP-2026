@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-18"
 ITEM_NAME="/etc/shadow 파일 소유자 및 권한 설정"
-SEVERITY="(상)"
+SEVERITY="상"
 
 # 가이드라인 정보 (PDF 43페이지 내용 반영)
 GUIDELINE_PURPOSE="/etc/shadow 파일을 관리자만 제어할 수 있게하여 비인가자들의 임의적인 파일 변조를 방지하기 위함"

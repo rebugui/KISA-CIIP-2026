@@ -32,7 +32,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-36"
 ITEM_NAME="r 계열 서비스 비활성화"
-SEVERITY="중"
+SEVERITY="상"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="r-command 사용을 통한 원격 접속은 NET Backup 또는 클러스터 링 등 용도로 사용되기도하나, 인증 없이 관리자 원격 접속이 가능하여 이에 대한 보안 위협을 방지하기 위함"

@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-59"
 ITEM_NAME="안전한 SNMP 버전 사용"
-SEVERITY="(중)"
+SEVERITY="상"
 
 GUIDELINE_PURPOSE="안전한 SNMP 버전 사용으로 전송되는 데이터를 보호하기 위함"
 GUIDELINE_THREAT="SNMP 버전이 기준보다 낮을 경우, 응답 패킷이 평 문으로 전송되어 스니 핑 위험이 존재함"
