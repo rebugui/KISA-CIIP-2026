@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-21
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
-# @Title       : /etc/syslog.conf 파일 소유자 및 권한 설정
+# @Platform    : RedHat
+# @Severity    : 상
+# @Title       : /etc/(r)syslog.conf 파일 소유자 및 권한 설정
 # @Description : 로그 설정 파일(/etc/syslog.conf 또는 /etc/rsyslog.conf)의 소유자 및 권한 설정 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,7 +26,7 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-21"
-ITEM_NAME="/etc/syslog.conf 파일 소유자 및 권한 설정"
+ITEM_NAME="/etc/(r)syslog.conf 파일 소유자 및 권한 설정"
 SEVERITY="상"
 
 # 가이드라인 정보 (PDF 가이드 내용 반영)

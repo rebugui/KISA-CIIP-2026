@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 상
-# @Title       : 바이러스백신프로그램설치및주기적업데이트
+# @Title       : 바이러스 백신 프로그램 설치 및 주기적 업데이트
 # @Description : 바이러스 백신 프로그램 설치 및 주기적 업데이트 상태 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-13"
-$ITEM_NAME = "바이러스백신프로그램설치및주기적업데이트"
+$ITEM_NAME = "바이러스 백신 프로그램 설치 및 주기적 업데이트"
 $SEVERITY = "상"
 $CATEGORY = "4.보안관리"
 

@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-03
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 계정 잠금 임계값 설정
 # @Description : pam_faillock.so 또는 faillock 설정 확인

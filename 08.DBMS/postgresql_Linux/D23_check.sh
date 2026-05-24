@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-23
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
+# @Platform    : postgresql_Linux
 # @Severity    : 상
-# @Title       : xp_cmdshell 확장 저장 프로시저 사용 제한
+# @Title       : xp_cmdshell 사용 제한
 # @Description : xp_cmdshell 확장 저장 프로시저 사용 제한 관리를 통한 DBMS 보안 강화
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

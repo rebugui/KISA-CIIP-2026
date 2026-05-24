@@ -9,8 +9,8 @@
 # @ID          : U-54
 # @Category    : UNIX > 4. 웹 서비스 관리
 # @Platform    : RedHat
-# @Severity    : (상)
-# @Title       : 암호화되지 않은 FTP 서비스 비활성화
+# @Severity    : 중
+# @Title       : 암호화되지 않는 FTP 서비스 비활성화
 # @Description : 암호화되지 않은 FTP 서비스 실행 여부 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,12 +26,12 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-54"
-ITEM_NAME="암호화되지 않은 FTP 서비스 비활성화"
-SEVERITY="(상)"
+ITEM_NAME="암호화되지 않는 FTP 서비스 비활성화"
+SEVERITY="중"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="암호화되지 않은 FTP 서비스를 비활성화함으로써 계정 및 중요 정보 유출 방지하기 위함"
-GUIDELINE_THREAT="암호화되지 않은 FTP 서비스를 사용할 경우, 데이터가 평 문으로 전송되어 비인가자가 스니핑을 통해 계정 및 중요 정보를 외부로 유출할 위험이 존재함"
+GUIDELINE_THREAT="암호화되지 않은 FTP 서비스를 사용할 경우, 데이터가 평문으로 전송되어 비인가자가 스니핑을 통해 계정 및 중요 정보를 외부로 유출할 위험이 존재함"
 GUIDELINE_CRITERIA_GOOD="암호화되지 않은 FTP 서비스가 비활성화된 경우"
 GUIDELINE_CRITERIA_BAD="암호화되지 않은 FTP 서비스가 활성화된 경우"
 GUIDELINE_REMEDIATION="암호화되지 않은 FTP 서비스 중지 및 비활성화 설정"

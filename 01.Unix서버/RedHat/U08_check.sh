@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-08
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : 관리자 그룹에 최소한의 계정 포함
 # @Description : 관리자 권한이 있는 그룹(root, wheel 등)에 불필요한 계정 포함 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-08"
 ITEM_NAME="관리자 그룹에 최소한의 계정 포함"
-SEVERITY="(중)"
+SEVERITY="중"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="관리자 그룹에 최소한의 필요 계정만 존재하는지 확인하여 불필요한 권한 남용을 점검하기 위함"

@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 상
-# @Title       : 항목의불필요한서비스제거
+# @Title       : 항목의 불필요한 서비스 제거
 # @Description : 시스템에서 불필요한 서비스를 제거하여 공격면을 축소
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-05"
-$ITEM_NAME = "항목의불필요한서비스제거"
+$ITEM_NAME = "항목의 불필요한 서비스 제거"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 

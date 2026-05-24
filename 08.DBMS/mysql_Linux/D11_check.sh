@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-11
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
-# @Severity    : 중
-# @Title       : DBMS GRANT 권한 점검
+# @Platform    : mysql_Linux
+# @Severity    : 상
+# @Title       : DBA 이외의 인가되지 않은 사용자가 시스템 테이블에 접근할 수 없도록 설정
 # @Description : GRANT 권한을 제어하여 무단 권한 부여 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

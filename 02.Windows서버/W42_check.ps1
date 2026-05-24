@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-42
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 하
-# @Title       : 이벤트로그관리설정
+# @Title       : 이벤트 로그 관리 설정
 # @Description : 이벤트 로그 파일 크기 및 보관 기간 적절 유지로 중요 로그 누락 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-42"
-$ITEM_NAME = "이벤트로그관리설정"
+$ITEM_NAME = "이벤트 로그 관리 설정"
 $SEVERITY = "하"
 $CATEGORY = "4.로그관리"
 
@@ -84,9 +84,9 @@ try {
 # Define guideline variables
 $purpose = "유사시 책임 추적을 위해 주요 이벤트가 누락되지 않도록 이벤트 로그 파일의 크기 및 보관 기간을 적절하게 유지하기 위함"
 $threat = "이벤트 로그 파일의 크기가 충분하지 않으면 중요 로그가 저장되지 않을 위험이 있으며, 최대 보존 크기를 초과하는 경우 자동으로 덮어씀으로써 중요 로그의 손실 위험이 존재함"
-$criteria_good = "최대로 그 크기'10,240KB 이상'으로 설정,'90일 이후 이벤트 덮어씀'을 설정한 경우"
-$criteria_bad = "최대로 그 크기'10,240KB 미만'으로 설정, 이벤트 덮어 씀 기간이'90일 이하로 설정된 경우"
-$remediation = "최대로 그 크기'10,240KB','90일 이후 이벤트 덮어씀'설정"
+$criteria_good = "최대 로그 크기'10,240KB 이상'으로 설정,'90일 이후 이벤트 덮어씀'을 설정한 경우"
+$criteria_bad = "최대 로그 크기'10,240KB 미만'으로 설정, 이벤트 덮어 씀 기간이'90일 이하로 설정된 경우"
+$remediation = "최대 로그 크기'10,204KB','90일 이후 이벤트 덮어씀'설정"
 
 # Save results using lib
 Save-DualResult -ItemId $ITEM_ID `

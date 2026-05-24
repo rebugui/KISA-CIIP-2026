@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-38
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : DoS 공격에 취약한 서비스 비활성화
 # @Description : DoS 공격에 악용될 수 있는 echo, discard, daytime, chargen 등의 서비스 비활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

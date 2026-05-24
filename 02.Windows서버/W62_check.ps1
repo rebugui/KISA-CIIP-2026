@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-62
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 시작프로그램목록분석
+# @Title       : 시작 프로그램 목록 분석
 # @Description : 시작 프로그램 목록 분석으로 악성 프로그램 실행 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-62"
-$ITEM_NAME = "시작프로그램목록분석"
+$ITEM_NAME = "시작 프로그램 목록 분석"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 

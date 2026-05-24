@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-04
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 계정잠금임계값설정
+# @Title       : 계정 잠금 임계값 설정
 # @Description : 계정 잠금 임계값 설정 여부 점검으로 공격자의 자유로운 자동화 암호 유추 공격 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-04"
-$ITEM_NAME = "계정잠금임계값설정"
+$ITEM_NAME = "계정 잠금 임계값 설정"
 $SEVERITY = "상"
 $CATEGORY = "1.계정관리"
 

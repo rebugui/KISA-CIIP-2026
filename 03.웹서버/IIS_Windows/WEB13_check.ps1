@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-13
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 하
-# @Title       : 웹서비스디렉터리리스팅제거
+# @Platform    : IIS_Windows
+# @Severity    : 상
+# @Title       : 웹 서비스 설정 파일 노출 제한
 # @Description : 웹 서버의 디렉터리 리스팅(Directory Listing) 기능을 제거하여 웹 서버 디렉터리 정보 노출을 방지합니다. 이 항목은 WEB-04와 동일한 내용을 다루지만 제거를 강조합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-25
 # @Category    : Web Server
-# @Platform    : Nginx
+# @Platform    : Nginx_Linux
 # @Severity    : 상
-# @Title       : 주기적보안패치및벤더권고사항적용
+# @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
 # @Description : 주기적 보안 패치 및 벤더 권고 사항 적용 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

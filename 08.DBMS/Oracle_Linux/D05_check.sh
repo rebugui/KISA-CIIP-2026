@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-05
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 중
-# @Title       : DBMS 진단 항목 D-05
+# @Title       : 비밀번호 재사용에 대한 제약 설정
 # @Description : DBMS 진단 항목 D-05 관련 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-65
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
 # @Title       : NTP 및 시각 동기화 설정
 # @Description : NTP 서비스 설정 확인

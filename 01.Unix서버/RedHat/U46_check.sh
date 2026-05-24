@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-46
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : 일반 사용자의 메일 서비스 실행 방지
 # @Description : 일반 사용자가 메일 서비스를 임의로 실행하거나 제어하는 것을 방지하는 설정 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

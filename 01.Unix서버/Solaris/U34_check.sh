@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-34
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
-# @Title       : 로그온 시도 횟수 제한
+# @Title       : Finger 서비스 비활성화
 # @Description : faillock 설정 확인 deny <= 5
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-34"
-ITEM_NAME="로그온 시도 횟수 제한"
+ITEM_NAME="Finger 서비스 비활성화"
 SEVERITY="상"
 
 # 가이드라인 정보

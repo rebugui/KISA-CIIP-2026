@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-24
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 중
-# @Title       : X-Frame-Options 헤더 설정
+# @Title       : 별도의 업로드 경로 사용 및 권한 설정
 # @Description : X-Frame-Options HTTP 헤더를 설정하여 Clickjacking 공격을 방지합니다. X-Frame-Options 헤더 미설정 시 공격자가 피해자 사이트를 iframe으로 로드하여 Clickjacking 공격이 가능합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

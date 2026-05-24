@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-17
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 하
-# @Title       : AuditTable은데이터베이스관리자계정으로접근하도록제한
+# @Title       : AuditTable은 데이터베이스 관리자 계정으로 접근하도록 제한
 # @Description : Audit Table 접근권한이 DBA 계정으로 제한되어 있는지 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

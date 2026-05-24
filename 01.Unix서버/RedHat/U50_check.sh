@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-50
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
-# @Title       : DNS Zone Transfer 설정
+# @Platform    : RedHat
+# @Severity    : 상
+# @Title       : DNS ZoneTransfer 설정
 # @Description : DNS 존 전송(Zone Transfer)을 제한하여 불필요한 영역 정보 노출을 방지하는지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,7 +26,7 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-50"
-ITEM_NAME="DNS Zone Transfer 설정"
+ITEM_NAME="DNS ZoneTransfer 설정"
 SEVERITY="상"
 
 GUIDELINE_PURPOSE="DNSZoneTransfer 설정을 통해 비인가자에 대한 무단 접근을 방지하기 위함"

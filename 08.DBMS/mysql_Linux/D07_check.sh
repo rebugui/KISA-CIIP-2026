@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-07
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
+# @Platform    : mysql_Linux
 # @Severity    : 중
-# @Title       : root권한으로서비스구동제한
+# @Title       : root 권한으로 서비스 구동 제한
 # @Description : MySQL 서비스가 root 권한으로 실행되지 않도록 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

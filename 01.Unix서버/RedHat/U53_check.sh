@@ -9,7 +9,7 @@
 # @ID          : U-53
 # @Category    : UNIX > 3. FTP 서비스 관리
 # @Platform    : RedHat
-# @Severity    : (하)
+# @Severity    : 하
 # @Title       : FTP 서비스 정보 노출 제한
 # @Description : FTP 배너 정보 제거 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-53"
 ITEM_NAME="FTP 서비스 정보 노출 제한"
-SEVERITY="(하)"
+SEVERITY="하"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="FTP 서비스 접속 배너를 통한 불필요한 정보 노출을 방지하기 위함"

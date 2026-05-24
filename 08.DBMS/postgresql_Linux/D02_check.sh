@@ -9,7 +9,7 @@
 # [점검 항목 상세]
 # @ID          : D-02
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
+# @Platform    : postgresql_Linux
 # @Severity    : 상
 # @Title       : 데이터베이스의 불필요 계정을 제거하거나, 잠금 설정 후 사용
 # @Description : 불필요한 계정 관리 및 권한 제어를 통한 보안 강화

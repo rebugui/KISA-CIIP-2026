@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-09
 # @Category    : Server
-# @Platform    : Tomcat
+# @Platform    : Tomcat_Linux
 # @Severity    : 상
-# @Title       : 웹서비스프로세스권한제한
+# @Title       : 웹 서비스 프로세스 권한 제한
 # @Description : 웹 서비스 프로세스의 권한 제한 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

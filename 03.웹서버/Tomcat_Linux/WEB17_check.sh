@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-17
 # @Category    : Server
-# @Platform    : Tomcat
-# @Severity    : 상
-# @Title       : 웹서비스가상디렉토리삭제
+# @Platform    : Tomcat_Linux
+# @Severity    : 중
+# @Title       : 웹 서비스 가상 디렉터리 삭제
 # @Description : 불필요한 가상 디렉토리 삭제 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

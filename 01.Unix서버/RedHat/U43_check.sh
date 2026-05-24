@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-43
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
-# @Title       : NIS, NIS+ 점검
+# @Platform    : RedHat
+# @Severity    : 상
+# @Title       : NIS, NIS +점검
 # @Description : 계정 정보를 네트워크로 공유하는 NIS 서비스의 활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,7 +26,7 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-43"
-ITEM_NAME="NIS, NIS+ 점검"
+ITEM_NAME="NIS, NIS +점검"
 SEVERITY="상"
 
 # 가이드라인 정보 (PDF 내용 반영)

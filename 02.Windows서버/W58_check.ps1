@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-58
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 사용자별홈디렉터리권한설정
+# @Title       : 사용자별 홈 디렉터리 권한 설정
 # @Description : 홈 디렉터리 권한 설정으로 비인가 사용자 정보 노출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-58"
-$ITEM_NAME = "사용자별홈디렉터리권한설정"
+$ITEM_NAME = "사용자별 홈 디렉터리 권한 설정"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 

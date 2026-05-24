@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-38
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : DoS 공격에 취약한 서비스 비활성화
 # @Description : echo, chargen, daytime 등 비활성화

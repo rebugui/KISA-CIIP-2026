@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-14
 # @Category    : Server
-# @Platform    : Tomcat
+# @Platform    : Tomcat_Linux
 # @Severity    : 상
-# @Title       : 불필요한스크립트매핑제거
+# @Title       : 웹 서비스 경로 내 파일의 접근 통제
 # @Description : 불필요한 CGI 스크립트 핸들러 매핑 제거 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

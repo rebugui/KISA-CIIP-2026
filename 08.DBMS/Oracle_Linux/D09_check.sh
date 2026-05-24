@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-09
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 중
-# @Title       : DBMS 진단 항목 D-09
+# @Title       : 일정 횟수의 로그인 실패 시 이에 대한 잠금 정책 설정
 # @Description : DBMS 진단 항목 D-09 관련 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

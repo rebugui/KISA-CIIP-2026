@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-65
 # @Category    : UNIX > 5. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
-# @Title       : NTP 서비스 설정 및 동기화
+# @Platform    : RedHat
+# @Severity    : 중
+# @Title       : NTP 및 시각 동기화 설정
 # @Description : NTP 서비스 활성화 여부 및 시간 동기화 상태 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,8 +26,8 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-65"
-ITEM_NAME="NTP 서비스 설정 및 동기화"
-SEVERITY="(중)"
+ITEM_NAME="NTP 및 시각 동기화 설정"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="인증 및 감사 목적을 위한 시간 동기화는 필수적이며, 안전하고 승인된 NTP 서비스와 동기화하기 위함"
 GUIDELINE_THREAT="시스템 간 시간 동기화 미흡으로 보안 사고 및 장애 발생 시 로그에 대한 신뢰도 확보 미흡 위험이 존재함"

@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-26
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL
-# @Severity    : 중
-# @Title       : DBMS 감사 로깅 점검
+# @Platform    : MSSQL_Linux
+# @Severity    : 상
+# @Title       : 데이터베이스의 접근, 변경, 삭제 등의 감사 기록이 기관의 감사 기록 정책에 적합하도록 설정
 # @Description : 보안 감사 로그 기록 및 관리를 통한 추적성 확보
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

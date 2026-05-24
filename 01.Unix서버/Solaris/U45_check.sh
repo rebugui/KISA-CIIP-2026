@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-45
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 메일 서비스 버전 점검
 # @Description : Sendmail/Postfix 버전 확인

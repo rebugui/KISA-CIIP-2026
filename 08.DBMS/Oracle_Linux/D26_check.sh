@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-26
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
-# @Severity    : 중
-# @Title       : DBMS감사로깅점검
+# @Platform    : Oracle_Linux
+# @Severity    : 상
+# @Title       : 데이터베이스의 접근, 변경, 삭제 등의 감사 기록이 기관의 감사 기록 정책에 적합하도록 설정
 # @Description : 감사 로깅 활성화로 보안 이벤트 추적 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

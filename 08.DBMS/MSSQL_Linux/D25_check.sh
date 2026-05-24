@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-25
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL
-# @Severity    : 중
-# @Title       : DBMS 백업/복구 권한 점검
+# @Platform    : MSSQL_Linux
+# @Severity    : 상
+# @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
 # @Description : 과도한 권한 부여 방지 및 최소 권한 원칙 적용
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

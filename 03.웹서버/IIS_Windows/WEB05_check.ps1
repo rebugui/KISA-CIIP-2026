@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-05
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 중
-# @Title       : 지정하지않은CGI/ISAPI실행제한
+# @Platform    : IIS_Windows
+# @Severity    : 상
+# @Title       : 지정하지 않은 CGI/ISAPI 실행 제한
 # @Description : 지정하지 않은 디렉토리에서의 CGI/ISAPI 실행을 제한하여 웹쉘(Web Shell) 공격 등 악의적인 코드 실행을 방지합니다. CGI/ISAPI 프로그램의 무제한 실행은 악성 코드 업로드 및 시스템 장악으로 이어질 수 있는 심각한 보안 위협입니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

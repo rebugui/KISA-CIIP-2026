@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-06
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
+# @Platform    : postgresql_Linux
 # @Severity    : 중
-# @Title       : DB사용자계정을개별적으로부여하여사용
+# @Title       : DB 사용자 계정을 개별적으로 부여하여 사용
 # @Description : 불필요한 계정 관리 및 권한 제어를 통한 보안 강화
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

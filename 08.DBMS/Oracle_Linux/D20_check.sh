@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-20
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 하
-# @Title       : 인가되지않은ObjectOwner제한
+# @Title       : 인가되지 않은 Object Owner의 제한
 # @Description : Object Owner가 SYS, SYSTEM, 관리자 계정 등으로 제한 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

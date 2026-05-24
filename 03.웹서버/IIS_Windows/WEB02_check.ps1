@@ -7,7 +7,7 @@
 # [점검 항목 상세]
 # @ID          : WEB-02
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 상
 # @Title       : 취약한 비밀번호 사용 제한
 # @Description : 관리자 계정의 취약한 비밀번호 설정 여부 점검

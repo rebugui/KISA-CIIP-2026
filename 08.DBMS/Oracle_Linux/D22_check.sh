@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-22
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 하
-# @Title       : 데이터베이스자원제한기능설정
+# @Title       : 데이터베이스의 자원 제한 기능을 TRUE로 설정
 # @Description : RESOURCE_LIMIT를 TRUE로 설정하여 자원의 과도한 사용 방지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

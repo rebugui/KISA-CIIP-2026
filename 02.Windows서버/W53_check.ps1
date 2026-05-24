@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-53
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 이동식미디어포맷및꺼내기허용
+# @Title       : 이동식 미디어 포맷 및 꺼내기 허용
 # @Description : 이동식 미디어 포맷 및 꺼내기 권한 제한으로 불법적인 매체 처리 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-53"
-$ITEM_NAME = "이동식미디어포맷및꺼내기허용"
+$ITEM_NAME = "이동식 미디어 포맷 및 꺼내기 허용"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 

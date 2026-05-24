@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-26
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 중
-# @Title       : 로그디렉터리및파일권한설정
+# @Title       : 로그 디렉터리 및 파일 권한 설정
 # @Description : IIS 로그 디렉터리(C:\Windows\System32\LogFiles) 및 파일의 권한을 제한하여 비인가자의 로그 파일 접근을 차단합니다. 로그 파일에는 공격자에게 유용한 정보가 포함될 수 있으며 권한 미설정 시 정보유출, 로그파일 훼손 및 변조 위험이 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

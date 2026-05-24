@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-04
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
-# @Severity    : 중
-# @Title       : DBMS 진단 항목 D-04
+# @Platform    : Oracle_Linux
+# @Severity    : 상
+# @Title       : 데이터베이스 관리자 권한을 꼭 필요한 계정 및 그룹에 대해서만 허용
 # @Description : DBMS 진단 항목 D-04 관련 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

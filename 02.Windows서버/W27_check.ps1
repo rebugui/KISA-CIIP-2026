@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-27
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 최신Windows OS Build버전적용
+# @Title       : 최신 Windows OS Build 버전 적용
 # @Description : 최신 Windows OS Build 버전 적용으로 알려진 보안 취약점 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-27"
-$ITEM_NAME = "최신Windows OS Build버전적용"
+$ITEM_NAME = "최신 Windows OS Build 버전 적용"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 

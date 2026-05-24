@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-14
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
+# @Platform    : postgresql_Linux
 # @Severity    : 중
-# @Title       : DBMS ALTER 권한 점검
+# @Title       : 데이터베이스의 주요 설정 파일, 비밀번호 파일 등과 같은 주요 파일들의 접근 권한이 적절하게 설정
 # @Description : 과도한 권한 부여 방지 및 최소 권한 원칙 적용
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

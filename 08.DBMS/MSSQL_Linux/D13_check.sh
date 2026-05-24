@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-13
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL
+# @Platform    : MSSQL_Linux
 # @Severity    : 중
-# @Title       : 불필요한ODBC/OLE-DB데이터소스와드라이브를제거하여사용
+# @Title       : 불필요한 ODBC/OLE-DB 데이터 소스와 드라이브를 제거하여 사용
 # @Description : 불필요한ODBC/OLE-DB데이터소스와드라이브를제거하여사용 관리를 통한 DBMS 보안 강화
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

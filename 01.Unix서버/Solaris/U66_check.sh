@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-66
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
-# @Title       : 정책에 따른 시스템 로깅 설정
+# @Title       : 정책에 따른 시스템로깅 설정
 # @Description : rsyslog/syslog-ng 설정 및 로그 기록 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-66"
-ITEM_NAME="정책에 따른 시스템 로깅 설정"
+ITEM_NAME="정책에 따른 시스템로깅 설정"
 SEVERITY="중"
 
 # 가이드라인 정보

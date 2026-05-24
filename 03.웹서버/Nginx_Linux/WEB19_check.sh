@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-19
 # @Category    : Web Server
-# @Platform    : Nginx
-# @Severity    : 상
-# @Title       : 웹서비스SSI사용제한
+# @Platform    : Nginx_Linux
+# @Severity    : 중
+# @Title       : 웹 서비스 SSI(Server Side Includes)사용 제한
 # @Description : SSI(Server Side Includes) 사용 제한 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

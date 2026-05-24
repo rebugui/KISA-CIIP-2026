@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-14
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 원격터미널접속가능한사용자그룹제한
+# @Title       : (중) 원격 터미널 접속 가능한 사용자 그룹 제한 개요
 # @Description : 원격 터미널 접속 가능 사용자 그룹 제한 여부 점검으로 관리자 계정 분리
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -24,7 +24,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-14"
-$ITEM_NAME = "원격터미널접속가능한사용자그룹제한"
+$ITEM_NAME = "(중) 원격 터미널 접속 가능한 사용자 그룹 제한 개요"
 $SEVERITY = "중"
 $CATEGORY = "1.계정관리"
 

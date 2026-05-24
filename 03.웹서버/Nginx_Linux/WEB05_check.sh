@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-05
 # @Category    : Web Server
-# @Platform    : Nginx
+# @Platform    : Nginx_Linux
 # @Severity    : 상
-# @Title       : 지정하지않은CGI/ISAPI실행제한
+# @Title       : 지정하지 않은 CGI/ISAPI 실행 제한
 # @Description : 웹서비스 CGI 실행 제한 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

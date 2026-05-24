@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : D-12
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 상
 # @Title       : 안전한 리스너 비밀번호 설정 및 사용
 # @Description : Oracle 리스너 비밀번호 설정 여부 확인 (Oracle 12c Release 2+ 미지원)

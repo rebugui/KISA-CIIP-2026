@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-20
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : NetBIOS바인딩서비스구동점검
+# @Title       : NetBIOS 바인 딩 서비스 구동 점검
 # @Description : NetBIOS over TCP/IP 비활성화 여부 점검으로 NetBIOS 관련 공격 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -22,7 +22,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-20"
-$ITEM_NAME = "NetBIOS바인딩서비스구동점검"
+$ITEM_NAME = "NetBIOS 바인 딩 서비스 구동 점검"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 

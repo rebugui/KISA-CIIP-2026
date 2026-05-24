@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-08
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL
+# @Platform    : MSSQL_Linux
 # @Severity    : 상
-# @Title       : 안전한암호화알고리즘사용
+# @Title       : 안전한 암호화 알고리즘 사용
 # @Description : 비밀번호 정책 및 설정 관리를 통한 무단 접근 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

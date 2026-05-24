@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-18
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
-# @Severity    : 중
-# @Title       : 응용프로그램또는DBA계정의Role이Public으로설정되지않도록조정
+# @Platform    : Oracle_Linux
+# @Severity    : 상
+# @Title       : 응용 프로그램 또는 DBA 계정의 Role이 Public으로 설정되지 않도록 조정
 # @Description : Public role에 부여된 불필요한 권한 확인 및 제거
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

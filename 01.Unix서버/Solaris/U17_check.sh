@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-17
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 시스템 시작 스크립트 권한 설정
 # @Description : /etc/init.d/* 권한 755 확인

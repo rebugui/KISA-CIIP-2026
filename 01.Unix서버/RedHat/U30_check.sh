@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-30
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : UMASK 설정 관리
 # @Description : 신규 파일 및 디렉터리 생성 시 기본 권한을 제어하는 UMASK 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -29,7 +29,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-30"
 ITEM_NAME="UMASK 설정 관리"
-SEVERITY="(중)"
+SEVERITY="중"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="잘못 설정된 UMASK 값으로 인해 신규 파일에 대한 권한이 과도하게 부여되는 것을 방지하기 위함"

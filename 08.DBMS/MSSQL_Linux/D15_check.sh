@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-15
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL
+# @Platform    : MSSQL_Linux
 # @Severity    : 하
-# @Title       : 관리자이외의사용자가오라클리스너의접속을통해리스너로그및trace파일에대한변경제한
+# @Title       : 관리자 이외의 사용자가 오라클 리스너의 접속을 통해 리스너 로그 및 trace 파일에 대한 변경 제한
 # @Description : 불필요한 접속 경로 제한 및 접근 통제
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

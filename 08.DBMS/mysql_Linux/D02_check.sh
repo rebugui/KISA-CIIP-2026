@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : D-02
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
+# @Platform    : mysql_Linux
 # @Severity    : 상
 # @Title       : 데이터베이스의 불필요 계정을 제거하거나, 잠금 설정 후 사용
 # @Description : 불필요한 계정 존재 유무를 점검하여 비인가자의 DB 접근에 대비되어 있는지 확인

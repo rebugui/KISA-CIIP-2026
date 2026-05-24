@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-02
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 비밀번호 관리 정책 설정
 # @Description : 비밀번호 복잡성 설정 및 최소/최대 사용 기간 확인

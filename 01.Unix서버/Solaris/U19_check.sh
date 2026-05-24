@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-19
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : /etc/hosts 파일 소유자 및 권한 설정
 # @Description : root:root 644 확인

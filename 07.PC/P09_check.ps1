@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 하
-# @Title       : 브라우저종료시임시인터넷파일폴더의내용을삭제하도록설정
+# @Title       : 브라우저 종료 시 임시 인터넷 파일 폴더의 내용을 삭제하도록 설정
 # @Description : 브라우저 종료 시 임시 인터넷 파일 폴더의 내용을 삭제하여 캐시 정보 누출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-09"
-$ITEM_NAME = "브라우저종료시임시인터넷파일폴더의내용을삭제하도록설정"
+$ITEM_NAME = "브라우저 종료 시 임시 인터넷 파일 폴더의 내용을 삭제하도록 설정"
 $SEVERITY = "하"
 $CATEGORY = "2.서비스관리"
 

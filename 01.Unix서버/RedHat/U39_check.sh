@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-39
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : 불필요한 NFS 서비스 비활성화
 # @Description : 시스템 보안 강화를 위해 사용하지 않는 NFS 서비스의 활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 상
-# @Title       : 주기적보안패치및벤더권고사항적용
+# @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
 # @Description : 주기적인 보안 패치 및 벤더 권고 사항 적용하여 시스템 취약점 최소화
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-10"
-$ITEM_NAME = "주기적보안패치및벤더권고사항적용"
+$ITEM_NAME = "주기적 보안 패치 및 벤더 권고 사항 적용"
 $SEVERITY = "상"
 $CATEGORY = "3.패치관리"
 

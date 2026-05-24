@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-32
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
 # @Title       : 홈 디렉토리로 지정한 디렉토리의 존재 관리
 # @Description : /etc/passwd에 설정된 홈 디렉토리가 실제로 존재하는지 확인

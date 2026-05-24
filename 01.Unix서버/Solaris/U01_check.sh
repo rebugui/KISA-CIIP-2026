@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-01
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : root 계정 원격 접속 제한
 # @Description : PermitRootLogin no 설정 확인

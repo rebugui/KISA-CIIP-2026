@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-07
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : Everyone사용권한을익명사용자에게적용
+# @Title       : Everyone 사용 권한을 익명 사용자에 적용
 # @Description : Everyone 사용권한이 익명사용자에게 적용되는지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-07"
-$ITEM_NAME = "Everyone사용권한을익명사용자에게적용"
+$ITEM_NAME = "Everyone 사용 권한을 익명 사용자에 적용"
 $SEVERITY = "중"
 $CATEGORY = "1.계정관리"
 

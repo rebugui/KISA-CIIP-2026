@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-08
 # @Category    : Web Server
-# @Platform    : Apache
-# @Severity    : 상
-# @Title       : Apache .htaccess 오버라이드
+# @Platform    : Apache_Linux
+# @Severity    : 하
+# @Title       : 웹 서비스 파일 업로드 및 다운로드 용량 제한
 # @Description : Apache .htaccess 파일의 오버라이드 권한 제한 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-02
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : 비밀번호 관리 정책 설정
 # @Description : 비밀번호의 복잡성 설정(길이, 숫자, 대소문자, 특수문자 등) 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

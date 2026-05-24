@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : WEB-05
 # @Category    : Web Server
-# @Platform    : Apache
+# @Platform    : Apache_Linux
 # @Severity    : 상
 # @Title       : 지정하지 않은 CGI/ISAPI 실행 제한
 # @Description : 웹서비스 CGI 실행 제한 설정 여부 점검

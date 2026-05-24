@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-12
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (하)
+# @Platform    : RedHat
+# @Severity    : 하
 # @Title       : 세션 종료 시간 설정
 # @Description : 사용자 쉘에 대한 환경설정 파일에서 Session Timeout 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-12"
 ITEM_NAME="세션 종료 시간 설정"
-SEVERITY="(하)"
+SEVERITY="하"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="사용자의 고의 또는 실수로 시스템에 계정이 접속된 상태로 방치됨을 차단하기 위함"

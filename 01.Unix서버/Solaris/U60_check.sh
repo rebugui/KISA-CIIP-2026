@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-60
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
 # @Title       : SNMP Community String 복잡성 설정
 # @Description : public, private 이외 community 사용

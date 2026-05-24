@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : Debian
 # @Severity    : 하
-# @Title       : 세션 종료시간 설정
+# @Title       : 세션 종료 시간 설정
 # @Description : TMOUT 설정 확인 (/etc/profile, /etc/bash.bashrc, /etc/profile.d/)
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-12"
-ITEM_NAME="세션 종료시간 설정"
+ITEM_NAME="세션 종료 시간 설정"
 SEVERITY="하"
 
 # 가이드라인 정보

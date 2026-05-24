@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : D-11
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 상
 # @Title       : DBA 이외의 인가되지 않은 사용자가 시스템 테이블에 접근할 수 없도록 설정
 # @Description : DBA 권한이 없는 사용자의 시스템 테이블 접근 권한 확인

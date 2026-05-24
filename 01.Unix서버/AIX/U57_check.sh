@@ -36,7 +36,7 @@ SEVERITY="중"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="root 계정의 FTP 직접 접속을 제한하여 root 비밀번호 정보 노출을 방지하기 위함"
-GUIDELINE_THREAT="FTP 서비스에 root 계정으로 접근할 경우, 데이터가 평 문으로 전송되어 비인가자가 스니핑을 통해 관리자 계정 및 중요 정보를 외부로 유출할 위험이 존재함"
+GUIDELINE_THREAT="FTP 서비스에 root 계정으로 접근할 경우, 데이터가 평문으로 전송되어 비인가자가 스니핑을 통해 관리자 계정 및 중요 정보를 외부로 유출할 위험이 존재함"
 GUIDELINE_CRITERIA_GOOD="root 계정 접속을 차단한 경우"
 GUIDELINE_CRITERIA_BAD="root 계정 접속을 허용한 경우"
 GUIDELINE_REMEDIATION="FTP 서비스를 사용하지 않는 경우 서비스 중지 및 비활성화 설정 FTP 서비스 사용 시 root 계정으로 직접 접속할 수 없도록 설정"

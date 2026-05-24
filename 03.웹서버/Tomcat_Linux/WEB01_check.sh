@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-01
 # @Category    : Server
-# @Platform    : Tomcat
+# @Platform    : Tomcat_Linux
 # @Severity    : 상
-# @Title       : Default관리자계정명변경
+# @Title       : Default 관리자 계정 명 변경
 # @Description : 웹서비스 설치 시 기본적으로 설정된 관리자 계정의 변경 후 사용 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

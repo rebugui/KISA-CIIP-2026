@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-59
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 안전한 SNMP 버전 사용
 # @Description : SNMP v3 사용 확인
@@ -36,7 +36,7 @@ SEVERITY="상"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="안전한 SNMP 버전 사용으로 전송되는 데이터를 보호하기 위함"
-GUIDELINE_THREAT="SNMP 버전이 기준보다 낮을 경우, 응답 패킷이 평 문으로 전송되어 스니 핑 위험이 존재함"
+GUIDELINE_THREAT="SNMP 버전이 기준보다 낮을 경우, 응답 패킷이 평문으로 전송되어 스니 핑 위험이 존재함"
 GUIDELINE_CRITERIA_GOOD="SNMP 서비스를 v3 이상으로 사용하는 경우"
 GUIDELINE_CRITERIA_BAD="SNMP 서비스를 v2 이하로 사용하는 경우"
 GUIDELINE_REMEDIATION="SNMP 서비스를 사용하지 않는 경우 서비스 중지 및 비활성화 설정 SNMP 서비스 사용 시 SNMP 버전을 v3 이상으로 적용하도록 설정"

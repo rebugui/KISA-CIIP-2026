@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-63
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
-# @Title       : 사용자 sudo 명령어 사용 제한
+# @Platform    : RedHat
+# @Severity    : 중
+# @Title       : sudo 명령어 접근 관리
 # @Description : sudoers 파일 권한 및 소유자 설정 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,12 +26,12 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-63"
-ITEM_NAME="사용자 sudo 명령어 사용 제한"
-SEVERITY="(중)"
+ITEM_NAME="sudo 명령어 접근 관리"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="비인가자가 관리자 권한을 남용하여 시스템 손상, 악성 코드 실행, 민감한 데이터 유출 등의 보안 위협을 방지하기 위함"
 GUIDELINE_THREAT="sudo 명령어 접근을 제한하지 않을 경우, 비인가자가 관리자 권한으로 허가되지 않은 명령어를 사용하여 루트 권한 오용, 악성 코드 실행, 데이터 유출 등의 시도를 할 위험이 존재함"
-GUIDELINE_CRITERIA_GOOD="/etc/sudoers 파일 소유자가 root이고, 파일 권한이 640 이하인 경우"
+GUIDELINE_CRITERIA_GOOD="/etc/sudoers 파일 소유자가 root이고, 파일 권한이 640인 경우"
 GUIDELINE_CRITERIA_BAD="/etc/sudoers 파일 소유자가 root가 아니거나, 파일 권한이 640을 초과하는 경우"
 GUIDELINE_REMEDIATION="/etc/sudoers 파일 소유자 및 권한 변경 설정"
 

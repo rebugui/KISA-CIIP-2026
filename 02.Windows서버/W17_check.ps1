@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-17
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 하드디스크기본공유제거
+# @Title       : 하드 디스크 기본 공유 제거
 # @Description : 하드디스크 기본 공유(C$, D$, ADMIN$) 제거 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -24,7 +24,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-17"
-$ITEM_NAME = "하드디스크기본공유제거"
+$ITEM_NAME = "하드 디스크 기본 공유 제거"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 
@@ -77,7 +77,7 @@ $purpose = "하드 디스크 기본 공유를 제거하여 시스템 정보 노�
 $threat = "Windows는 프로그램 및 서비스를 네트워크나 컴퓨터 환경에서 관리하기 위해 시스템 기본 공유 항목을 자동으로 생성함. 이를 제거하지 않으면 비인가자가 모든 시스템 자원에 접근할 수 있는 위험한 상황이 발생할 수 있으며 이러한 공유 기능의 경로를 이용하여 바이러스가 침투 위험이 존재함"
 $criteria_good = "레지스트리의 AutoShareServer (WinNT: AutoShareWks)가 0이며 기본 공유가 존재하지 않는 경우"
 $criteria_bad = "레지스트리의 AutoShareServer (WinNT: AutoShareWks)가 1이거나 기본 공유가 존재하는 경우"
-$remediation = "기본 공유 중지 후 레지스트리 값 설정(IPC $, 일반 공유 제외)"
+$remediation = "기본 공유 중지 후 레지스트리 값 설정(IPC `$, 일반 공유 제외)"
 
 Save-DualResult -ItemId $ITEM_ID `
     -ItemName $ITEM_NAME `

@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-06
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : 사용자 계정 su 기능 제한
 # @Description : 특정 그룹에 속한 사용자만 su 명령어를 사용할 수 있도록 제한하는지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

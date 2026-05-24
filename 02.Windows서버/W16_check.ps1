@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-16
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 공유권한및사용자그룹설정
+# @Title       : 공유 권한 및 사용자 그룹 설정
 # @Description : 공유 폴더 권한 설정 점검으로 Everyone 권한 부여 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -24,7 +24,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-16"
-$ITEM_NAME = "공유권한및사용자그룹설정"
+$ITEM_NAME = "공유 권한 및 사용자 그룹 설정"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 
@@ -91,7 +91,7 @@ try {
 }
 
 # 2. lib를 통한 결과 저장
-$purpose = "기본 공유인 C $, D $, Admin $, IPC $ 등을 제외한 공유 폴더에 Everyone 그룹으로 공유되는 것을 금지하여 익명 사용자의 접근을 차단하기 위함"
+$purpose = "기본 공유인 C `$, D `$, Admin `$, IPC `$ 등을 제외한 공유 폴더에 Everyone 그룹으로 공유되는 것을 금지하여 익명 사용자의 접근을 차단하기 위함"
 $threat = "Everyone이 공유 계정에 포함되어 있으면 익명 사용자의 접근이 가능하여 내부 정보 유출 및 악성 코드 감염 위험이 존재함"
 $criteria_good = "일반 공유 디렉터리가 없거나 공유 디렉터리 접근 권한에 Everyone 권한이 없는 경우"
 $criteria_bad = "일반 공유 디렉터리의 접근 권한에 Everyone 권한이 있는 경우"

@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 상
-# @Title       : 비밀번호관리정책설정
+# @Title       : 비밀번호 관리 정책 설정
 # @Description : 비밀번호의 최소 길이를 8자 이상으로 설정하고 암호 복잡성 정책을 적용하여 비밀번호 추측 공격 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-02"
-$ITEM_NAME = "비밀번호관리정책설정"
+$ITEM_NAME = "비밀번호 관리 정책 설정"
 $SEVERITY = "상"
 $CATEGORY = "1.계정관리"
 

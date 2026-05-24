@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-51
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : DNS 서비스의 취약한 동적 업데이트 설정 금지
 # @Description : 인가되지 않은 사용자의 DNS 동적 업데이트(Dynamic Update) 허용 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-51"
 ITEM_NAME="DNS 서비스의 취약한 동적 업데이트 설정 금지"
-SEVERITY="(상)"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="DNS 서비스의 동적 업데이트를 비활성화함으로써 신뢰할 수 없는 원본으로부터 업데이트를 받아들이는 위험을 차단하기 위함"
 GUIDELINE_THREAT="DNS 서버에서 동적 업데이트를 사용할 경우, 악의적인 사용자에 의해 신뢰할 수 없는 데이터가 받아들여질 위험이 존재함"

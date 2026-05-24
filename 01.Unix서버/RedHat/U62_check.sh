@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-62
 # @Category    : UNIX > 6. 로그 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (하)
+# @Platform    : RedHat
+# @Severity    : 하
 # @Title       : 로그인 시 경고 메시지 설정
 # @Description : 서버 접속 시 법적 책임 및 경고 문구가 포함된 배너 출력 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-62"
 ITEM_NAME="로그인 시 경고 메시지 설정"
-SEVERITY="(하)"
+SEVERITY="하"
 
 GUIDELINE_PURPOSE="비인가자들에게 서버에 대한 불필요한 정보를 제공하지 않고, 서버 접속 시 관계자만 접속해야한다는 경각심을 심어 주기 위함"
 GUIDELINE_THREAT="로그온 시 경고 메시지가 설정되어 있지 않을 경우, 기본 설정 값엔 서버 OS 버전 및 서비스 버전이 비인가자에게 노출되어 해당 정보를 통해 서비스의 취약점을 이용하여 공격을 시도할 위험이 존재함"

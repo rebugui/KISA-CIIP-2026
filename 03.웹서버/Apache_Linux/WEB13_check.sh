@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-13
 # @Category    : Web Server
-# @Platform    : Apache
+# @Platform    : Apache_Linux
 # @Severity    : 상
-# @Title       : 웹서비스디렉터리리스팅제거
+# @Title       : 웹 서비스 설정 파일 노출 제한
 # @Description : 디렉터리 리스팅 기능 비활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-39
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 백신프로그램업데이트
+# @Title       : 백신 프로그램 업데이트
 # @Description : 백신 프로그램 최신 업데이트 유지로 신종 바이러스 공격 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-39"
-$ITEM_NAME = "백신프로그램업데이트"
+$ITEM_NAME = "백신 프로그램 업데이트"
 $SEVERITY = "상"
 $CATEGORY = "3.패치관리"
 

@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 상
-# @Title       : 공유폴더제거
+# @Title       : 공유 폴더 제거
 # @Description : 시스템의 공유폴더를 제거하여 외부 접근 경로 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-04"
-$ITEM_NAME = "공유폴더제거"
+$ITEM_NAME = "공유 폴더 제거"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 

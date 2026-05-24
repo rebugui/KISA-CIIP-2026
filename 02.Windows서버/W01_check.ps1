@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-01
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : Administrator 계정 이름 변경
+# @Title       : Administrator 계정 이름 변경 등 보안성 강화
 # @Description : 기본 Administrator 계정 이름을 변경하여 무단 접근 위험 방지 및 보안 강화
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-01"
-$ITEM_NAME = "Administrator계정이름변경"
+$ITEM_NAME = "Administrator 계정 이름 변경 등 보안성 강화"
 $SEVERITY = "상"
 $CATEGORY = "1.계정관리"
 

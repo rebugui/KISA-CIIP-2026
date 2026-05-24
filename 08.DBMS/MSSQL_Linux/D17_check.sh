@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-17
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL
+# @Platform    : MSSQL_Linux
 # @Severity    : 하
-# @Title       : AuditTable은데이터베이스관리자계정으로접근하도록제한
+# @Title       : AuditTable은 데이터베이스 관리자 계정으로 접근하도록 제한
 # @Description : 불필요한 계정 관리 및 권한 제어를 통한 보안 강화
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

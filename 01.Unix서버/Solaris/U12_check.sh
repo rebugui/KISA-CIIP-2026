@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-12
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 하
-# @Title       : 세션 종료시간 설정
+# @Title       : 세션 종료 시간 설정
 # @Description : TMOUT 또는 /etc/profile 설정 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-12"
-ITEM_NAME="세션 종료시간 설정"
+ITEM_NAME="세션 종료 시간 설정"
 SEVERITY="하"
 
 # 가이드라인 정보

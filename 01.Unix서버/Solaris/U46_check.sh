@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-46
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 일반 사용자의 메일 서비스 실행 방지
 # @Description : mail 실행 제한 확인

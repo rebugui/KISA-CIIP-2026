@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-33
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 하
-# @Title       : HTTP/FTP/SMTP배너차단
+# @Title       : HTTP/FTP/SMTP 배너차단
 # @Description : HTTP/FTP/SMTP 서비스 배너 정보 노출 차단으로 불필요한 정보 유출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-33"
-$ITEM_NAME = "HTTP/FTP/SMTP배너차단"
+$ITEM_NAME = "HTTP/FTP/SMTP 배너차단"
 $SEVERITY = "하"
 $CATEGORY = "2.서비스관리"
 

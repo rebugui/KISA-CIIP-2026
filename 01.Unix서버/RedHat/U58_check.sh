@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-58
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : 불필요한 SNMP 서비스 구동 점검
 # @Description : SNMP 서비스 활성화 여부 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-58"
 ITEM_NAME="불필요한 SNMP 서비스 구동 점검"
-SEVERITY="(중)"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="불필요한 SNMP 서비스를 비활성화하여 필요 이상의 정보가 노출되는 것을 방지하기 위함"
 GUIDELINE_THREAT="SNMP 서비스가 활성화되어 있을 경우, 비인가자가 시스템의 중요 정보를 유출하거나 불법적으로 수정할 위험이 존재함"

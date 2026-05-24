@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-09
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (하)
+# @Platform    : RedHat
+# @Severity    : 하
 # @Title       : 계정이 존재하지 않는 GID 금지
 # @Description : 그룹 설정 파일(/etc/group)에 불필요한 그룹 존재 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,14 +27,14 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-09"
 ITEM_NAME="계정이 존재하지 않는 GID 금지"
-SEVERITY="(하)"
+SEVERITY="하"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="시스템에 불필요한 그룹이 존재하는지 점검하여 불필요한 그룹의 소유권으로 설정된 파일의 노출로 인해 발생할 수 있는 위험에 대해 대비를 하기 위함"
 GUIDELINE_THREAT="계정이 존재하지 않거나 불필요한 그룹이 존재하는 경우, 해당 그룹의 소유로 설정된 파일을 통한 권한 남용 또는 의도치 않은 권한 부여, 보안 감사 및 관리의 어려움 등의 위험이 존재함"
 GUIDELINE_CRITERIA_GOOD="시스템 관리나 운용에 불필요한 그룹이 제거된 경우"
 GUIDELINE_CRITERIA_BAD="시스템 관리나 운용에 불필요한 그룹이 존재하는 경우"
-GUIDELINE_REMEDIATION="불필요한 그룹이 존재하는 경우 관리자와 검토하여 제거하도록 설정 ※ /etc/group 파일과/etc/passwd 파일을 비교하여 점검하기를 권고함"
+GUIDELINE_REMEDIATION="불필요한 그룹이 존재하는 경우 관리자와 검토하여 제거하도록 설정 ※ /etc/group 파일과 /etc/passwd 파일을 비교하여 점검하기를 권고 함"
 
 diagnose() {
     local status="양호"

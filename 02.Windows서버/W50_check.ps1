@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-50
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 보안감사를로그할수없는경우즉시시스템종료
+# @Title       : 보안 감사를 로그 할 수 없는 경우 즉시 시스템 종료
 # @Description : 보안 감사 실패 시 시스템 종료 비활성화로 서비스 거부 공격 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-50"
-$ITEM_NAME = "보안감사를로그할수없는경우즉시시스템종료"
+$ITEM_NAME = "보안 감사를 로그 할 수 없는 경우 즉시 시스템 종료"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 

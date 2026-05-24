@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 상
-# @Title       : 최신보안패치및벤더권고사항적용WindowsOSBuild점검
+# @Title       : 지원이 종료되지 않은 WindowsOSBuild 적용
 # @Description : 최신 보안 패치 및 벤더 권고 사항 적용 및 Windows OS Build 버전 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-11"
-$ITEM_NAME = "최신보안패치및벤더권고사항적용WindowsOSBuild점검"
+$ITEM_NAME = "지원이 종료되지 않은 WindowsOSBuild 적용"
 $SEVERITY = "상"
 $CATEGORY = "3.패치관리"
 

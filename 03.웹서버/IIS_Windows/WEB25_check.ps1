@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-25
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 중
-# @Title       : X-XSS-Protection 헤더 설정
+# @Platform    : IIS_Windows
+# @Severity    : 상
+# @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
 # @Description : X-XSS-Protection HTTP 헤더를 설정하여 XSS(Cross-Site Scripting) 공격을 방지합니다. X-XSS-Protection 헤더 미설정 시 브라우저의 XSS 필터가 비활성화되어 XSS 공격에 취약합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

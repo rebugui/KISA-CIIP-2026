@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-21
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 중
-# @Title       : 동적페이지요청및응답값검증
+# @Title       : HTTP 리디렉션
 # @Description : 동적 페이지의 요청 및 응답값을 검증하여 SQL Injection, XSS(Command Injection) 등 공격을 방지합니다. IIS Request Filtering 활성화 및 애플리케이션 레벨의 입력값 검증 로직 구현이 필요합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

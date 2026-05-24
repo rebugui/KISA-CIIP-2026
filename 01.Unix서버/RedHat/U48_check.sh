@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-48
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : expn, vrfy 명령어 제한
 # @Description : SMTP 서버의 EXPN 및 VRFY 명령어 비활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-48"
 ITEM_NAME="expn, vrfy 명령어 제한"
-SEVERITY="(중)"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="SMTP 서비스의 expn,vrfy 명령을 통한 정보 유출을 방지하기 위함"
 GUIDELINE_THREAT="expn, vrfy 명령어를 통하여 특정 사용자 계정의 존재 여부를 알 수 있고, 사용자의 정보를 외부로 유출할 수 있는 위험이 존재함"

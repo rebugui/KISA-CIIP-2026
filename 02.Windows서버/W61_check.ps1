@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-61
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 파일및디렉토리보호
+# @Title       : 파일 및 디렉토리 보호
 # @Description : NTFS 파일 시스템 사용으로 강화된 보안 기능 및 접근 통제 적용
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-61"
-$ITEM_NAME = "파일및디렉토리보호"
+$ITEM_NAME = "파일 및 디렉토리 보호"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 

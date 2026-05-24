@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-30
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
 # @Title       : UMASK 설정 관리
 # @Description : UMASK 022 또는 027 확인

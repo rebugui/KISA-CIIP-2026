@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-23
 # @Category    : Web Server
-# @Platform    : Nginx
-# @Severity    : 상
-# @Title       : 웹서비스웹쉘(shell)삭제
+# @Platform    : Nginx_Linux
+# @Severity    : 중
+# @Title       : LDAP 알고리즘 적절하게 구성
 # @Description : 웹 서비스 디렉터리 내의 웹 쉘(shell) 파일 삭제 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

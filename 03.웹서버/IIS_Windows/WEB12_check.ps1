@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-12
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 하
-# @Title       : 웹서비스링크사용금지
+# @Platform    : IIS_Windows
+# @Severity    : 중
+# @Title       : 웹 서비스 링크 사용 금지
 # @Description : 심볼릭 링크(Symbolic Links) 사용을 제한하여 디렉터리 트래버설 공격을 방지합니다. IIS는 기본적으로 심볼릭 링크를 지원하지 않지만 추가 모듈 설치 시 확인이 필요합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

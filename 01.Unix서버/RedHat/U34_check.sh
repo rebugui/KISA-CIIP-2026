@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-34
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : Finger 서비스 비활성화
 # @Description : Finger 서비스(사용자 정보 확인 서비스)의 비활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

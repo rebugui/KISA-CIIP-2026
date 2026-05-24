@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-44
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : tftp, talk 서비스 비활성화
 # @Description : tftp, talk 서비스 중지 확인

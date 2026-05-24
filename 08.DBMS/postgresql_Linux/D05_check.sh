@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-05
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
+# @Platform    : postgresql_Linux
 # @Severity    : 중
-# @Title       : 비밀번호재사용에대한제약설정
+# @Title       : 비밀번호 재사용에 대한 제약 설정
 # @Description : 비밀번호 정책 및 설정 관리를 통한 무단 접근 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

@@ -9,8 +9,8 @@
 # @ID          : U-57
 # @Category    : UNIX > 2. 서비스 관리
 # @Platform    : RedHat
-# @Severity    : (상)
-# @Title       : ftpusers 파일 설정
+# @Severity    : 중
+# @Title       : Ftpusers 파일 설정
 # @Description : ftpusers 파일에 root 계정 등 시스템 계정 접근 제한 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,8 +26,8 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-57"
-ITEM_NAME="ftpusers 파일 설정"
-SEVERITY="(상)"
+ITEM_NAME="Ftpusers 파일 설정"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="root 계정의 FTP 직접 접속을 제한하여 root 비밀번호 정보 노출을 방지하기 위함"
 GUIDELINE_THREAT="FTP 서비스에 root 계정으로 접근할 경우, 데이터가 평문으로 전송되어 비인가자가 스니핑을 통해 관리자 계정 및 중요 정보를 외부로 유출할 위험이 존재함"

@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-21
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 중
-# @Title       : 인가되지않은GRANTOPTION사용제한
+# @Title       : 인가되지 않은 GRANTOPTION 사용 제한
 # @Description : 일반 사용자에게 WITH GRANT OPTION 부여 제한 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

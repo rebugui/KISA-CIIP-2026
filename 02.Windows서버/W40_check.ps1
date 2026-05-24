@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-40
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 정책에따른시스템로깅설정
+# @Title       : 정책에 따른 시스템로깅 설정
 # @Description : 감사 정책 설정으로 유사시 책임 추적을 위한 로그 확보
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-40"
-$ITEM_NAME = "정책에따른시스템로깅설정"
+$ITEM_NAME = "정책에 따른 시스템로깅 설정"
 $SEVERITY = "중"
 $CATEGORY = "4.로그관리"
 

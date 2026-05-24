@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-61
 # @Category    : UNIX > 5. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
-# @Title       : SNMP 서비스 접근 제어 설정
+# @Platform    : RedHat
+# @Severity    : 상
+# @Title       : SNMP Access Control 설정
 # @Description : SNMP 서비스에 대한 호스트/IP 기반 접근 제어 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,7 +26,7 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-61"
-ITEM_NAME="SNMP 서비스 접근 제어 설정"
+ITEM_NAME="SNMP Access Control 설정"
 SEVERITY="상"
 
 GUIDELINE_PURPOSE="SNMP 접근 제어 설정을 통해 비인가자의 접근을 차단하기 위함"

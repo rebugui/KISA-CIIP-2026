@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-15
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 파일 및 디렉터리 소유자 설정
 # @Description : 소유자가 없는 파일 확인

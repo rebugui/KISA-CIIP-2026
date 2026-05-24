@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-13
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 콘솔로그온시로컬계정에서빈암호사용제한
+# @Title       : 콘솔 로그 온 시 로컬 계정에서 빈 암호 사용 제한
 # @Description : 빈 암호 사용 제한 정책 설정 여부 점검으로 빈 암호를 통한 무단 접근 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-13"
-$ITEM_NAME = "콘솔로그온시로컬계정에서빈암호사용제한"
+$ITEM_NAME = "콘솔 로그 온 시 로컬 계정에서 빈 암호 사용 제한"
 $SEVERITY = "중"
 $CATEGORY = "1.계정관리"
 

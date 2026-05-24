@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-47
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 하
-# @Title       : 화면보호기설정
+# @Title       : 화면 보호기 설정
 # @Description : 화면보호기 설정으로 유휴 시간 내 불법적인 시스템 접근 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-47"
-$ITEM_NAME = "화면보호기설정"
+$ITEM_NAME = "화면 보호기 설정"
 $SEVERITY = "하"
 $CATEGORY = "5.보안관리"
 
@@ -75,7 +75,7 @@ try {
 $purpose = "사용자가 일정 시간 동안 아무런 작업을 수행하지 않으면 자동으로 로그오프 되거나 워크스테이션이 잠기도록 설정하여, 유휴 시간 내 불법적인 시스템 접근을 차단하기 위함"
 $threat = "화면 보호기 설정을 하지 않으면 사용자가 자리를 비운 사이에 임의의 사용자가 해당 시스템에 접근하여 중요 정보를 유출하거나, 악의적인 행위를 통해 시스템 운영에 악영향을 미칠 위험이 존재함"
 $criteria_good = "화면 보호기를 설정하고 대기 시간이 10분 이하의 값으로 설정되어 있으며, 화면 보호기 해제를 위한 암호를 사용하는 경우"
-$criteria_bad = "화면보호기가설정되지않거나대기시간이10분초과또는암호사용이비활성화된경우"
+$criteria_bad = ""
 $remediation = "화면 보호기 사용, 대기 시간 10분 이하, 해제를 위한 암호 사용"
 
 Save-DualResult -ItemId $ITEM_ID `

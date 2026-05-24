@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-16
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 하
-# @Title       : 웹서버헤더정보노출제한
+# @Platform    : IIS_Windows
+# @Severity    : 중
+# @Title       : 웹 서비스 헤더 정보 노출 제한
 # @Description : HTTP 응답 헤더에서 Server, X-Powered-By 등 서버 정보를 제거하거나 제한하여 정보 유출을 방지합니다. 서버 버전 정보 노출 시 공격자가 해당 버전의 취약점을 악용한 공격이 가능해집니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

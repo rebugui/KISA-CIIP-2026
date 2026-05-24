@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-18
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 중
-# @Title       : 웹서비스WebDAV비활성화
+# @Platform    : IIS_Windows
+# @Severity    : 상
+# @Title       : 웹 서비스 WebDAV 비활성화
 # @Description : WebDAV(Web Distributed Authoring and Versioning)를 비활성화하여 파일 무단 수정, 삭제, 업로드 등 악의적인 조작을 방지합니다. WebDAV 활성화 시 인증된 사용자가 HTTP를 통해 파일을 직접 조작할 수 있어 보안 위험이 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

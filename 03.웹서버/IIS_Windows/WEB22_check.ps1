@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-22
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 중
-# @Title       : 에러페이지관리
+# @Platform    : IIS_Windows
+# @Severity    : 하
+# @Title       : 에러 페이지 관리
 # @Description : 기본 에러 페이지(Default Error Pages)를 커스텀 페이지로 변경하여 서버 내부 구조 및 정보 노출을 방지합니다. 기본 에러 페이지 사용 시 서버 버전, 경로 등 민감한 정보가 노출될 수 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

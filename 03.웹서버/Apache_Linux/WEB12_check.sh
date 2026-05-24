@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-12
 # @Category    : Web Server
-# @Platform    : Apache
-# @Severity    : 상
-# @Title       : 웹서비스링크사용금지
+# @Platform    : Apache_Linux
+# @Severity    : 중
+# @Title       : 웹 서비스 링크 사용 금지
 # @Description : 웹 서비스에서의 심볼릭 링크 사용 금지 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

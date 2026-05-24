@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-06
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 관리자그룹에최소한의사용자포함
+# @Title       : 관리자 그룹에 최소한의 사용자 포함
 # @Description : 관리자 그룹에 최소한의 사용자 포함 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-06"
-$ITEM_NAME = "관리자그룹에최소한의사용자포함"
+$ITEM_NAME = "관리자 그룹에 최소한의 사용자 포함"
 $CATEGORY = "1.계정관리"
 
 # run_all 모드가 아닐 때만 진단 정보 출력

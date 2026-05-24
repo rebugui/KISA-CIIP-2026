@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-49
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 원격시스템에서강제로시스템종료
+# @Title       : 원격 시스템에서 강제로 시스템 종료
 # @Description : 원격 시스템 강제 종료 권한 제한으로 서비스 거부 공격 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-49"
-$ITEM_NAME = "원격시스템에서강제로시스템종료"
+$ITEM_NAME = "원격 시스템에서 강제로 시스템 종료"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 

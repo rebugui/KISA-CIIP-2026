@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-29
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 불필요한SNMP서비스구동점검
+# @Title       : 불필요한 SNMP 서비스 구동 점검
 # @Description : 불필요한 SNMP 서비스 구동 여부 점검으로 시스템 정보 유출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-29"
-$ITEM_NAME = "불필요한SNMP서비스구동점검"
+$ITEM_NAME = "불필요한 SNMP 서비스 구동 점검"
 $SEVERITY = "중"
 $CATEGORY = "2.서비스관리"
 

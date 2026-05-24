@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : HP-UX
 # @Severity    : 중
-# @Title       : FTP 계정 Shell 제한
+# @Title       : FTP 계정 shell 제한
 # @Description : FTP 계정의 Shell 제한 설정 여부 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,15 +31,15 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-55"
-ITEM_NAME="FTP 계정 Shell 제한"
+ITEM_NAME="FTP 계정 shell 제한"
 SEVERITY="중"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="FTP 계정의 쉘을 통한 시스템 접근을 차단하기 위함"
 GUIDELINE_THREAT="FTP 기본 계정에 쉘이 부여될 경우, 비인가자가 해당 기본 계정으로 시스템에 접근할 위험이 존재함"
-GUIDELINE_CRITERIA_GOOD="FTP 계정에/bin/false(/sbin/nologin)쉘이 부여된 경우"
-GUIDELINE_CRITERIA_BAD="FTP 계정에/bin/false(/sbin/nologin)쉘이 부여되어 있지 않은 경우"
-GUIDELINE_REMEDIATION="FTP 서비스를 사용하지 않는 경우 서비스 중지 및 비활성화 설정 FTP 서비스 사용 시 FTP 계정에/bin/false 쉘부여 설정"
+GUIDELINE_CRITERIA_GOOD="FTP 계정에 /bin/false(/sbin/nologin)쉘이 부여된 경우"
+GUIDELINE_CRITERIA_BAD="FTP 계정에 /bin/false(/sbin/nologin)쉘이 부여되어 있지 않은 경우"
+GUIDELINE_REMEDIATION="FTP 서비스를 사용하지 않는 경우 서비스 중지 및 비활성화 설정 FTP 서비스 사용 시 FTP 계정에 /bin/false 쉘부여 설정"
 
 # ============================================================================
 # 진단 함수

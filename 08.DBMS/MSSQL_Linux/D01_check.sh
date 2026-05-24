@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-01
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL (Running on Linux/Unix)
-# @Severity    : 상 (High)
-# @Title       : 기본계정의 비밀번호, 정책 등을 변경하여 사용
+# @Platform    : MSSQL_Linux
+# @Severity    : 상
+# @Title       : 기본 계정의 비밀번호, 정책 등을 변경하여 사용
 # @Description : DBMS 초기 설치 시 생성되는 기본 계정(sa 등)의 기본 비밀번호
 #                변경 여부 및 기본 권한 정책의 적절성을 점검합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

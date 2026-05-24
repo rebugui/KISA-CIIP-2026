@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-03
 # @Category    : Web Server
-# @Platform    : Nginx
+# @Platform    : Nginx_Linux
 # @Severity    : 상
-# @Title       : 비밀번호파일권한관리
+# @Title       : 비밀번호 파일 권한 관리
 # @Description : 비밀번호 파일에 대해 적절한 접근 권한 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

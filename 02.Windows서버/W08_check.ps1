@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-08
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 계정잠금기간설정
+# @Title       : 계정 잠금 기간 설정
 # @Description : 계정 잠금 기간 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-08"
-$ITEM_NAME = "계정잠금기간설정"
+$ITEM_NAME = "계정 잠금 기간 설정"
 $SEVERITY = "중"
 $CATEGORY = "1.계정관리"
 

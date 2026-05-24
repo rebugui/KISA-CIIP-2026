@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-10
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 상
-# @Title       : 불필요한프록시설정제한
+# @Title       : 불필요한 프 록 시 설정 제한
 # @Description : 불필요한 프록시 설정(Reverse Proxy, Application Request Routing)을 제한하여 내부 네트워크 정보 노출 및 무단 접근을 방지합니다. 프록시가 활성화되면 공격자가 내부망 정보를 획득하거나 프록시 서버를 악용할 수 있는 보안 위협이 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

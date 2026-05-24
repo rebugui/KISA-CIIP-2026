@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-11
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 하
-# @Title       : 웹서비스경로설정
+# @Platform    : IIS_Windows
+# @Severity    : 중
+# @Title       : 웹 서비스 경로 설정
 # @Description : 웹 서비스 경로를 기본 경로(C:\inetpub\wwwroot)가 아닌 별도의 분리된 경로로 설정하여 보안을 강화합니다. 기본 경로 사용 시 공격자가 웹 서버 구조를 쉽게 파악하고 공격 경로를 예측할 수 있는 위험이 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

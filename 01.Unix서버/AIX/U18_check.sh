@@ -35,11 +35,11 @@ ITEM_NAME="/etc/security/passwd 파일 소유자 및 권한 설정 (AIX)"
 SEVERITY="상"
 
 # 가이드라인 정보
-GUIDELINE_PURPOSE="/etc/shadow 파일을 관리자만 제어할 수 있게하여 비인가자들의 임의적인 파일 변조를 방지하기 위함"
-GUIDELINE_THREAT="/etc/shadow 파일에 저장된 암호화된 해시 값을 복호화하여(크래킹)비밀번호를 탈취할 위험이 존재함"
-GUIDELINE_CRITERIA_GOOD="/etc/shadow 파일의 소유자가 root이고, 권한이 400 이하인 경우"
-GUIDELINE_CRITERIA_BAD="/etc/shadow 파일의 소유자가 root가 아니거나, 권한이 400 이하가 아닌 경우"
-GUIDELINE_REMEDIATION="/etc/shadow 파일 소유자 및 권한 변경 설정"
+GUIDELINE_PURPOSE="/etc/security/passwd 파일을 관리자만 제어할 수 있게하여 비인가자들의 임의적인 파일 변조를 방지하기 위함"
+GUIDELINE_THREAT="/etc/security/passwd 파일에 저장된 암호화된 해시 값을 복호화하여(크래킹)비밀번호를 탈취할 위험이 존재함"
+GUIDELINE_CRITERIA_GOOD="/etc/security/passwd 파일의 소유자가 root이고, 권한이 600 또는 400인 경우"
+GUIDELINE_CRITERIA_BAD="/etc/security/passwd 파일의 소유자가 root가 아니거나, 권한이 600 또는 400이 아닌 경우"
+GUIDELINE_REMEDIATION="/etc/security/passwd 파일 소유자 및 권한 변경 설정"
 
 # ============================================================================
 # 진단 함수

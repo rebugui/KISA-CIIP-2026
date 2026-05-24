@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 중
-# @Title       : 원격지원금지정책설정
+# @Title       : 원격 지원을 금지하도록 정책이 설정
 # @Description : 원격 지원 기능에 대한 금지 정책 설정 확인을 통해 외부 접근 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-18"
-$ITEM_NAME = "원격지원금지정책설정"
+$ITEM_NAME = "원격 지원을 금지하도록 정책이 설정"
 $SEVERITY = "중"
 $CATEGORY = "4.보안관리"
 

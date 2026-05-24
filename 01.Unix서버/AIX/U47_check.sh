@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : AIX
 # @Severity    : 상
-# @Title       : 스팸 메일 릴레이 제한
+# @Title       : 스팸메일 릴레이 제한
 # @Description : 메일 릴레이 제한 설정 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-47"
-ITEM_NAME="스팸 메일 릴레이 제한"
+ITEM_NAME="스팸메일 릴레이 제한"
 SEVERITY="상"
 
 # 가이드라인 정보

@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-11
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
+# @Platform    : postgresql_Linux
 # @Severity    : 상
-# @Title       : DBA이외의인가되지않은사용자가시스템테이블에접근할수없도록설정
+# @Title       : DBA 이외의 인가되지 않은 사용자가 시스템 테이블에 접근할 수 없도록 설정
 # @Description : 불필요한 접속 경로 제한 및 접근 통제
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

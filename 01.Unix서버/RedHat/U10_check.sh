@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-10
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : 동일한 UID 금지
 # @Description : 동일한 UID를 가진 계정 존재 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-10"
 ITEM_NAME="동일한 UID 금지"
-SEVERITY="(중)"
+SEVERITY="중"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="UID가 동일한 사용자 계정을 점검함으로써 타 사용자 계정 소유의 파일 및 디렉터리로의 악의적 접근 예방 및 침해 사고 시 명확한 감사 추적을 하기 위함"

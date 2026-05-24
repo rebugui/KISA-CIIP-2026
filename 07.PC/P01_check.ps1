@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-01"
-$ITEM_NAME = "비밀번호의주기적변경"
+$ITEM_NAME = "비밀번호의 주기적 변경"
 $SEVERITY = "상"
 $CATEGORY = "1.계정관리"
 

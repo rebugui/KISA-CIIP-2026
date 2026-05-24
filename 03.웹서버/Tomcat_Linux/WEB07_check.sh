@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-07
 # @Category    : Server
-# @Platform    : Tomcat
-# @Severity    : 상
-# @Title       : 웹서비스로그분석관리
+# @Platform    : Tomcat_Linux
+# @Severity    : 중
+# @Title       : 웹 서비스 경로 내 불필요한 파일 제거
 # @Description : 웹 서비스 로그 분석 및 관리 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

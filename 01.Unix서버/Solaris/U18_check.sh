@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-18
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : /etc/shadow 파일 소유자 및 권한 설정
 # @Description : root:root 600 또는 400 확인

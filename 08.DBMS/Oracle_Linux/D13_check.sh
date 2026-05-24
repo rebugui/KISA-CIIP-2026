@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-13
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 중
-# @Title       : DBMS 진단 항목 D-13
+# @Title       : 불필요한 ODBC/OLE-DB 데이터 소스와 드라이브를 제거하여 사용
 # @Description : DBMS 진단 항목 D-13 관련 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

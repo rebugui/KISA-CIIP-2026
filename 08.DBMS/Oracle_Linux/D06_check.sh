@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-06
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 중
-# @Title       : DB 사용자 계정의 개별적 부여 및 사용
+# @Title       : DB 사용자 계정을 개별적으로 부여하여 사용
 # @Description : DB 접근 시 사용자별로 서로 다른 계정을 사용하는지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

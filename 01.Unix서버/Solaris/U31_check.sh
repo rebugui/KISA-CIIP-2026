@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-31
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
-# @Title       : 홈 디렉터리 소유자 및 권한 설정
+# @Title       : 홈 디렉토리 소유자 및 권한 설정
 # @Description : 홈 디렉터리 소유자가 해당 계정이고 타사용자 쓰기 권한이 없는지 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-31"
-ITEM_NAME="홈 디렉터리 소유자 및 권한 설정"
+ITEM_NAME="홈 디렉토리 소유자 및 권한 설정"
 SEVERITY="중"
 
 # 가이드라인 정보

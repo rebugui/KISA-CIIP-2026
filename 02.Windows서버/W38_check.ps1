@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-38
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 주기적보안패치및벤더권고사항적용
+# @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
 # @Description : 주기적 보안패치 및 벤더 권고사항 적용으로 시스템 취약성 제거
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-38"
-$ITEM_NAME = "주기적보안패치및벤더권고사항적용"
+$ITEM_NAME = "주기적 보안 패치 및 벤더 권고 사항 적용"
 $SEVERITY = "상"
 $CATEGORY = "3.패치관리"
 

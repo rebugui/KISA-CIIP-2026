@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-36
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 원격터미널접속타임아웃설정
+# @Title       : 원격 터미널 접속 타임 아웃 설정
 # @Description : 원격 터미널 접속 Timeout 설정으로 비인가자의 불필요한 접근 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-36"
-$ITEM_NAME = "원격터미널접속타임아웃설정"
+$ITEM_NAME = "원격 터미널 접속 타임 아웃 설정"
 $SEVERITY = "중"
 $CATEGORY = "2.서비스관리"
 

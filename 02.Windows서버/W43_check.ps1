@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-43
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 이벤트로그파일접근통제설정
+# @Title       : 이벤트 로그 파일 접근 통제 설정
 # @Description : 이벤트 로그 파일 접근 통제로 로그 파일 훼손 및 변조 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-43"
-$ITEM_NAME = "이벤트로그파일접근통제설정"
+$ITEM_NAME = "이벤트 로그 파일 접근 통제 설정"
 $SEVERITY = "중"
 $CATEGORY = "4.로그관리"
 

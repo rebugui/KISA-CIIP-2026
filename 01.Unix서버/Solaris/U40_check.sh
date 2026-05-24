@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-40
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : NFS 접근 통제
 # @Description : NFS exports 설정 확인

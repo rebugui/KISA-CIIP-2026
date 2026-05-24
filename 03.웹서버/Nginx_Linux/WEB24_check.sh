@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-24
 # @Category    : Web Server
-# @Platform    : Nginx
-# @Severity    : 상
-# @Title       : 웹서비스관리자페이지노출제한
+# @Platform    : Nginx_Linux
+# @Severity    : 중
+# @Title       : 별도의 업로드 경로 사용 및 권한 설정
 # @Description : 웹 서비스 관리자 페이지 노출 제한 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

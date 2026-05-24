@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-22
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : FTP디렉토리접근권한설정
+# @Title       : FTP 디렉토리 접근 권한 설정
 # @Description : FTP 디렉토리의 쓰기 권한 제거로 무단 파일 업로드 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -22,7 +22,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-22"
-$ITEM_NAME = "FTP디렉토리접근권한설정"
+$ITEM_NAME = "FTP 디렉토리 접근 권한 설정"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 
@@ -79,8 +79,8 @@ try {
 # 2. lib를 통한 결과 저장
 $purpose = "FTP 서비스 디렉터리의 접근 권한을 적절하게 설정하여 의도치 않은 정보 유출을 방지하기 위함"
 $threat = "FTP 홈 디렉터리에 과도한 권한(예. Everyone Full Control)이 부여된 경우 임의의 사용자가 쓰기, 수정이 가능하여 정보 유출, 파일 위 ‧ 변조 등의 위험이 존재함"
-$criteria_good = "FTP 홈 디렉터리에 Everyone 쓰기 권한이 없는 경우"
-$criteria_bad = "FTP 홈 디렉터리에 Everyone 쓰기 권한이 있는 경우"
+$criteria_good = "FTP 홈 디렉터리에 Everyone 권한이 없는 경우"
+$criteria_bad = "FTP 홈 디렉터리에 Everyone 권한이 있는 경우"
 $remediation = "FTP 홈 디렉터리에서 Everyone 권한 삭제, 각 사용자에게 적절한 권한 부여"
 
 Save-DualResult -ItemId $ITEM_ID `

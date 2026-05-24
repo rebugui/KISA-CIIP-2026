@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-62
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 하
 # @Title       : 로그인 시 경고 메시지 설정
 # @Description : /etc/issue, /etc/issue.net 설정 확인

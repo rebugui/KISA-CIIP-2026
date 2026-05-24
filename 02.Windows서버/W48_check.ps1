@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-48
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 로그온하지않고시스템종료허용
+# @Title       : 로그 온하지 않고 시스템 종료 허용
 # @Description : 로그온하지 않고 시스템 종료 방지로 불법적인 시스템 종료 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-48"
-$ITEM_NAME = "로그온하지않고시스템종료허용"
+$ITEM_NAME = "로그 온하지 않고 시스템 종료 허용"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 

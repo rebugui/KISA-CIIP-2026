@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-45
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 백신프로그램설치
+# @Title       : 백신 프로그램 설치
 # @Description : 백신 프로그램 설치로 바이러스 감염 및 악성코드 실행 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-45"
-$ITEM_NAME = "백신프로그램설치"
+$ITEM_NAME = "백신 프로그램 설치"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 

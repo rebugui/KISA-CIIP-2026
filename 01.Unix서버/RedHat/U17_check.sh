@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-17
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : 시스템 시작 스크립트 권한 설정
 # @Description : 시스템 시작 시 실행되는 스크립트 파일의 소유자 및 권한 설정 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-57
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 하
-# @Title       : 로그온시경고메시지설정
+# @Title       : 로그 온 시 경고 메시지 설정
 # @Description : 로그온 시 경고 메시지 설정으로 사용자에게 경각심 고취
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-57"
-$ITEM_NAME = "로그온시경고메시지설정"
+$ITEM_NAME = "로그 온 시 경고 메시지 설정"
 $SEVERITY = "하"
 $CATEGORY = "5.보안관리"
 

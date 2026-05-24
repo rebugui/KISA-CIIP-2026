@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-19
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 중
-# @Title       : 웹서비스SSI사용제한
+# @Title       : 웹 서비스 SSI(Server Side Includes)사용 제한
 # @Description : SSI(Server-Side Includes) 사용을 제한하여 악의적인 명령 실행 공격을 방지합니다. SSI 활성화 시 공격자가 악의적인 스크립트를 삽입하여 시스템 명령을 실행할 수 있는 보안 위협이 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-55
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 사용자가프린터드라이버를설치할수없게함
+# @Title       : 사용자가 프린터 드라이버를 설치할 수 없게 함
 # @Description : 프린터 드라이버 설치 제한으로 의도하지 않은 시스템 손상 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-55"
-$ITEM_NAME = "사용자가프린터드라이버를설치할수없게함"
+$ITEM_NAME = "사용자가 프린터 드라이버를 설치할 수 없게 함"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 

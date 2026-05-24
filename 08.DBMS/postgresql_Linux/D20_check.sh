@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-20
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
+# @Platform    : postgresql_Linux
 # @Severity    : 하
-# @Title       : 인가되지않은Object Owner의제한
+# @Title       : 인가되지 않은 Object Owner의 제한
 # @Description : 인가되지않은Object Owner의제한 관리를 통한 DBMS 보안 강화
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

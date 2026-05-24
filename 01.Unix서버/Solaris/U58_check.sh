@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-58
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
 # @Title       : 불필요한 SNMP 서비스 구동 점검
 # @Description : SNMP 서비스 활성화 여부 확인

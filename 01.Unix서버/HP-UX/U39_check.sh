@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : HP-UX
 # @Severity    : 상
-# @Title       : SSH 서비스 보안 설정
+# @Title       : 불필요한 NFS 서비스 비활성화
 # @Description : SSH 보안 설정 확인 - Protocol 2, PermitRootLogin no, X11Forwarding no, MaxAuthTries <= 3
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-39"
-ITEM_NAME="SSH 서비스 보안 설정"
+ITEM_NAME="불필요한 NFS 서비스 비활성화"
 SEVERITY="상"
 
 # 가이드라인 정보

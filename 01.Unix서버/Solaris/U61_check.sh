@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-61
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : SNMP Access Control 설정
 # @Description : SNMP 접근 제어 설정 확인

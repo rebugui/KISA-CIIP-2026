@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-05
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
-# @Title       : root 이외의 UID가 ‘0’ 금지
+# @Platform    : RedHat
+# @Severity    : 상
+# @Title       : root 이외의 UID가 '0' 금지
 # @Description : root 계정 외에 UID 0을 사용하는 계정 존재 여부 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,7 +26,7 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-05"
-ITEM_NAME="root 이외의 UID가 ‘0’ 금지"
+ITEM_NAME="root 이외의 UID가 '0' 금지"
 SEVERITY="상"
 
 # 가이드라인 정보

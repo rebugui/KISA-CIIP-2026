@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-10
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 마지막사용자이름표시안함
+# @Title       : 마지막 사용자 이름 표시 안 함
 # @Description : 로그인 화면에 마지막 로그온 사용자 이름 표시 안 함 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-10"
-$ITEM_NAME = "마지막사용자이름표시안함"
+$ITEM_NAME = "마지막 사용자 이름 표시 안 함"
 $SEVERITY = "중"
 $CATEGORY = "1.계정관리"
 

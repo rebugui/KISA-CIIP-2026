@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-35
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 공유 서비스에 대한 익명 접근 제한 설정
 # @Description : FTP 익명 접근 제한 확인

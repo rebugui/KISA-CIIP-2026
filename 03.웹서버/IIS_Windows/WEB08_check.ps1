@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-08
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 하
-# @Title       : Apache.htaccess오버라이드제한
+# @Title       : 웹 서비스 파일 업로드 및 다운로드 용량 제한
 # @Description : Apache 웹 서버의 .htaccess 파일 오버라이드 기능을 제한하여 설정 파일 무결성을 보장합니다. IIS는 Apache의 .htaccess를 사용하지 않으며 web.config를 사용하므로 이 항목은 IIS에 해당하지 않습니다(N/A).
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

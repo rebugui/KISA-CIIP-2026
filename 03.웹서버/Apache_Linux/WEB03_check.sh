@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : WEB-03
 # @Category    : Web Server
-# @Platform    : Apache
+# @Platform    : Apache_Linux
 # @Severity    : 상
 # @Title       : 비밀번호 파일 권한 관리
 # @Description : 비밀번호 파일에 대해 적절한 접근 권한 설정 여부 점검

@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-02
 # @Category    : Server
-# @Platform    : Tomcat
+# @Platform    : Tomcat_Linux
 # @Severity    : 상
-# @Title       : 취약한비밀번호사용제한
+# @Title       : 취약한 비밀번호 사용 제한
 # @Description : 관리자 계정의 취약한 비밀번호 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

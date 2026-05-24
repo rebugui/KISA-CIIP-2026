@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-25
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : DNS Zone Transfer설정
+# @Title       : DNS Zone Transfer 설정
 # @Description : DNS Zone Transfer 제한으로 DNS 정보 유출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-25"
-$ITEM_NAME = "DNS Zone Transfer설정"
+$ITEM_NAME = "DNS Zone Transfer 설정"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 

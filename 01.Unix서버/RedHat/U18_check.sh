@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-18
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : /etc/shadow 파일 소유자 및 권한 설정
 # @Description : /etc/shadow 파일의 소유자 및 권한 설정이 적절한지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-25
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : world writable 파일 점검
 # @Description : 전체 쓰기 권한 파일 확인

@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-09
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 상
-# @Title       : 웹서비스프로세스권한제한
+# @Title       : 웹 서비스 프로세스 권한 제한
 # @Description : 웹 서비스 프로세스(IIS Application Pool)가 관리자 권한(LocalSystem, Administrator)이 아닌 최소 권한(ApplicationPoolIdentity, IIS AppPool 계정 등)으로 실행되도록 제한합니다. 웹 프로세스가 관리자 권한으로 실행될 경우 취약점 악용 시 시스템 전체 권한 탈취 위험이 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-23
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : SUID, SGID, Sticky bit 설정 파일 점검
 # @Description : 불필요하거나 악의적인 파일에 SUID, SGID, Sticky bit 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

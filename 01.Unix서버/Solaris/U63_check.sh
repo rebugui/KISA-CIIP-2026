@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-63
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
 # @Title       : sudo 명령어 접근 관리
 # @Description : sudoers 설정 확인

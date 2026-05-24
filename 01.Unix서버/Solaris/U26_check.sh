@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-26
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : /dev에 존재하지 않는 device 파일 점검
 # @Description : device 파일 무결성 확인

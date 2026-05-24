@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-64
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 윈도우방화벽설정
+# @Title       : 윈도우 방화벽 설정
 # @Description : Windows 방화벽 활성화로 비인가 접근 및 정보 유출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-64"
-$ITEM_NAME = "윈도우방화벽설정"
+$ITEM_NAME = "윈도우 방화벽 설정"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 

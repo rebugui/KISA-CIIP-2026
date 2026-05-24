@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-23
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
-# @Title       : SUID, SGID, Stickybit 설정 파일 점검
+# @Title       : SUID, SGID, Sticky bit 설정 파일 점검
 # @Description : 불필요한 SUID/SGID 파일 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-23"
-ITEM_NAME="SUID, SGID, Stickybit 설정 파일 점검"
+ITEM_NAME="SUID, SGID, Sticky bit 설정 파일 점검"
 SEVERITY="상"
 
 # 가이드라인 정보

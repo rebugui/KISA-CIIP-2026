@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-66
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
-# @Title       : 정책에 따른 시스템 로깅 설정
+# @Platform    : RedHat
+# @Severity    : 중
+# @Title       : 정책에 따른 시스템로깅 설정
 # @Description : rsyslog/syslog 서비스 설정 및 로그 기록 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -26,8 +26,8 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-66"
-ITEM_NAME="정책에 따른 시스템 로깅 설정"
-SEVERITY="(중)"
+ITEM_NAME="정책에 따른 시스템로깅 설정"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="보안 사고 발생 시 원인 파악 및 각종 침해 사실 확인을 하기 위함"
 GUIDELINE_THREAT="로깅 설정이 되어 있지 않을 경우, 원인 규명이 어려우며 법적 대응을 위한 충분한 증거로 사용할 수 없는 위험이 존재함"

@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-14
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : root 홈, 패스 디렉터리 권한 및 패스 설정
 # @Description : root 계정의 PATH 환경변수에 “.”(마침표)이 포함 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드

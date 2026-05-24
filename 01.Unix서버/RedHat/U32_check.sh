@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-32
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : 홈 디렉토리로 지정한 디렉토리의 존재 관리
 # @Description : 계정 설정에 명시된 홈 디렉터리가 실제로 존재하는지 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-32"
 ITEM_NAME="홈 디렉토리로 지정한 디렉토리의 존재 관리"
-SEVERITY="(중)"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="/home 디렉토리 이외의 사용자의 홈 디렉토리 존재 여부를 점검하여 비인가자가 시스템 명령어의 무단 사용을 방지하기 위함"
 GUIDELINE_THREAT="/etc/passwd 파일에 설정된 홈 디렉토리가 존재하지 않는 경우, 해당 계정으로 로그인 시 홈 디렉토리가 루트 디렉토리(/)로 할당되어 접근이 가능한 위험이 존재함"

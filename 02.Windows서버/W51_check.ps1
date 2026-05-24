@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-51
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : SAM계정과공유의익명열거허용안함
+# @Title       : SAM 계정과 공유의 익명 열거 허용 안 함
 # @Description : SAM 계정 익명 열거 금지로 악의적인 계정 정보 탈취 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-51"
-$ITEM_NAME = "SAM계정과공유의익명열거허용안함"
+$ITEM_NAME = "SAM 계정과 공유의 익명 열거 허용 안 함"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 

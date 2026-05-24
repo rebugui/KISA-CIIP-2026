@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-24
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL
-# @Severity    : 하
-# @Title       : DBMS 기본 포트 사용 점검
+# @Platform    : MSSQL_Linux
+# @Severity    : 상
+# @Title       : Registry Procedure 권한 제한
 # @Description : DBMS 기본 포트 사용 점검 관리를 통한 DBMS 보안 강화
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

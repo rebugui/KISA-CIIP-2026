@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-31
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : 홈 디렉토리 소유자 및 권한 설정
 # @Description : 사용자별 홈 디렉터리의 소유자 및 권한 설정의 적절성 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-31"
 ITEM_NAME="홈 디렉토리 소유자 및 권한 설정"
-SEVERITY="(중)"
+SEVERITY="중"
 
 GUIDELINE_PURPOSE="사용자 홈 디렉토리 내 설정 파일이 비인가자에 의한 변조를 방지하기 위함"
 GUIDELINE_THREAT="홈 디렉토리 내 설정 파일 변조 시 정상적인 서비스 이용이 제한될 위험이 존재함"

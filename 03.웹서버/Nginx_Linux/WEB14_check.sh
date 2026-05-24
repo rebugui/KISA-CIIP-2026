@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-14
 # @Category    : Web Server
-# @Platform    : Nginx
+# @Platform    : Nginx_Linux
 # @Severity    : 상
-# @Title       : Nginx default server block 설정
+# @Title       : 웹 서비스 경로 내 파일의 접근 통제
 # @Description : Nginx default server block 설정 적절성 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

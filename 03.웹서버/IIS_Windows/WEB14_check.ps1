@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-14
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 하
-# @Title       : 웹서비스경로내파일의접근통제
+# @Platform    : IIS_Windows
+# @Severity    : 상
+# @Title       : 웹 서비스 경로 내 파일의 접근 통제
 # @Description : 웹서비스 경로 내 백업 파일(.bak), 설정 파일(.config), 소스 코드 등 민감한 파일에 대한 웹 접근을 차단하여 정보 노출을 방지합니다. IIS Request Filtering을 사용하여 파일 확장자별 접근 제어가 필요합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

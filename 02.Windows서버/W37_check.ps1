@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-37
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 예약된작업에의심스러운명령이등록되어있는지점검
+# @Title       : (중) 예약된 작업에 의심스러운 명령이 등록되어 있는지 점검 개요
 # @Description : 예약된 작업에 의심스러운 명령 등록 여부 확인으로 백도어 설치 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-37"
-$ITEM_NAME = "예약된작업에의심스러운명령이등록되어있는지점검"
+$ITEM_NAME = "(중) 예약된 작업에 의심스러운 명령이 등록되어 있는지 점검 개요"
 $SEVERITY = "중"
 $CATEGORY = "2.서비스관리"
 

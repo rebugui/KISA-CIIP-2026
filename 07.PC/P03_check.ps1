@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 중
-# @Title       : 복구콘솔에서자동로그온을금지하도록설정
+# @Title       : 복구 콘솔에서 자동 로그 온을 금지하도록 설정
 # @Description : 시스템 복구 시 자동 로그온을 금지하여 무단 접근 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-03"
-$ITEM_NAME = "복구콘솔에서자동로그온을금지하도록설정"
+$ITEM_NAME = "복구 콘솔에서 자동 로그 온을 금지하도록 설정"
 $SEVERITY = "중"
 $CATEGORY = "1.계정관리"
 

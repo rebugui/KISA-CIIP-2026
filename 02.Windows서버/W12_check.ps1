@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-12
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 익명SID/이름변환허용해제
+# @Title       : 익명 SID/ 이름 변환 허용 해제
 # @Description : 익명 SID/이름 변환 정책 적용 여부 점검으로 Administrator 이름 찾기 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-12"
-$ITEM_NAME = "익명SID/이름변환허용해제"
+$ITEM_NAME = "익명 SID/ 이름 변환 허용 해제"
 $SEVERITY = "중"
 $CATEGORY = "1.계정관리"
 

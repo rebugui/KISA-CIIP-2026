@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-03
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
-# @Severity    : 중
-# @Title       : DBMS 진단 항목 D-03
+# @Platform    : Oracle_Linux
+# @Severity    : 상
+# @Title       : 비밀번호 사용 기간 및 복잡 도를 기관의 정책에 맞도록 설정
 # @Description : DBMS 진단 항목 D-03 관련 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

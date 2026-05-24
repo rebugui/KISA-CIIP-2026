@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; LIB_DIR="${SCRIPT_DIR}/../../lib"
 source "${LIB_DIR}/common.sh"; source "${LIB_DIR}/result_manager.sh"; source "${LIB_DIR}/output_mode.sh"; source "${LIB_DIR}/metadata_parser.sh"
 
-ITEM_ID="U-24"; ITEM_NAME="사용자, 시스템 환경변수 파일 소유자 및 권한 설정"; SEVERITY="(상)"
+ITEM_ID="U-24"; ITEM_NAME="사용자, 시스템 환경변수 파일 소유자 및 권한 설정"; SEVERITY="상"
 GUIDELINE_PURPOSE="비인가자의 환경 변수 조작으로 인한 보안 위험이 존재함"
 GUIDELINE_THREAT="홈 디렉터리 내의 사용자 파일 및 사용자별 시스템 시작 파일 등과 같은 환경 변수 파일의 접근 권한 설정이 적절하지 않을 경우, 비인가자가 환경 변수 파일을 변조하여 정상 사용 중인 사용자의 서비스가 제한될 수 있는 위험이 존재함"
 GUIDELINE_CRITERIA_GOOD="홈 디렉터리 환경 변수 파일 소유자가 root 또는 해당 계정으로 지정되어 있고, 홈 디렉터리 환경 변수 파일에 root 계정과 소유자만 쓰기 권한이 부여된 경우"

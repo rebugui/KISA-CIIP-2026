@@ -9,7 +9,7 @@
 # [점검 항목 상세]
 # @ID          : D-04
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
+# @Platform    : postgresql_Linux
 # @Severity    : 상
 # @Title       : 데이터베이스 관리자 권한을 꼭 필요한 계정 및 그룹에 대해서만 허용
 # @Description : 불필요한 계정 관리 및 권한 제어를 통한 보안 강화

@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : U-42
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
-# @Severity    : 중
-# @Title       : NFS 서비스 비활성화
+# @Platform    : Solaris
+# @Severity    : 상
+# @Title       : 불필요한 RPC 서비스 비활성화
 # @Description : nfs-server, rpcbind 서비스 비활성화 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-42"
-ITEM_NAME="NFS 서비스 비활성화"
+ITEM_NAME="불필요한 RPC 서비스 비활성화"
 SEVERITY="상"
 
 # 가이드라인 정보

@@ -9,7 +9,7 @@
 # [점검 항목 상세]
 # @ID          : W-02
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
 # @Title       : Guest 계정 비활성화
 # @Description : Guest 계정 비활성화로 무단 로그인 접근 방지 및 시스템 보안 강화
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-02"
-$ITEM_NAME = "Guest계정비활성화"
+$ITEM_NAME = "Guest 계정 비활성화"
 $SEVERITY = "상"
 $CATEGORY = "1.계정관리"
 
@@ -69,7 +69,7 @@ try {
 
 # 2. lib를 통한 결과 저장
 $purpose = "Guest 계정을 비활성화하여 불특정 다수의 임시적인 시스템 접근을 차단하기 위함"
-$threat = "Guest 계정은 시스템에 임시로 액세스해야하는 사용자용 계정으로, 해당 계정을 사용하여 권한 없는 사용자가 시스템에 익명으로 액세스할 수 있으므로 비인가자 접근, 정보 유출 등 보안 위험이 존재함"
+$threat = "Guest 계정은 시스템에 임시로 액세스해야 하는 사용자용 계정으로, 해당 계정을 사용하여 권한 없는 사용자가 시스템에 익명으로 액세스할 수 있으므로 비인가자 접근, 정보 유출 등 보안 위험이 존재함"
 $criteria_good = "Guest 계정이 비활성화되어 있는 경우"
 $criteria_bad = "Guest 계정이 활성화되어 있는 경우"
 $remediation = "Guest 계정 비활성화"

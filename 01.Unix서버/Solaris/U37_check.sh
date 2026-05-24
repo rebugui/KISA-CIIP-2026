@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-37
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : crontab 설정 파일 권한 설정 미흡
 # @Description : /etc/crontab 권한 600 확인

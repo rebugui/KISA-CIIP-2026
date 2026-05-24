@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-26
 # @Category    : Web Server
-# @Platform    : Apache
-# @Severity    : 상
-# @Title       : 로그디렉터리및파일권한설정
+# @Platform    : Apache_Linux
+# @Severity    : 중
+# @Title       : 로그 디렉터리 및 파일 권한 설정
 # @Description : 로그 디렉터리 및 파일에 대한 적절한 권한 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

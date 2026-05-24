@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-08
 # @Category    : Server
-# @Platform    : Tomcat
-# @Severity    : 상
-# @Title       : 웹서비스접속통제
+# @Platform    : Tomcat_Linux
+# @Severity    : 하
+# @Title       : 웹 서비스 파일 업로드 및 다운로드 용량 제한
 # @Description : 웹 서비스 접속 통제 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : Debian
 # @Severity    : 상
-# @Title       : r 계열 서비스 비활성화
+# @Title       : NIS, NIS +점검
 # @Description : rsh, rlogin, rexec 서비스 비활성화 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-43"
-ITEM_NAME="r 계열 서비스 비활성화"
+ITEM_NAME="NIS, NIS +점검"
 SEVERITY="상"
 
 # 가이드라인 정보

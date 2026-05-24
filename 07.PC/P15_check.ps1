@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 상
-# @Title       : OS에서제공하는침입차단기능활성화
+# @Title       : OS에서 제공하는 침입 차단 기능 활성화
 # @Description : OS에서 제공하는 침입 차단 기능이 활성화되어 있는지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-15"
-$ITEM_NAME = "OS에서제공하는침입차단기능활성화"
+$ITEM_NAME = "OS에서 제공하는 침입 차단 기능 활성화"
 $SEVERITY = "상"
 $CATEGORY = "4.보안관리"
 

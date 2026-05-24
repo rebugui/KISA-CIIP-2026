@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-46
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : SAM파일접근통제설정
+# @Title       : SAM 파일 접근 통제 설정
 # @Description : SAM 파일 접근 통제로 악의적인 계정 정보 유출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-46"
-$ITEM_NAME = "SAM파일접근통제설정"
+$ITEM_NAME = "SAM 파일 접근 통제 설정"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 
@@ -85,7 +85,7 @@ try {
 
 # 2. lib를 통한 결과 저장
 $purpose = "Administrator 및 System 그룹만 SAM 파일에 접근할 수 있도록 제한하여 악의적인 계정 정보 유출을 차단하기 위함"
-$threat = "SAM 파일이 노출될 경우 비밀번호 공격 시도로 인해 계정 및 비밀번호 데이터 베이스 정보가 탈취될 위험이 존재함"
+$threat = "SAM 파일이 노출될 경우 비밀번호 공격 시도로 인해 계정 및 비밀번호 데이터베이스 정보가 탈취될 위험이 존재함"
 $criteria_good = "SAM 파일 접근 권한에 Administrator,System 그룹만 모든 권한으로 설정된 경우"
 $criteria_bad = "SAM 파일 접근 권한에 Administrator,System 그룹 외 다른 그룹에 권한이 설정된 경우"
 $remediation = "SAM 파일 권한 확인 후 Administrator,System 그룹 외 다른 그룹에 설정된 권한 제거"

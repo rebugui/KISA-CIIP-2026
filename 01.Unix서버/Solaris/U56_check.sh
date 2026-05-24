@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-56
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 하
 # @Title       : FTP 서비스 접근 제어 설정
 # @Description : /etc/ftpusers 설정 확인

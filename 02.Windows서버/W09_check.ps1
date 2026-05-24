@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-09
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 비밀번호관리정책설정
+# @Title       : 비밀번호 관리 정책 설정
 # @Description : 비밀번호 관리 정책 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-09"
-$ITEM_NAME = "비밀번호관리정책설정"
+$ITEM_NAME = "비밀번호 관리 정책 설정"
 $SEVERITY = "상"
 $CATEGORY = "1.계정관리"
 

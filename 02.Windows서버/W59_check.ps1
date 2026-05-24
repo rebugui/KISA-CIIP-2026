@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-59
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : LANManager인증수준
+# @Title       : LAN Manager 인증 수준
 # @Description : LAN Manager 인증 수준 설정으로 안전한 인증 프로토콜 적용
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-59"
-$ITEM_NAME = "LANManager인증수준"
+$ITEM_NAME = "LAN Manager 인증 수준"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 

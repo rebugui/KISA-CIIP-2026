@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-41
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 불필요한 automountd 제거
 # @Description : automount 비활성화 확인

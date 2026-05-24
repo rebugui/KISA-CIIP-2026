@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-33
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 하
 # @Title       : 숨겨진 파일 및 디렉토리 검색 및 제거
 # @Description : 숨겨진 파일(.) 및 의심스러운 파일 탐지

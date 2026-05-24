@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-23
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 공유서비스에대한익명접근제한설정
+# @Title       : 공유 서비스에 대한 익명 접근 제한 설정
 # @Description : 공유 폴더의 익명 접근 제한으로 무단 데이터 접근 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-23"
-$ITEM_NAME = "공유서비스에대한익명접근제한설정"
+$ITEM_NAME = "공유 서비스에 대한 익명 접근 제한 설정"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 

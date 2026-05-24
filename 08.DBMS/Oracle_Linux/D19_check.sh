@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-19
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 상
-# @Title       : OS인증및Roles설정점검
+# @Title       : OS_ROLES, REMOTE_OS_AUTHENTICATION, REMOTE_OS_ROLES를 FALSE로 설정
 # @Description : OS_ROLES, REMOTE_OS_AUTHENTICATION, REMOTE_OS_ROLES 설정 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-07
 # @Category    : Web Server
-# @Platform    : Apache
-# @Severity    : 상
-# @Title       : 불필요한파일제거
+# @Platform    : Apache_Linux
+# @Severity    : 중
+# @Title       : 웹 서비스 경로 내 불필요한 파일 제거
 # @Description : 웹 서버 디렉터리 내의 불필요한 백업 파일, 샘플 파일, 테스트 파일 제거 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

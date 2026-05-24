@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 상
-# @Title       : 비인가상용메신저사용금지
+# @Title       : 비인가 상용 메신저 사용 금지
 # @Description : 비인가 상용 메신저 프로그램의 사용을 금지하여 정보 유출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-06"
-$ITEM_NAME = "비인가상용메신저사용금지"
+$ITEM_NAME = "비인가 상용 메신저 사용 금지"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 

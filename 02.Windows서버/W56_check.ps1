@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-56
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : SMB세션중단관리설정
+# @Title       : SMB 세션 중단 관리 설정
 # @Description : SMB 세션 타임아웃 설정으로 서비스 거부 공격 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-56"
-$ITEM_NAME = "SMB세션중단관리설정"
+$ITEM_NAME = "SMB 세션 중단 관리 설정"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 
@@ -79,7 +79,7 @@ try {
 }
 
 # 2. lib를 통한 결과 저장
-$purpose = "Session이 중단되기 전에 SMB(서버 메시지 블록) Session에서 보내야하는 연속 유휴 시간을 결정하여 서비스 거부 공격 등에 악용되지 않도록하기 위함"
+$purpose = "Session이 중단되기 전에 SMB(서버 메시지 블록) Session에서 보내야 하는 연속 유휴 시간을 결정하여 서비스 거부 공격 등에 악용되지 않도록하기 위함"
 $threat = "SMB Session에서는 서버 리소스를 사용하며, NULL Session 수가 많으면 서버 속도가 느려지거나 서버에 오류를 발생시킬 수 있으므로 공격자는 이를 악용하여 SMB Session을 반복 설정하여 서버의 SMB 서비스가 느려지거나 응답하지 않게하여 서비스 거부 공격을 실행할 위험이 존재함"
 $criteria_good = '''로그온 시간이 만료되면 클라이언트 연결 끊기''정책을''사용''으로,''세션 연결을 중단하기 전에 필요한 유휴 시간''정책을''15분''이하로 설정한 경우'
 $criteria_bad = '''로그 온 시간이 만료되면 클라이언트 연결 끊기'' 정책이 ''사용 안 함'' 또는 ''세션 연결을 중단하기 전에 필요한 유휴 시간''정책이''15분''초과로 설정한 경우'

@@ -10,8 +10,8 @@
 # @ID          : PC-16
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
-# @Severity    : 하
-# @Title       : 화면보호기대기시간설정및재시작시암호보호설정
+# @Severity    : 상
+# @Title       : 화면 보호기 대기 시간 설정 및 재시작 시 암호 보호 설정
 # @Description : 화면 보호기 대기 시간 설정 및 재시작 시 암호 보호 기능 활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,8 +25,8 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-16"
-$ITEM_NAME = "화면보호기대기시간설정및재시작시암호보호설정"
-$SEVERITY = "중"
+$ITEM_NAME = "화면 보호기 대기 시간 설정 및 재시작 시 암호 보호 설정"
+$SEVERITY = "상"
 $CATEGORY = "4.보안관리"
 
 # run_all 모드가 아닐 때만 진단 정보 출력

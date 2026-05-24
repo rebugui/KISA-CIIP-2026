@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : D-10
 # @Category    : DBMS (Database Management System)
-# @Platform    : PostgreSQL
-# @Severity    : 중
-# @Title       : 원격에서DB서버로의접속제한
+# @Platform    : postgresql_Linux
+# @Severity    : 상
+# @Title       : 원격에서 DB 서버로의 접속 제한
 # @Description : 불필요한 접속 경로 제한 및 접근 통제
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

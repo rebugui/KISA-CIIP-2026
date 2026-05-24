@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-24
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 사용자, 시스템 환경변수 파일 소유자 및 권한 설정
 # @Description : .bashrc, .profile 등 권한 확인

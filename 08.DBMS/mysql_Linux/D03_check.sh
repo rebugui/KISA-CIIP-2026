@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-03
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
-# @Severity    : 중
-# @Title       : 비밀번호사용기간및복잡도를기관의정책에맞도록설정
+# @Platform    : mysql_Linux
+# @Severity    : 상
+# @Title       : 비밀번호 사용 기간 및 복잡 도를 기관의 정책에 맞도록 설정
 # @Description : 비밀번호 사용기간 및 복잡도 설정 유무를 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-20
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 상
-# @Title       : SSL/TLS활성화
+# @Title       : SSL/TLS 활성화
 # @Description : 웹 서비스에 SSL/TLS(HTTPS)를 활성화하여 통신 데이터를 암호화하고 중간자 공격(Man-in-the-Middle)을 방지합니다. SSL/TLS 미사용 시 평문 통화으로 인한 정보 탈취 및 도청 위험이 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

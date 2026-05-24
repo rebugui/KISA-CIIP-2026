@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-51
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
 # @Title       : DNS 서비스의 취약한 동적 업데이트 설정 금지
 # @Description : allow-update 설정 확인

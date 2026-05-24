@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-52
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : Autologon기능제어
+# @Title       : Autologon 기능 제어
 # @Description : 자동 로그온 기능 비활성화로 시스템 계정 정보 노출 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-52"
-$ITEM_NAME = "Autologon기능제어"
+$ITEM_NAME = "Autologon 기능 제어"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 

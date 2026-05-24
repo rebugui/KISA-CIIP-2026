@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-28
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 접속 IP 및 포트 제한
 # @Description : /etc/hosts.allow, hosts.deny 확인

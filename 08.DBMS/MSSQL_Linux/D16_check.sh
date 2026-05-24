@@ -6,11 +6,11 @@
 # @Last Updated: 2026-01-16
 # ============================================================================
 # [점검 항목 상세]
-# @ID          : # : D-16
+# @ID          : D-16
 # @Category    : DBMS (Database Management System)
-# @Platform    : MSSQL
-# @Severity    : # : 하
-# @Title       : # : Windows 인증 모드 사용
+# @Platform    : MSSQL_Linux
+# @Severity    : 하
+# @Title       : Windows 인증 모드 사용
 # @Description : # : MSSQL Server가 Windows 인증 모드만 사용하도록 설정되어 있는지 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

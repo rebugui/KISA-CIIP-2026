@@ -9,7 +9,7 @@
 # @ID          : U-56
 # @Category    : UNIX > 2. 서비스 관리
 # @Platform    : RedHat
-# @Severity    : (하)
+# @Severity    : 하
 # @Title       : FTP 서비스 접근 제어 설정
 # @Description : FTP 서비스의 접근 제어 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-56"
 ITEM_NAME="FTP 서비스 접근 제어 설정"
-SEVERITY="(하)"
+SEVERITY="하"
 
 GUIDELINE_PURPOSE="접근 권한이 없는 비인가자의 접근을 통제하기 위함"
 GUIDELINE_THREAT="FTP 서비스의 접근 제한 설정이 적절하지 않을 경우, 인증 절차 없이 비인가자가 디렉터리나 파일에 접근할 수 있어 중요 파일 변조 및 유출을 시도할 위험이 존재함"

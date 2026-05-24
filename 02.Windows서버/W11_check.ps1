@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-11
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 로컬로그온허용
+# @Title       : 로컬 로그 온 허용
 # @Description : 불필요한 계정의 로컬 로그온 허용 여부 점검으로 비인가자의 불법적 시스템 로컬 접근 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -24,7 +24,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-11"
-$ITEM_NAME = "로컬로그온허용"
+$ITEM_NAME = "로컬 로그 온 허용"
 $SEVERITY = "중"
 $CATEGORY = "1.계정관리"
 

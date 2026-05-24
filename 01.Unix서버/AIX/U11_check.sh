@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : AIX
 # @Severity    : 하
-# @Title       : 사용자 Shell 점검
+# @Title       : 사용자 shell 점검
 # @Description : 로그인이 불필요한 계정(daemon, bin, sys, adm 등)에 쉘 부여 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -30,15 +30,15 @@ source "${LIB_DIR}/output_mode.sh"
 source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-11"
-ITEM_NAME="사용자 Shell 점검"
+ITEM_NAME="사용자 shell 점검"
 SEVERITY="하"
 
 # 가이드라인 정보
-GUIDELINE_PURPOSE="로그인이 불필요한 계정에 부여된 쉘을 제거하여, 로그인이 필요하지 않은 계정을 통한 시스템 명령어를 실행하지 못하게하기 위함"
+GUIDELINE_PURPOSE="로그인이 불필요한 계정에 부여된 쉘을 제거하여, 로그인이 필요하지 않은 계정을 통한 시스템 명령어를 실행하지 못하게 하기 위함"
 GUIDELINE_THREAT="로그인이 불필요한 계정에 쉘이 부여될 경우, 비인가자가 해당 기본 계정으로 시스템에 접근 위험이 존재함"
-GUIDELINE_CRITERIA_GOOD="로그인이 필요하지 않은 계정에/bin/false(/sbin/nologin)쉘이 부여된 경우"
-GUIDELINE_CRITERIA_BAD="로그인이 필요하지 않은 계정에/bin/false(/sbin/nologin)쉘이 부여되지 않은 경우"
-GUIDELINE_REMEDIATION="로그인이 필요하지 않은 계정에 대해/bin/false(/sbin/nologin)쉘부여 설정"
+GUIDELINE_CRITERIA_GOOD="로그인이 필요하지 않은 계정에 /bin/false(/sbin/nologin)쉘이 부여된 경우"
+GUIDELINE_CRITERIA_BAD="로그인이 필요하지 않은 계정에 /bin/false(/sbin/nologin)쉘이 부여되지 않은 경우"
+GUIDELINE_REMEDIATION="로그인이 필요하지 않은 계정에 대해 /bin/false(/sbin/nologin)쉘부여 설정"
 
 # ============================================================================
 # 진단 함수

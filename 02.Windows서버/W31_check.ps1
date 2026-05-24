@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-31
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : SNMP Access Control설정
+# @Title       : SNMP Access Control 설정
 # @Description : SNMP 트래픽에 대한 Access Control 설정으로 내부 네트워크 공격 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-31"
-$ITEM_NAME = "SNMP Access Control설정"
+$ITEM_NAME = "SNMP Access Control 설정"
 $SEVERITY = "중"
 $CATEGORY = "2.서비스관리"
 

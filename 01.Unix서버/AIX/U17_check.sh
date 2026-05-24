@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : AIX
 # @Severity    : 상
-# @Title       : 시스템 시작 스크립트 및 SUID/SGID 파일 권한 설정
+# @Title       : 시스템 시작 스크립트 권한 설정
 # @Description : /etc/rc.d, SUID/SGID 파일 권한 확인 (AIX)
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-17"
-ITEM_NAME="시스템 시작 스크립트 및 SUID/SGID 파일 권한 설정 (AIX)"
+ITEM_NAME="시스템 시작 스크립트 권한 설정"
 SEVERITY="상"
 
 # 가이드라인 정보

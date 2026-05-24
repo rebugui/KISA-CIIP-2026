@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-33
 # @Category    : UNIX > 2. 파일 및 디렉토리 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (하)
+# @Platform    : RedHat
+# @Severity    : 하
 # @Title       : 숨겨진 파일 및 디렉토리 검색 및 제거
 # @Description : 시스템 내 불필요하거나 의심스러운 숨겨진 파일 및 디렉터리 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-33"
 ITEM_NAME="숨겨진 파일 및 디렉토리 검색 및 제거"
-SEVERITY="(하)"
+SEVERITY="하"
 
 GUIDELINE_PURPOSE="숨겨진 파일 및 디렉토리 중 의심스러운 내용은 정상 사용자가 아닌 공격자에 의해 생성되었을 가능성이 높으므로 이를 제거하여 보안 위협을 방지하기 위함"
 GUIDELINE_THREAT="숨겨진 파일 및 디렉토리를 방치할 경우, 비인가자가 생성한 악성 파일 또는 백 도어 등을 탐지하지 못할 위험이 존재함"

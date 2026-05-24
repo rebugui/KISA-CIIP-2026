@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-54
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : Dos공격방어레지스트리설정
+# @Title       : Dos 공격 방어 레지스트리 설정
 # @Description : TCP/IP 스택 레지스트리 설정으로 DoS 공격 방어
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-54"
-$ITEM_NAME = "Dos공격방어레지스트리설정"
+$ITEM_NAME = "Dos 공격 방어 레지스트리 설정"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 

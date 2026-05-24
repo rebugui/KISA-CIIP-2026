@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-24
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : FTP접근제어설정
+# @Title       : FTP 접근 제어 설정
 # @Description : FTP 서비스의 IP 기반 접근 제어로 무단 접속 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -22,7 +22,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-24"
-$ITEM_NAME = "FTP접근제어설정"
+$ITEM_NAME = "FTP 접근 제어 설정"
 $SEVERITY = "상"
 $CATEGORY = "2.서비스관리"
 

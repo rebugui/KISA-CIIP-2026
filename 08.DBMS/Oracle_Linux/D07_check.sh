@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-07
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 중
-# @Title       : DBMS 진단 항목 D-07
+# @Title       : root 권한으로 서비스 구동 제한
 # @Description : DBMS 진단 항목 D-07 관련 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

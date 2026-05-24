@@ -26,7 +26,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 # Parameters
 $ITEM_ID = "PC-17"
 $ITEM_NAME = "이동식미디어자동실행방지"
-$SEVERITY = "중"
+$SEVERITY = ""
 $CATEGORY = "4.보안관리"
 
 # run_all 모드가 아닐 때만 진단 정보 출력

@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-13
 # @Category    : UNIX > 1. 계정 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (중)
+# @Platform    : RedHat
+# @Severity    : 중
 # @Title       : 안전한 비밀번호 암호화 알고리즘 사용
 # @Description : 안전한 비밀번호 암호화 알고리즘을 사용 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
@@ -27,7 +27,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 ITEM_ID="U-13"
 ITEM_NAME="안전한 비밀번호 암호화 알고리즘 사용"
-SEVERITY="(중)"
+SEVERITY="중"
 
 # 가이드라인 정보
 GUIDELINE_PURPOSE="안전한 비밀번호 암호화 알고리즘을 사용하여 사용자 계정 정보를 보호하기 위함"

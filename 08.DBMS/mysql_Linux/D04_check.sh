@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-04
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
+# @Platform    : mysql_Linux
 # @Severity    : 상
-# @Title       : 원격에서DB서버로의접속제한
+# @Title       : 데이터베이스 관리자 권한을 꼭 필요한 계정 및 그룹에 대해서만 허용
 # @Description : 관리자 계정의 원격 접속을 제한하여 비인가자의 DB 접근을 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

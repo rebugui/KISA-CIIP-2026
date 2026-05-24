@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : HP-UX
 # @Severity    : 상
-# @Title       : root 홈, 패스 디렉터리 권한 및 PATH 설정
+# @Title       : root 홈, 패스 디렉터리 권한 및 패스 설정
 # @Description : root PATH 확인 (. 포함 여부)
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-14"
-ITEM_NAME="root 홈, 패스 디렉터리 권한 및 PATH 설정"
+ITEM_NAME="root 홈, 패스 디렉터리 권한 및 패스 설정"
 SEVERITY="상"
 
 # 가이드라인 정보

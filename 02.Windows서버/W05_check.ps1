@@ -9,9 +9,9 @@
 # [점검 항목 상세]
 # @ID          : W-05
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 해독가능한암호화를사용하여암호저장해제
+# @Title       : 해독 가능한 암호화를 사용하여 암호 저장 해제
 # @Description : 해독 가능한 암호화 사용 여부 점검으로 비밀번호 평문 저장 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "W-05"
-$ITEM_NAME = "해독가능한암호화를사용하여암호저장해제"
+$ITEM_NAME = "해독 가능한 암호화를 사용하여 암호 저장 해제"
 $SEVERITY = "상"
 $CATEGORY = "1.계정관리"
 

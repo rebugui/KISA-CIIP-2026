@@ -8,8 +8,8 @@
 # [점검 항목 상세]
 # @ID          : U-44
 # @Category    : UNIX > 3. 서비스 관리
-# @Platform    : SOLARIS, LINUX, AIX, HP-UX 등
-# @Severity    : (상)
+# @Platform    : RedHat
+# @Severity    : 상
 # @Title       : tftp, talk 서비스 비활성화
 # @Description : 인증 절차가 없는 tftp와 보안에 취약한 talk 서비스 비활성화 점검
 # ==============================================================================

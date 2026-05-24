@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-10
 # @Category    : Web Server
-# @Platform    : Apache
+# @Platform    : Apache_Linux
 # @Severity    : 상
-# @Title       : 불필요한프록시설정제한
+# @Title       : 불필요한 프 록 시 설정 제한
 # @Description : 불필요한 프록시 설정 제한 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

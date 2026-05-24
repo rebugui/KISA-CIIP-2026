@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-15
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 중
-# @Title       : 불필요한스크립트매핑제거
+# @Platform    : IIS_Windows
+# @Severity    : 상
+# @Title       : 웹 서비스의 불필요한 스크립트 매핑 제거
 # @Description : 불필요한 스크립트 매핑(Handler Mappings), 특히 시스템 실행 파일(.exe, .dll, .bat, .cmd)에 대한 매핑을 제거하여 악의적인 스크립트 실행을 방지합니다. 불필요한 확장자 매핑은 공격자가 악성 스크립트를 업로드하여 실행할 수 있는 위험이 있습니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

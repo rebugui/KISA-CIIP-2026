@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-06
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
-# @Severity    : 중
-# @Title       : 웹서비스상위디렉터리접근제한설정
+# @Platform    : IIS_Windows
+# @Severity    : 상
+# @Title       : 웹 서비스 상위 디렉터리 접근 제한 설정
 # @Description : 상위 디렉터리 접근(Path Traversal, ../)을 차단하여 웹 문서 루트 외부의 중요 파일 및 디렉터리에 대한 무단 접근을 방지합니다. IIS는 기본적으로 상위 디렉터리 접근을 차단하지만 URL Rewrite 등의 설정에 따라 우회될 수 있으므로 확인이 필요합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

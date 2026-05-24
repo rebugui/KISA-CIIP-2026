@@ -10,7 +10,7 @@
 # @Category    : Unix Server
 # @Platform    : Debian
 # @Severity    : 상
-# @Title       : DNS Zone Transfer 설정
+# @Title       : DNS ZoneTransfer 설정
 # @Description : allow-transfer 설정 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
@@ -31,7 +31,7 @@ source "${LIB_DIR}/metadata_parser.sh"
 
 
 ITEM_ID="U-50"
-ITEM_NAME="DNS Zone Transfer 설정"
+ITEM_NAME="DNS ZoneTransfer 설정"
 SEVERITY="상"
 
 # 가이드라인 정보

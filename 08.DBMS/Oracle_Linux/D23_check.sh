@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-23
 # @Category    : DBMS (Database Management System)
-# @Platform    : Oracle
+# @Platform    : Oracle_Linux
 # @Severity    : 상
-# @Title       : xp_cmdshell사용제한
+# @Title       : xp_cmdshell 사용 제한
 # @Description : MSSQL xp_cmdshell 프로시저 활성화 여부 확인 (Oracle 미해당)
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

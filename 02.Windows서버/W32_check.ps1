@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-32
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : DNS서비스구동점검
+# @Title       : DNS 서비스 구동 점검
 # @Description : DNS 서비스 동적 업데이트 비활성화로 신뢰할 수 없는 데이터 업데이트 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-32"
-$ITEM_NAME = "DNS서비스구동점검"
+$ITEM_NAME = "DNS 서비스 구동 점검"
 $SEVERITY = "중"
 $CATEGORY = "2.서비스관리"
 

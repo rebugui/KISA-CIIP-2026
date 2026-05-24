@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-24
 # @Category    : Web Server
-# @Platform    : Apache
+# @Platform    : Apache_Linux
 # @Severity    : 중
-# @Title       : X-Frame-Options 헤더 설정
+# @Title       : 별도의 업로드 경로 사용 및 권한 설정
 # @Description : Clickjacking 공격을 방지하기 위해 X-Frame-Options 헤더를 설정합니다. DENY 또는 SAMEORIGIN 값을 사용하여 페이지가 다른 사이트의 프레임에 로드되는 것을 방지해야 합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-20
 # @Category    : Web Server
-# @Platform    : Nginx
+# @Platform    : Nginx_Linux
 # @Severity    : 상
-# @Title       : SSL/TLS활성화
+# @Title       : SSL/TLS 활성화
 # @Description : 웹 서비스 SSL/TLS 활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================

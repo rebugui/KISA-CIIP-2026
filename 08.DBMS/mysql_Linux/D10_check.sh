@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-10
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
+# @Platform    : mysql_Linux
 # @Severity    : 상
-# @Title       : 원격에서DB서버로의접속제한
+# @Title       : 원격에서 DB 서버로의 접속 제한
 # @Description : 지정된 IP 주소만 DB 서버에 접근 가능하도록 설정되어있는지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

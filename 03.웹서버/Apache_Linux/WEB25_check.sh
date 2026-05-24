@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-25
 # @Category    : Web Server
-# @Platform    : Apache
-# @Severity    : 중
-# @Title       : X-XSS-Protection 헤더 설정
+# @Platform    : Apache_Linux
+# @Severity    : 상
+# @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
 # @Description : XSS(Cross-Site Scripting) 공격으로부터 보호하기 위해 X-XSS-Protection 헤더를 설정합니다. 브라우저의 내장 XSS 필터를 활성화하여 보안을 강화해야 합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

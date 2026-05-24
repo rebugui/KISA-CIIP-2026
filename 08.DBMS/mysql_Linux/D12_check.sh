@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-12
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
+# @Platform    : mysql_Linux
 # @Severity    : 상
-# @Title       : 안전한리스너비밀번호설정및사용
+# @Title       : 안전한 리스너 비밀번호 설정 및 사용
 # @Description : 오라클 데이터베이스 Listener의 비밀번호 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

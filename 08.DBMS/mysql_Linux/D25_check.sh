@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-25
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
-# @Severity    : 중
-# @Title       : DBMS 백업/복구 권한 점검
+# @Platform    : mysql_Linux
+# @Severity    : 상
+# @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
 # @Description : 백업/복구 권한 제어로 데이터 무단 유출 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

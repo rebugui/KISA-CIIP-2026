@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : WEB-13
 # @Category    : Web Server
-# @Platform    : Nginx
-# @Severity    : 중
-# @Title       : Nginx 디렉토리 리스팅(autoindex) 비활성화
+# @Platform    : Nginx_Linux
+# @Severity    : 상
+# @Title       : 웹 서비스 설정 파일 노출 제한
 # @Description : Nginx 웹 서버에서 디렉토리 리스팅 기능(autoindex)을 비활성화하여 디렉토리 내 파일 목록이 외부에 노출되지 않도록 합니다. autoindex off 설정으로 정보 유출을 방지해야 합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

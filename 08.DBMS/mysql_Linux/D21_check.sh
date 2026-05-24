@@ -8,9 +8,9 @@
 # [점검 항목 상세]
 # @ID          : D-21
 # @Category    : DBMS (Database Management System)
-# @Platform    : MySQL
+# @Platform    : mysql_Linux
 # @Severity    : 중
-# @Title       : DBMS local_infile 설정 점검
+# @Title       : 인가되지 않은 GRANTOPTION 사용 제한
 # @Description : local_infile 비활성화로 LOAD DATA INFILE을 통한 파일 읽기 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================

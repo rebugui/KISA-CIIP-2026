@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-49
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 상
 # @Title       : DNS 보안 버전 패치
 # @Description : BIND 버전 확인

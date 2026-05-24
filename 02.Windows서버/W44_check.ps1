@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-44
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
-# @Title       : 원격으로액세스할수있는레지스트리경로
+# @Title       : 원격으로 액세스할 수 있는 레지스트리 경로
 # @Description : 원격 레지스트리 서비스 비활성화로 레지스트리 원격 접근 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-44"
-$ITEM_NAME = "원격으로액세스할수있는레지스트리경로"
+$ITEM_NAME = "원격으로 액세스할 수 있는 레지스트리 경로"
 $SEVERITY = "상"
 $CATEGORY = "5.보안관리"
 

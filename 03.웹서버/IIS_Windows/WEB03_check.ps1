@@ -7,7 +7,7 @@
 # [점검 항목 상세]
 # @ID          : WEB-03
 # @Category    : Web Server
-# @Platform    : IIS (Windows Server)
+# @Platform    : IIS_Windows
 # @Severity    : 상
 # @Title       : 비밀번호 파일 권한 관리
 # @Description : 비밀번호 파일의 접근 권한 설정 여부 점검

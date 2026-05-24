@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 중
-# @Title       : 파일시스템이NTFS포맷으로설정
+# @Title       : 파일 시스템이 NTFS 포맷으로 설정
 # @Description : 파일 시스템이 NTFS 포맷으로 설정되어 있는지 확인하여 암호화 및 접근 제어 기능 보장
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -25,7 +25,7 @@ $LIB_DIR = Join-Path $SCRIPT_DIR "..\lib"
 
 # Parameters
 $ITEM_ID = "PC-07"
-$ITEM_NAME = "파일시스템이NTFS포맷으로설정"
+$ITEM_NAME = "파일 시스템이 NTFS 포맷으로 설정"
 $SEVERITY = "중"
 $CATEGORY = "2.서비스관리"
 

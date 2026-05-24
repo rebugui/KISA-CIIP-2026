@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-35
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 불필요한ODBC/OLE-DB데이터소스와드라이브제거
+# @Title       : 불필요한 ODBC/OLE-DB 데이터 소스와 드라이브 제거
 # @Description : 불필요한 ODBC/OLE-DB 데이터 소스 제거로 비인가 데이터베이스 접속 차단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-35"
-$ITEM_NAME = "불필요한ODBC/OLE-DB데이터소스와드라이브제거"
+$ITEM_NAME = "불필요한 ODBC/OLE-DB 데이터 소스와 드라이브 제거"
 $SEVERITY = "중"
 $CATEGORY = "2.서비스관리"
 

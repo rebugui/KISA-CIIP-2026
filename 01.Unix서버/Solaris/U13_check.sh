@@ -8,7 +8,7 @@
 # [점검 항목 상세]
 # @ID          : U-13
 # @Category    : Unix Server
-# @Platform    : Solaris (Oracle)
+# @Platform    : Solaris
 # @Severity    : 중
 # @Title       : 안전한 비밀번호 암호화 알고리즘 사용
 # @Description : SHA512 또는更强 알고리즘 확인

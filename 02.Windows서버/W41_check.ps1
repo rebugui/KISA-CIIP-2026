@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-41
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : NTP및시각동기화설정
+# @Title       : NTP 및 시각 동기화 설정
 # @Description : NTP 및 시각 동기화 설정으로 시스템간 시간 동기화 및 감사 정확성 확보
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-41"
-$ITEM_NAME = "NTP및시각동기화설정"
+$ITEM_NAME = "NTP 및 시각 동기화 설정"
 $SEVERITY = "중"
 $CATEGORY = "4.로그관리"
 

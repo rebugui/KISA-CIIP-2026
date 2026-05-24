@@ -7,9 +7,9 @@
 # [점검 항목 상세]
 # @ID          : W-63
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : 도메인컨트롤러-사용자의시간동기화
+# @Title       : 도메인 컨트롤러-사용자의 시간 동기화
 # @Description : Kerberos 시간 동기화 설정으로 재전송 공격 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-63"
-$ITEM_NAME = "도메인컨트롤러-사용자의시간동기화"
+$ITEM_NAME = "도메인 컨트롤러-사용자의 시간 동기화"
 $SEVERITY = "중"
 $CATEGORY = "5.보안관리"
 
