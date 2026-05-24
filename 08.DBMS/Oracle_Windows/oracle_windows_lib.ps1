@@ -1,0 +1,259 @@
+#Requires -Version 5.1
+
+function Add-OracleUniquePath {
+    param(
+        [System.Collections.Generic.List[string]]$Paths,
+        [string]$Candidate,
+        [string]$PathType = 'Any'
+    )
+    if ([string]::IsNullOrWhiteSpace($Candidate)) { return }
+    try { $resolved = [System.IO.Path]::GetFullPath($Candidate.Trim('"')) } catch { return }
+    $exists = switch ($PathType) {
+        'Leaf' { Test-Path -LiteralPath $resolved -PathType Leaf }
+        'Container' { Test-Path -LiteralPath $resolved -PathType Container }
+        default { Test-Path -LiteralPath $resolved }
+    }
+    if ($exists -and -not $Paths.Contains($resolved)) { $Paths.Add($resolved) | Out-Null }
+}
+
+function Get-OracleWindowsServices {
+    try {
+        @(Get-CimInstance Win32_Service -ErrorAction Stop | Where-Object {
+            $_.Name -match '(?i)^Oracle(Service|Ora|.+TNSListener)' -or $_.DisplayName -match '(?i)Oracle'
+        })
+    } catch { @() }
+}
+
+function Get-OracleWindowsProcesses {
+    try {
+        @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+            $_.Name -match '(?i)^(oracle|tnslsnr)\.exe$'
+        })
+    } catch { @() }
+}
+
+function Get-OracleCliPath {
+    foreach ($cmd in @('sqlplus.exe', 'sqlplus')) {
+        $found = Get-Command $cmd -ErrorAction SilentlyContinue
+        if ($found) { return $found.Source }
+    }
+    foreach ($root in @($env:ORACLE_HOME, $env:ProgramFiles, ${env:ProgramFiles(x86)}, 'C:\oracle', 'C:\app')) {
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        $candidate = Get-ChildItem -LiteralPath $root -Recurse -File -Filter 'sqlplus.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '(?i)\\bin\\sqlplus\.exe$' } |
+            Select-Object -First 1
+        if ($candidate) { return $candidate.FullName }
+    }
+    return $null
+}
+
+function Get-OracleRegistryHomes {
+    $homes = [System.Collections.Generic.List[string]]::new()
+    foreach ($base in @('HKLM:\SOFTWARE\Oracle', 'HKLM:\SOFTWARE\WOW6432Node\Oracle')) {
+        if (-not (Test-Path -LiteralPath $base)) { continue }
+        foreach ($node in @(Get-ChildItem -LiteralPath $base -Recurse -ErrorAction SilentlyContinue | Select-Object -First 200)) {
+            try {
+                $props = Get-ItemProperty -LiteralPath $node.PSPath -ErrorAction Stop
+                foreach ($name in @('ORACLE_HOME', 'OracleHome', 'ORACLE_HOME_NAME')) {
+                    if ($props.$name) { Add-OracleUniquePath -Paths $homes -Candidate ([string]$props.$name) -PathType Container }
+                }
+            } catch {}
+        }
+    }
+    return @($homes)
+}
+
+function Get-OracleWindowsState {
+    $services = @(Get-OracleWindowsServices)
+    $processes = @(Get-OracleWindowsProcesses)
+    $homes = [System.Collections.Generic.List[string]]::new()
+    Add-OracleUniquePath -Paths $homes -Candidate $env:ORACLE_HOME -PathType Container
+
+    foreach ($service in $services) {
+        $pathName = [string]$service.PathName
+        if ($pathName -match '(?i)"([^"]*\\bin\\(?:oracle|tnslsnr)\.exe)"') {
+            Add-OracleUniquePath -Paths $homes -Candidate (Split-Path -Parent (Split-Path -Parent $Matches[1])) -PathType Container
+        }
+        elseif ($pathName -match '(?i)(\S*\\bin\\(?:oracle|tnslsnr)\.exe)') {
+            Add-OracleUniquePath -Paths $homes -Candidate (Split-Path -Parent (Split-Path -Parent $Matches[1])) -PathType Container
+        }
+    }
+    foreach ($process in $processes) {
+        if ($process.ExecutablePath -match '(?i)\\bin\\(?:oracle|tnslsnr)\.exe$') {
+            Add-OracleUniquePath -Paths $homes -Candidate (Split-Path -Parent (Split-Path -Parent $process.ExecutablePath)) -PathType Container
+        }
+    }
+    foreach ($home in Get-OracleRegistryHomes) {
+        Add-OracleUniquePath -Paths $homes -Candidate $home -PathType Container
+    }
+
+    $configs = [System.Collections.Generic.List[string]]::new()
+    foreach ($dir in @($env:TNS_ADMIN | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        Add-OracleUniquePath -Paths $configs -Candidate (Join-Path $dir 'listener.ora') -PathType Leaf
+        Add-OracleUniquePath -Paths $configs -Candidate (Join-Path $dir 'sqlnet.ora') -PathType Leaf
+        Add-OracleUniquePath -Paths $configs -Candidate (Join-Path $dir 'tnsnames.ora') -PathType Leaf
+    }
+    foreach ($home in $homes) {
+        foreach ($candidate in @(
+            (Join-Path $home 'network\admin\listener.ora'),
+            (Join-Path $home 'network\admin\sqlnet.ora'),
+            (Join-Path $home 'network\admin\tnsnames.ora')
+        )) {
+            Add-OracleUniquePath -Paths $configs -Candidate $candidate -PathType Leaf
+        }
+    }
+
+    $initFiles = [System.Collections.Generic.List[string]]::new()
+    foreach ($home in $homes) {
+        foreach ($pattern in @('database\init*.ora', 'dbs\init*.ora', 'admin\*\pfile\init*.ora')) {
+            Get-ChildItem -LiteralPath $home -Recurse -File -Filter (Split-Path $pattern -Leaf) -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match [regex]::Escape((Split-Path $pattern -Leaf).Replace('*', '')) -or $_.Name -match '^init.*\.ora$' } |
+                Select-Object -First 40 |
+                ForEach-Object { Add-OracleUniquePath -Paths $initFiles -Candidate $_.FullName -PathType Leaf }
+        }
+    }
+
+    $installedEvidence = ($services.Count -gt 0 -or $processes.Count -gt 0 -or $homes.Count -gt 0)
+
+    [pscustomobject]@{
+        Services = $services
+        Processes = $processes
+        OracleHomes = @($homes)
+        ConfigFiles = @($configs)
+        InitFiles = @($initFiles)
+        CliPath = if ($installedEvidence) { Get-OracleCliPath } else { $null }
+        Installed = $installedEvidence
+    }
+}
+
+function Get-OracleWindowsEvidence {
+    param($State)
+    @(
+        $State.Services | ForEach-Object { "Service $($_.Name) [$($_.State)] $($_.StartName): $($_.PathName)" }
+        $State.Processes | ForEach-Object { "Process $($_.ProcessId): $($_.CommandLine)" }
+        if ($State.OracleHomes.Count -gt 0) { "OracleHomes: $($State.OracleHomes -join ', ')" }
+        if ($State.ConfigFiles.Count -gt 0) { "ConfigFiles: $($State.ConfigFiles -join ', ')" }
+        if ($State.InitFiles.Count -gt 0) { "InitFiles: $($State.InitFiles -join ', ')" }
+        if ($State.CliPath) { "CliPath: $($State.CliPath)" }
+    ) -join "`n"
+}
+
+function New-OracleResult {
+    param([string]$FinalResult, [string]$Summary, [string]$CommandOutput, [string]$CommandExecuted)
+    $status = switch ($FinalResult) {
+        'GOOD' { '양호' }
+        'VULNERABLE' { '취약' }
+        'N/A' { 'N/A' }
+        default { '수동진단' }
+    }
+    [pscustomobject]@{ FinalResult = $FinalResult; Status = $status; Summary = $Summary; CommandOutput = $CommandOutput; CommandExecuted = $CommandExecuted }
+}
+
+function New-OracleNotInstalledResult {
+    New-OracleResult 'N/A' 'Oracle Database for Windows service/process/home evidence was not found.' 'No Oracle service, oracle.exe/tnslsnr.exe process, or ORACLE_HOME evidence found.' 'Get-CimInstance Win32_Service/Win32_Process; inspect Oracle registry'
+}
+
+function Invoke-OracleQuery {
+    param($State, [string]$Query)
+    if (-not $State.CliPath) {
+        return [pscustomobject]@{ Ok = $false; Output = 'sqlplus.exe client was not found.'; Command = 'sqlplus client discovery' }
+    }
+    if ($env:ORACLE_CONNECT_STRING) {
+        $conn = $env:ORACLE_CONNECT_STRING
+        $display = 'ORACLE_CONNECT_STRING'
+    }
+    elseif (($env:DB_USER -or $env:ORACLE_USER) -and ($env:DB_PASSWORD -or $env:ORACLE_PASSWORD)) {
+        $user = if ($env:DB_USER) { $env:DB_USER } else { $env:ORACLE_USER }
+        $password = if ($env:DB_PASSWORD) { $env:DB_PASSWORD } else { $env:ORACLE_PASSWORD }
+        $hostName = if ($env:DB_HOST) { $env:DB_HOST } elseif ($env:ORACLE_HOST) { $env:ORACLE_HOST } else { 'localhost' }
+        $port = if ($env:DB_PORT) { $env:DB_PORT } elseif ($env:ORACLE_PORT) { $env:ORACLE_PORT } else { '1521' }
+        $service = if ($env:DB_NAME) { $env:DB_NAME } elseif ($env:ORACLE_SERVICE_NAME) { $env:ORACLE_SERVICE_NAME } elseif ($env:ORACLE_SID) { $env:ORACLE_SID } else { 'ORCL' }
+        $conn = "$user/$password@${hostName}:$port/$service"
+        $display = "$user/***@${hostName}:$port/$service"
+    }
+    else {
+        $conn = '/ as sysdba'
+        $display = '/ as sysdba'
+    }
+    $inputText = "set heading off feedback off pagesize 500 linesize 32767 trimspool on`n$Query`nexit`n"
+    $output = $inputText | & $State.CliPath -L -S $conn 2>&1
+    $exit = $LASTEXITCODE
+    $text = (($output | Out-String).Trim())
+    $ok = ($exit -eq 0 -and $text -notmatch '(?i)ORA-\d+|SP2-\d+|TNS-\d+')
+    [pscustomobject]@{ Ok = $ok; Output = $text; Command = "$($State.CliPath) -L -S $display" }
+}
+
+function Invoke-OracleSqlCheck {
+    param($State, [string]$Query, [scriptblock]$Judge, [string]$Description)
+    $result = Invoke-OracleQuery -State $State -Query $Query
+    if (-not $result.Ok) {
+        return New-OracleResult 'MANUAL' "Oracle was found, but SQL evidence for $Description could not be collected automatically." ("Discovery evidence:`n$(Get-OracleWindowsEvidence -State $State)`n`nSQL output:`n$($result.Output)") $result.Command
+    }
+    & $Judge $result
+}
+
+function Get-OracleConfigLines {
+    param($State, [string]$Pattern)
+    foreach ($file in @($State.ConfigFiles + $State.InitFiles)) {
+        $lines = @(Select-String -LiteralPath $file -Pattern $Pattern -ErrorAction SilentlyContinue)
+        foreach ($line in $lines) { "${file}:$($line.LineNumber): $($line.Line.Trim())" }
+    }
+}
+
+function Test-OracleBroadPrincipal {
+    param([System.Security.Principal.IdentityReference]$Identity)
+    try { $sid = $Identity.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $sid = [string]$Identity }
+    return @($sid -eq 'S-1-1-0', $sid -eq 'S-1-5-11', $sid -eq 'S-1-5-32-545', $sid -eq 'S-1-5-32-546', $sid -match '-513$', ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users') -contains $true
+}
+
+function Get-OracleBroadAclEvidence {
+    param([string]$Path, [string]$Role)
+    $writeRights = @([System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.FileSystemRights]::Modify, [System.Security.AccessControl.FileSystemRights]::Write, [System.Security.AccessControl.FileSystemRights]::WriteData, [System.Security.AccessControl.FileSystemRights]::AppendData, [System.Security.AccessControl.FileSystemRights]::CreateFiles, [System.Security.AccessControl.FileSystemRights]::CreateDirectories, [System.Security.AccessControl.FileSystemRights]::Delete, [System.Security.AccessControl.FileSystemRights]::ChangePermissions, [System.Security.AccessControl.FileSystemRights]::TakeOwnership)
+    try { $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop } catch { return [pscustomobject]@{ Path = $Path; Role = $Role; Access = 'Unknown'; Principal = 'N/A'; Rights = "ACL read failed: $($_.Exception.Message)" } }
+    foreach ($rule in $acl.Access) {
+        if ($rule.AccessControlType -ne 'Allow' -or -not (Test-OracleBroadPrincipal -Identity $rule.IdentityReference)) { continue }
+        foreach ($right in $writeRights) {
+            if (($rule.FileSystemRights -band $right) -eq $right) {
+                [pscustomobject]@{ Path = $Path; Role = $Role; Access = 'Write'; Principal = [string]$rule.IdentityReference; Rights = [string]$rule.FileSystemRights }
+                break
+            }
+        }
+    }
+}
+
+function Invoke-OracleWindowsCheck {
+    param([string]$ItemId, [string]$ItemName)
+    $state = Get-OracleWindowsState
+    if (-not $state.Installed) { return New-OracleNotInstalledResult }
+    $evidence = Get-OracleWindowsEvidence -State $state
+
+    switch ($ItemId) {
+        'D-01' { return Invoke-OracleSqlCheck $state "SELECT username||' '||account_status||' '||NVL(password_versions,'-') FROM dba_users WHERE username IN ('SYS','SYSTEM','DBSNMP','SYSMAN','OUTLN','SCOTT');" { param($r) if ($r.Output -match '(?im)^(SYS|SYSTEM|DBSNMP|SYSMAN|OUTLN|SCOTT)\s+OPEN') { New-OracleResult 'MANUAL' 'Default Oracle accounts are open; confirm password change, lock policy, and approved use.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-OracleResult 'GOOD' 'Default Oracle account evidence was collected without obvious open-account risk.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No default Oracle account evidence was returned.' 'No rows returned.' $r.Command } } 'default account password policy' }
+        'D-02' { return Invoke-OracleSqlCheck $state "SELECT username||' '||account_status FROM dba_users WHERE username IN ('SCOTT','HR','OE','PM','IX','SH','BI','DEMO') OR username LIKE 'TEST%';" { param($r) if ($r.Output -match '(?im)\s+OPEN') { New-OracleResult 'VULNERABLE' 'Unnecessary Oracle sample/test accounts are open.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-OracleResult 'MANUAL' 'Sample/test Oracle accounts exist; confirm they are locked or approved.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No obvious sample/test Oracle accounts were returned.' 'No rows returned.' $r.Command } } 'unnecessary account removal' }
+        'D-03' { return Invoke-OracleSqlCheck $state "SELECT resource_name||'='||limit FROM dba_profiles WHERE profile='DEFAULT' AND resource_name IN ('PASSWORD_LIFE_TIME','PASSWORD_VERIFY_FUNCTION','FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME');" { param($r) if ($r.Output -match '(?im)PASSWORD_VERIFY_FUNCTION=NULL|PASSWORD_LIFE_TIME=UNLIMITED|FAILED_LOGIN_ATTEMPTS=UNLIMITED') { New-OracleResult 'VULNERABLE' 'Oracle DEFAULT profile password lifetime/complexity/lockout controls are weak.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'Oracle DEFAULT profile password controls appear configured.' $r.Output $r.Command } } 'password lifetime and complexity' }
+        'D-04' { return Invoke-OracleSqlCheck $state "SELECT grantee FROM dba_role_privs WHERE granted_role='DBA' ORDER BY grantee;" { param($r) if ($r.Output -match '(?im)^(SYS|SYSTEM)$' -and $r.Output -notmatch '(?im)^(?!SYS$|SYSTEM$)\S+') { New-OracleResult 'GOOD' 'Only default administrative DBA grantees were obvious.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-OracleResult 'MANUAL' 'Oracle DBA role grantees exist; confirm only approved administrators are included.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No DBA role grantee evidence was returned.' 'No rows returned.' $r.Command } } 'administrator privilege restriction' }
+        'D-05' { return Invoke-OracleSqlCheck $state "SELECT resource_name||'='||limit FROM dba_profiles WHERE resource_name IN ('PASSWORD_REUSE_TIME','PASSWORD_REUSE_MAX') ORDER BY profile,resource_name;" { param($r) if ($r.Output -match '(?im)=UNLIMITED|=DEFAULT') { New-OracleResult 'MANUAL' 'Oracle password reuse controls require profile-by-profile review.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'Oracle password reuse profile limits were collected without obvious unlimited evidence.' $r.Output $r.Command } } 'password reuse policy' }
+        'D-06' { return Invoke-OracleSqlCheck $state "SELECT username FROM dba_users WHERE username IN ('DBA','ADMIN','OPER','SHARED') OR username LIKE 'APP_%' ORDER BY username;" { param($r) if ($r.Output -match '(?m)\S') { New-OracleResult 'MANUAL' 'Shared or privileged-looking Oracle accounts were found; confirm individual account assignment policy.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No obvious shared Oracle account names were returned.' 'No rows returned.' $r.Command } } 'individual DB account assignment' }
+        'D-07' { $accounts = @($state.Services | Where-Object { $_.Name -match '(?i)^OracleService' } | ForEach-Object { $_.StartName } | Where-Object { $_ }); if ($accounts -match '^(?i)(LocalSystem|NT AUTHORITY\\SYSTEM)$|Administrator') { return New-OracleResult 'VULNERABLE' 'Oracle database Windows service appears to run with administrator-equivalent OS privileges.' ($accounts -join ', ') 'Inspect Oracle Windows service StartName' }; if ($accounts.Count -gt 0) { return New-OracleResult 'GOOD' 'Oracle database Windows service account is not administrator-equivalent.' ($accounts -join ', ') 'Inspect Oracle Windows service StartName' }; return New-OracleResult 'MANUAL' 'Oracle database service account could not be determined.' $evidence 'Inspect Oracle Windows service StartName' }
+        'D-08' { $lines = @(Get-OracleConfigLines $state '(?i)SQLNET\.ENCRYPTION_SERVER|SQLNET\.CRYPTO_CHECKSUM_SERVER'); if ($lines -match '(?i)REQUIRED|ACCEPTED|REQUESTED') { return New-OracleResult 'GOOD' 'Oracle sqlnet encryption/integrity settings were found.' ($lines -join "`n") 'Inspect sqlnet.ora encryption settings' }; return New-OracleResult 'MANUAL' 'Oracle network encryption evidence was not found; confirm sqlnet.ora/TLS policy manually.' (($lines + $evidence) -join "`n") 'Inspect sqlnet.ora encryption settings' }
+        'D-09' { return Invoke-OracleSqlCheck $state "SELECT resource_name||'='||limit FROM dba_profiles WHERE resource_name IN ('FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME') ORDER BY profile,resource_name;" { param($r) if ($r.Output -match '(?im)FAILED_LOGIN_ATTEMPTS=UNLIMITED|PASSWORD_LOCK_TIME=UNLIMITED') { New-OracleResult 'VULNERABLE' 'Oracle failed-login lockout profile controls are weak.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'Oracle failed-login lockout profile evidence was collected.' $r.Output $r.Command } } 'failed login lockout policy' }
+        'D-10' { $lines = @(Get-OracleConfigLines $state '(?i)HOST\s*=|TCP\.VALIDNODE_CHECKING|TCP\.INVITED_NODES|TCP\.EXCLUDED_NODES'); if ($lines -match '(?i)TCP\.VALIDNODE_CHECKING\s*=\s*YES|TCP\.INVITED_NODES|TCP\.EXCLUDED_NODES') { return New-OracleResult 'GOOD' 'Oracle listener/sqlnet host restriction evidence was found.' ($lines -join "`n") 'Inspect listener.ora/sqlnet.ora remote access controls' }; return New-OracleResult 'MANUAL' 'Oracle remote access restriction evidence was not conclusive; confirm listener binding and firewall policy.' (($lines + $evidence) -join "`n") 'Inspect listener.ora/sqlnet.ora remote access controls' }
+        'D-11' { return Invoke-OracleSqlCheck $state "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE owner IN ('SYS','SYSTEM') AND grantee NOT IN ('SYS','SYSTEM','DBA') AND ROWNUM <= 100;" { param($r) if ($r.Output -match '(?m)\S') { New-OracleResult 'VULNERABLE' 'Non-DBA Oracle system object privileges were found.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No non-DBA Oracle system object privilege evidence was returned.' 'No rows returned.' $r.Command } } 'system table access restriction' }
+        'D-12' { $lines = @(Get-OracleConfigLines $state '(?i)PASSWORDS_.*=|ADMIN_RESTRICTIONS_.*='); if ($lines -match '(?i)ADMIN_RESTRICTIONS_.*=\s*ON' -and $lines -match '(?i)PASSWORDS_.*=') { return New-OracleResult 'GOOD' 'Oracle listener password/admin restriction evidence was found.' ($lines -join "`n") 'Inspect listener.ora password settings' }; if ($lines -match '(?i)ADMIN_RESTRICTIONS_.*=\s*ON') { return New-OracleResult 'MANUAL' 'Oracle listener admin restriction is enabled; listener password support depends on Oracle version.' ($lines -join "`n") 'Inspect listener.ora password settings' }; return New-OracleResult 'VULNERABLE' 'Oracle listener password/admin restriction evidence was not found.' (($lines + $evidence) -join "`n") 'Inspect listener.ora password settings' }
+        'D-13' { $drivers = @(Get-ChildItem 'HKLM:\SOFTWARE\ODBC\ODBCINST.INI' -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '(?i)Oracle' } | Select-Object -ExpandProperty PSChildName); if ($drivers.Count -gt 0) { return New-OracleResult 'MANUAL' 'Oracle ODBC drivers/data sources were found. Confirm only required DSNs/drivers remain.' ($drivers -join "`n") 'Inspect Windows ODBC registry driver entries' }; return New-OracleResult 'GOOD' 'No Oracle ODBC driver entries were found in the inspected registry path.' 'No Oracle ODBC entries returned.' 'Inspect Windows ODBC registry driver entries' }
+        'D-14' { $targets = @($state.OracleHomes + $state.ConfigFiles + $state.InitFiles | Select-Object -Unique); $acl = foreach ($path in $targets) { Get-OracleBroadAclEvidence -Path $path -Role 'OraclePath' }; if ($acl) { return New-OracleResult 'VULNERABLE' 'Broad local write or unknown ACL evidence was found on Oracle paths.' (($acl | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Get-Acl Oracle directories/files' }; if ($targets.Count -eq 0) { return New-OracleResult 'MANUAL' 'Oracle paths were not found for ACL assessment.' $evidence 'Get-Acl Oracle directories/files' }; return New-OracleResult 'GOOD' 'No broad local write ACL entries were found on assessed Oracle paths.' ($targets -join ', ') 'Get-Acl Oracle directories/files' }
+        'D-15' { $lines = @(Get-OracleConfigLines $state '(?i)ADMIN_RESTRICTIONS_.*=|TRACE_LEVEL_|LOG_DIRECTORY_|TRACE_DIRECTORY_'); if ($lines -match '(?i)ADMIN_RESTRICTIONS_.*=\s*ON') { return New-OracleResult 'GOOD' 'Oracle listener admin restriction evidence was found.' ($lines -join "`n") 'Inspect listener.ora admin restrictions' }; return New-OracleResult 'VULNERABLE' 'Oracle listener admin restriction evidence was not found.' (($lines + $evidence) -join "`n") 'Inspect listener.ora admin restrictions' }
+        'D-16' { return New-OracleResult 'N/A' 'SQL Server Windows authentication mode control is not applicable to Oracle Database.' 'Oracle authentication is controlled by Oracle users, OS authentication, sqlnet.ora, and profiles.' 'Map DBMS authentication-mode guideline applicability' }
+        'D-17' { return Invoke-OracleSqlCheck $state "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE table_name LIKE 'AUD$%' AND grantee NOT IN ('SYS','SYSTEM','DBA','AUDIT_ADMIN') AND ROWNUM <= 100;" { param($r) if ($r.Output -match '(?m)\S') { New-OracleResult 'VULNERABLE' 'Oracle audit table privileges granted to non-administrative principals were found.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No non-administrative Oracle audit table privilege evidence was returned.' 'No rows returned.' $r.Command } } 'audit table DBA-only access' }
+        'D-18' { return Invoke-OracleSqlCheck $state "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE grantee='PUBLIC' AND owner NOT IN ('SYS','SYSTEM') AND ROWNUM <= 100;" { param($r) if ($r.Output -match '(?m)\S') { New-OracleResult 'VULNERABLE' 'Oracle object permissions granted to PUBLIC were found.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No non-system Oracle object permissions granted to PUBLIC were returned.' 'No rows returned.' $r.Command } } 'public role restriction' }
+        'D-19' { return Invoke-OracleSqlCheck $state "SELECT name||'='||value FROM v`$parameter WHERE name IN ('os_roles','remote_os_authent','remote_os_roles');" { param($r) if ($r.Output -match '(?im)=TRUE') { New-OracleResult 'VULNERABLE' 'Oracle OS role/remote OS authentication parameters are enabled.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'Oracle OS role/remote OS authentication parameters appear disabled.' $r.Output $r.Command } } 'OS role and remote OS authentication restriction' }
+        'D-20' { return Invoke-OracleSqlCheck $state "SELECT owner||'.'||object_name FROM dba_objects WHERE owner NOT IN ('SYS','SYSTEM','OUTLN','DBSNMP','XDB','WMSYS','CTXSYS','MDSYS','ORDSYS','ORDDATA') AND object_type IN ('TABLE','PROCEDURE','PACKAGE') AND ROWNUM <= 100;" { param($r) if ($r.Output -match '(?m)\S') { New-OracleResult 'MANUAL' 'Application-owned Oracle objects were found; confirm owners are authorized.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No non-default Oracle object owner evidence was returned.' 'No rows returned.' $r.Command } } 'unauthorized object owner restriction' }
+        'D-21' { return Invoke-OracleSqlCheck $state "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE grantable='YES' AND grantee NOT IN ('SYS','SYSTEM','DBA') AND ROWNUM <= 100;" { param($r) if ($r.Output -match '(?m)\S') { New-OracleResult 'VULNERABLE' 'Oracle object privileges with grant option were found.' $r.Output $r.Command } else { New-OracleResult 'GOOD' 'No Oracle object privileges with grant option were returned.' 'No rows returned.' $r.Command } } 'GRANT OPTION restriction' }
+        'D-22' { return Invoke-OracleSqlCheck $state "SELECT name||'='||value FROM v`$parameter WHERE name='resource_limit';" { param($r) if ($r.Output -match '(?im)=TRUE') { New-OracleResult 'GOOD' 'Oracle RESOURCE_LIMIT is enabled.' $r.Output $r.Command } else { New-OracleResult 'VULNERABLE' 'Oracle RESOURCE_LIMIT is not enabled.' $r.Output $r.Command } } 'resource limit function' }
+        'D-23' { return New-OracleResult 'N/A' 'SQL Server xp_cmdshell control is not applicable to Oracle Database.' 'Oracle has no xp_cmdshell feature.' 'Map DBMS command-shell guideline applicability' }
+        'D-24' { return New-OracleResult 'N/A' 'SQL Server registry extended procedure control is not applicable to Oracle Database.' 'Oracle does not expose SQL Server registry extended procedures.' 'Map DBMS registry-procedure guideline applicability' }
+        'D-25' { return Invoke-OracleSqlCheck $state "SELECT banner FROM v`$version WHERE banner LIKE 'Oracle%';" { param($r) New-OracleResult 'MANUAL' 'Oracle was found. Compare detected version and patch level against current Oracle Critical Patch Update guidance.' $r.Output $r.Command } 'vendor patch status' }
+        'D-26' { return Invoke-OracleSqlCheck $state "SELECT name||'='||value FROM v`$parameter WHERE name IN ('audit_trail','unified_audit_sga_queue_size');" { param($r) if ($r.Output -match '(?im)audit_trail=(NONE|FALSE)') { New-OracleResult 'VULNERABLE' 'Oracle audit trail appears disabled.' $r.Output $r.Command } else { New-OracleResult 'MANUAL' 'Oracle audit evidence was collected; confirm it satisfies institutional audit retention and event policy.' $r.Output $r.Command } } 'audit logging policy' }
+        default { return New-OracleResult 'MANUAL' "No Oracle Windows diagnostic rule is defined for $ItemId." $evidence 'Oracle Windows generic discovery' }
+    }
+}

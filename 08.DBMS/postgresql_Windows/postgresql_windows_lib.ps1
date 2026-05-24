@@ -1,0 +1,213 @@
+#Requires -Version 5.1
+
+function Add-PostgreSqlUniquePath {
+    param(
+        [System.Collections.Generic.List[string]]$Paths,
+        [string]$Candidate,
+        [string]$PathType = 'Any'
+    )
+    if ([string]::IsNullOrWhiteSpace($Candidate)) { return }
+    try { $resolved = [System.IO.Path]::GetFullPath($Candidate.Trim('"')) } catch { return }
+    $exists = switch ($PathType) {
+        'Leaf' { Test-Path -LiteralPath $resolved -PathType Leaf }
+        'Container' { Test-Path -LiteralPath $resolved -PathType Container }
+        default { Test-Path -LiteralPath $resolved }
+    }
+    if ($exists -and -not $Paths.Contains($resolved)) { $Paths.Add($resolved) | Out-Null }
+}
+
+function Get-PostgreSqlWindowsServices {
+    try {
+        @(Get-CimInstance Win32_Service -ErrorAction Stop | Where-Object {
+            $_.Name -match '(?i)postgres|pgsql' -or $_.DisplayName -match '(?i)postgres|pgsql'
+        })
+    } catch { @() }
+}
+
+function Get-PostgreSqlWindowsProcesses {
+    try {
+        @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+            $_.Name -match '(?i)^postgres\.exe$'
+        })
+    } catch { @() }
+}
+
+function Get-PostgreSqlCliPath {
+    $found = Get-Command 'psql.exe' -ErrorAction SilentlyContinue
+    if ($found) { return $found.Source }
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, 'C:\ProgramData', 'C:\tools')) {
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        $candidate = Get-ChildItem -LiteralPath $root -Recurse -File -Filter 'psql.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '(?i)\\bin\\psql\.exe$' } |
+            Select-Object -First 1
+        if ($candidate) { return $candidate.FullName }
+    }
+    return $null
+}
+
+function Get-PostgreSqlDataDirs {
+    $dirs = [System.Collections.Generic.List[string]]::new()
+    foreach ($service in Get-PostgreSqlWindowsServices) {
+        $pathName = [string]$service.PathName
+        if ($pathName -match '(?i)-D\s+"([^"]+)"') { Add-PostgreSqlUniquePath -Paths $dirs -Candidate $Matches[1] -PathType Container }
+        elseif ($pathName -match '(?i)-D\s+([^\s]+)') { Add-PostgreSqlUniquePath -Paths $dirs -Candidate $Matches[1] -PathType Container }
+    }
+    foreach ($process in Get-PostgreSqlWindowsProcesses) {
+        $cmd = [string]$process.CommandLine
+        if ($cmd -match '(?i)-D\s+"([^"]+)"') { Add-PostgreSqlUniquePath -Paths $dirs -Candidate $Matches[1] -PathType Container }
+        elseif ($cmd -match '(?i)-D\s+([^\s]+)') { Add-PostgreSqlUniquePath -Paths $dirs -Candidate $Matches[1] -PathType Container }
+    }
+    foreach ($root in @("$env:ProgramFiles\PostgreSQL", "${env:ProgramFiles(x86)}\PostgreSQL", 'C:\ProgramData\PostgreSQL')) {
+        if ([string]::IsNullOrWhiteSpace($root) -or -not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        foreach ($dir in @(Get-ChildItem -LiteralPath $root -Directory -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq 'data' } | Select-Object -First 20)) {
+            Add-PostgreSqlUniquePath -Paths $dirs -Candidate $dir.FullName -PathType Container
+        }
+    }
+    return @($dirs)
+}
+
+function Get-PostgreSqlWindowsState {
+    $services = @(Get-PostgreSqlWindowsServices)
+    $processes = @(Get-PostgreSqlWindowsProcesses)
+    $dataDirs = @(Get-PostgreSqlDataDirs)
+    $configs = [System.Collections.Generic.List[string]]::new()
+    $hbas = [System.Collections.Generic.List[string]]::new()
+    $logs = [System.Collections.Generic.List[string]]::new()
+    foreach ($dir in $dataDirs) {
+        Add-PostgreSqlUniquePath -Paths $configs -Candidate (Join-Path $dir 'postgresql.conf') -PathType Leaf
+        Add-PostgreSqlUniquePath -Paths $hbas -Candidate (Join-Path $dir 'pg_hba.conf') -PathType Leaf
+        Add-PostgreSqlUniquePath -Paths $hbas -Candidate (Join-Path $dir 'pg_ident.conf') -PathType Leaf
+        Add-PostgreSqlUniquePath -Paths $logs -Candidate (Join-Path $dir 'log') -PathType Container
+        Add-PostgreSqlUniquePath -Paths $logs -Candidate (Join-Path $dir 'pg_log') -PathType Container
+    }
+    [pscustomobject]@{
+        Services = $services
+        Processes = $processes
+        DataDirs = $dataDirs
+        ConfigFiles = @($configs)
+        HbaFiles = @($hbas)
+        LogDirs = @($logs)
+        CliPath = Get-PostgreSqlCliPath
+        Installed = ($services.Count -gt 0 -or $processes.Count -gt 0 -or $dataDirs.Count -gt 0)
+    }
+}
+
+function Get-PostgreSqlWindowsEvidence {
+    param($State)
+    @(
+        $State.Services | ForEach-Object { "Service $($_.Name) [$($_.State)] $($_.StartName): $($_.PathName)" }
+        $State.Processes | ForEach-Object { "Process $($_.ProcessId): $($_.CommandLine)" }
+        if ($State.DataDirs.Count -gt 0) { "DataDirs: $($State.DataDirs -join ', ')" }
+        if ($State.ConfigFiles.Count -gt 0) { "ConfigFiles: $($State.ConfigFiles -join ', ')" }
+        if ($State.HbaFiles.Count -gt 0) { "HbaFiles: $($State.HbaFiles -join ', ')" }
+        if ($State.CliPath) { "CliPath: $($State.CliPath)" }
+    ) -join "`n"
+}
+
+function Invoke-PostgreSqlQuery {
+    param($State, [string]$Query)
+    if (-not $State.CliPath) {
+        return [pscustomobject]@{ Ok = $false; Output = 'psql.exe client was not found.'; Command = 'psql client discovery' }
+    }
+    $user = if ($env:DB_USER) { $env:DB_USER } elseif ($env:PGUSER) { $env:PGUSER } else { 'postgres' }
+    $password = if ($env:DB_PASSWORD) { $env:DB_PASSWORD } else { $env:PGPASSWORD }
+    $host = if ($env:DB_HOST) { $env:DB_HOST } elseif ($env:PGHOST) { $env:PGHOST } else { 'localhost' }
+    $port = if ($env:DB_PORT) { $env:DB_PORT } elseif ($env:PGPORT) { $env:PGPORT } else { '5432' }
+    $db = if ($env:DB_NAME) { $env:DB_NAME } elseif ($env:PGDATABASE) { $env:PGDATABASE } else { 'postgres' }
+    $oldPwd = $env:PGPASSWORD
+    if ($password) { $env:PGPASSWORD = $password }
+    try {
+        $args = @('-X','-A','-t','-q','-h',$host,'-p',$port,'-U',$user,'-d',$db,'-c',$Query)
+        $output = & $State.CliPath @args 2>&1
+        $exit = $LASTEXITCODE
+    }
+    finally {
+        if ($null -ne $oldPwd) { $env:PGPASSWORD = $oldPwd } else { Remove-Item Env:\PGPASSWORD -ErrorAction SilentlyContinue }
+    }
+    [pscustomobject]@{ Ok = ($exit -eq 0); Output = (($output | Out-String).Trim()); Command = "$($State.CliPath) -h $host -p $port -U $user -d $db -c <query>" }
+}
+
+function Test-PostgreSqlBroadPrincipal {
+    param([System.Security.Principal.IdentityReference]$Identity)
+    try { $sid = $Identity.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $sid = [string]$Identity }
+    return @($sid -eq 'S-1-1-0', $sid -eq 'S-1-5-11', $sid -eq 'S-1-5-32-545', $sid -eq 'S-1-5-32-546', $sid -match '-513$', ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users') -contains $true
+}
+
+function Test-PostgreSqlAnyRight {
+    param([System.Security.AccessControl.FileSystemRights]$Rights, [System.Security.AccessControl.FileSystemRights[]]$Expected)
+    foreach ($right in $Expected) { if (($Rights -band $right) -eq $right) { return $true } }
+    return $false
+}
+
+function Get-PostgreSqlBroadAclEvidence {
+    param([string]$Path, [string]$Role)
+    $readRights = @([System.Security.AccessControl.FileSystemRights]::Read, [System.Security.AccessControl.FileSystemRights]::ReadAndExecute, [System.Security.AccessControl.FileSystemRights]::ListDirectory)
+    $writeRights = @([System.Security.AccessControl.FileSystemRights]::FullControl, [System.Security.AccessControl.FileSystemRights]::Modify, [System.Security.AccessControl.FileSystemRights]::Write, [System.Security.AccessControl.FileSystemRights]::WriteData, [System.Security.AccessControl.FileSystemRights]::AppendData, [System.Security.AccessControl.FileSystemRights]::CreateFiles, [System.Security.AccessControl.FileSystemRights]::CreateDirectories, [System.Security.AccessControl.FileSystemRights]::Delete, [System.Security.AccessControl.FileSystemRights]::ChangePermissions, [System.Security.AccessControl.FileSystemRights]::TakeOwnership)
+    try { $acl = Get-Acl -LiteralPath $Path -ErrorAction Stop } catch { return [pscustomobject]@{ Path = $Path; Role = $Role; Access = 'Unknown'; Principal = 'N/A'; Rights = "ACL read failed: $($_.Exception.Message)" } }
+    foreach ($rule in $acl.Access) {
+        if ($rule.AccessControlType -ne 'Allow' -or -not (Test-PostgreSqlBroadPrincipal -Identity $rule.IdentityReference)) { continue }
+        $hasWrite = Test-PostgreSqlAnyRight -Rights $rule.FileSystemRights -Expected $writeRights
+        $hasRead = Test-PostgreSqlAnyRight -Rights $rule.FileSystemRights -Expected $readRights
+        if ($hasWrite -or $hasRead) {
+            [pscustomobject]@{ Path = $Path; Role = $Role; Access = if ($hasWrite) { 'Write' } else { 'Read' }; Principal = [string]$rule.IdentityReference; Rights = [string]$rule.FileSystemRights }
+        }
+    }
+}
+
+function New-PostgreSqlResult {
+    param([string]$FinalResult, [string]$Summary, [string]$CommandOutput, [string]$CommandExecuted)
+    $status = switch ($FinalResult) { 'GOOD' { '양호' } 'VULNERABLE' { '취약' } 'N/A' { 'N/A' } default { '수동진단' } }
+    [pscustomobject]@{ FinalResult = $FinalResult; Status = $status; Summary = $Summary; CommandOutput = $CommandOutput; CommandExecuted = $CommandExecuted }
+}
+
+function New-PostgreSqlNotInstalledResult {
+    New-PostgreSqlResult 'N/A' 'PostgreSQL for Windows service/process/configuration was not found.' 'No PostgreSQL service, process, or data directory evidence found.' 'Get-CimInstance Win32_Service/Win32_Process; known PostgreSQL paths'
+}
+
+function Invoke-PostgreSqlSqlCheck {
+    param($State, [string]$Query, [scriptblock]$Judge, [string]$Description)
+    $result = Invoke-PostgreSqlQuery -State $State -Query $Query
+    if (-not $result.Ok) {
+        return New-PostgreSqlResult 'MANUAL' "PostgreSQL was found, but SQL evidence for $Description could not be collected automatically." ("Discovery evidence:`n$(Get-PostgreSqlWindowsEvidence -State $State)`n`nSQL output:`n$($result.Output)") $result.Command
+    }
+    & $Judge $result
+}
+
+function Invoke-PostgreSqlWindowsCheck {
+    param([string]$ItemId, [string]$ItemName)
+    $state = Get-PostgreSqlWindowsState
+    if (-not $state.Installed) { return New-PostgreSqlNotInstalledResult }
+    $configText = @($state.ConfigFiles | ForEach-Object { "# FILE: $_`n" + (Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue) }) -join "`n"
+    $hbaText = @($state.HbaFiles | ForEach-Object { "# FILE: $_`n" + (Get-Content -LiteralPath $_ -Raw -ErrorAction SilentlyContinue) }) -join "`n"
+    $evidence = Get-PostgreSqlWindowsEvidence -State $state
+
+    switch ($ItemId) {
+        'D-01' { return Invoke-PostgreSqlSqlCheck $state "SELECT rolname, rolcanlogin, rolpassword IS NULL AS empty_password FROM pg_authid WHERE rolname IN ('postgres','admin','test') OR rolname LIKE 'test%';" { param($r) if ($r.Output -match 'postgres\|t\|t|test') { New-PostgreSqlResult 'VULNERABLE' 'Default/test PostgreSQL account evidence or empty password evidence was found.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'No obvious default/test empty-password PostgreSQL account evidence was returned.' $r.Output $r.Command } } 'default account password policy' }
+        'D-02' { return Invoke-PostgreSqlSqlCheck $state "SELECT rolname FROM pg_roles WHERE rolname LIKE 'test%' OR rolname IN ('guest','demo');" { param($r) if ($r.Output -match '(?m)\S') { New-PostgreSqlResult 'VULNERABLE' 'Unnecessary PostgreSQL accounts were found.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'No obvious unnecessary PostgreSQL accounts were returned.' 'No rows returned.' $r.Command } } 'unnecessary account removal' }
+        'D-03' { return Invoke-PostgreSqlSqlCheck $state "SELECT rolname, rolvaliduntil FROM pg_authid WHERE rolcanlogin;" { param($r) if ($r.Output -match '\|$|infinity') { New-PostgreSqlResult 'MANUAL' 'Some PostgreSQL login roles have no finite password validity; confirm institutional password lifetime policy.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'PostgreSQL login role validity evidence was collected.' $r.Output $r.Command } } 'password lifetime policy' }
+        'D-04' { return Invoke-PostgreSqlSqlCheck $state "SELECT rolname FROM pg_roles WHERE rolsuper OR rolcreaterole OR rolcreatedb;" { param($r) if ($r.Output -match '(?m)^(postgres)$') { New-PostgreSqlResult 'MANUAL' 'PostgreSQL administrative roles exist; verify they are limited to approved DBA accounts.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-PostgreSqlResult 'VULNERABLE' 'Non-default PostgreSQL administrative roles were found.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'No PostgreSQL administrative role evidence was returned.' 'No rows returned.' $r.Command } } 'administrator privilege restriction' }
+        'D-05' { return New-PostgreSqlResult 'MANUAL' 'PostgreSQL does not enforce password reuse by core setting. Confirm password reuse policy via external auth/PAM/AD or extension.' $evidence 'Review PostgreSQL/external authentication password reuse controls' }
+        'D-06' { return Invoke-PostgreSqlSqlCheck $state "SELECT rolname FROM pg_roles WHERE rolcanlogin AND rolname IN ('postgres','admin','dba','shared');" { param($r) if ($r.Output -match '(?m)\S') { New-PostgreSqlResult 'MANUAL' 'Shared or privileged PostgreSQL login role names were found; confirm individual account assignment policy.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'No obvious shared PostgreSQL login role names were returned.' 'No rows returned.' $r.Command } } 'individual DB account assignment' }
+        'D-07' { $accounts = @($state.Services | ForEach-Object { $_.StartName } | Where-Object { $_ }); if ($accounts -match '^(?i)(LocalSystem|NT AUTHORITY\\SYSTEM)$|Administrator') { return New-PostgreSqlResult 'VULNERABLE' 'PostgreSQL Windows service appears to run with administrator-equivalent OS privileges.' ($accounts -join ', ') 'Inspect PostgreSQL Windows service StartName' }; if ($accounts.Count -gt 0) { return New-PostgreSqlResult 'GOOD' 'PostgreSQL Windows service account is not administrator-equivalent.' ($accounts -join ', ') 'Inspect PostgreSQL Windows service StartName' }; return New-PostgreSqlResult 'MANUAL' 'PostgreSQL service account could not be determined.' $evidence 'Inspect PostgreSQL Windows service StartName' }
+        'D-08' { if ($configText -match '(?im)^\s*ssl\s*=\s*on\b' -and $configText -notmatch '(?i)ssl_min_protocol_version\s*=\s*''?TLSv1(\.0|\.1)?') { return New-PostgreSqlResult 'GOOD' 'PostgreSQL SSL is enabled without obvious weak minimum protocol evidence.' $configText 'Parse postgresql.conf SSL settings' }; return New-PostgreSqlResult 'MANUAL' 'PostgreSQL SSL/TLS evidence is missing or incomplete; verify encryption policy.' $configText 'Parse postgresql.conf SSL settings' }
+        'D-09' { return New-PostgreSqlResult 'MANUAL' 'PostgreSQL login-failure lockout generally requires external auth or extension. Confirm institutional lockout control.' $evidence 'Review PostgreSQL authentication lockout controls' }
+        'D-10' { if ($hbaText -match '(?im)^\s*host\s+all\s+all\s+(0\.0\.0\.0/0|::/0)\s+') { return New-PostgreSqlResult 'VULNERABLE' 'pg_hba.conf allows broad remote database access.' $hbaText 'Parse pg_hba.conf remote access rules' }; if ($hbaText -match '(?im)^\s*host\s+') { return New-PostgreSqlResult 'MANUAL' 'PostgreSQL host access rules exist; confirm each source CIDR is approved.' $hbaText 'Parse pg_hba.conf remote access rules' }; return New-PostgreSqlResult 'GOOD' 'No broad PostgreSQL host access rule evidence was found.' $hbaText 'Parse pg_hba.conf remote access rules' }
+        'D-11' { return Invoke-PostgreSqlSqlCheck $state "SELECT grantee, table_schema, privilege_type FROM information_schema.table_privileges WHERE table_schema IN ('pg_catalog','information_schema') AND grantee NOT IN ('postgres');" { param($r) if ($r.Output -match '(?i)PUBLIC') { New-PostgreSqlResult 'VULNERABLE' 'Broad PostgreSQL system catalog privilege evidence was found.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-PostgreSqlResult 'MANUAL' 'System catalog privileges exist; confirm only DBAs are authorized.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'No non-DBA system catalog privilege evidence was returned.' 'No rows returned.' $r.Command } } 'system table access restriction' }
+        'D-12' { return New-PostgreSqlResult 'N/A' 'Oracle listener password control is not applicable to PostgreSQL.' 'PostgreSQL uses pg_hba.conf/listen_addresses instead of Oracle listener password.' 'Map DBMS listener-password guideline applicability' }
+        'D-13' { $drivers = @(Get-ChildItem 'HKLM:\SOFTWARE\ODBC\ODBCINST.INI' -ErrorAction SilentlyContinue | Where-Object { $_.PSChildName -match '(?i)postgres|psql' } | Select-Object -ExpandProperty PSChildName); if ($drivers.Count -gt 0) { return New-PostgreSqlResult 'MANUAL' 'PostgreSQL ODBC drivers/data sources were found. Confirm only required DSNs/drivers remain.' ($drivers -join "`n") 'Inspect Windows ODBC registry driver entries' }; return New-PostgreSqlResult 'GOOD' 'No PostgreSQL ODBC driver entries were found in the inspected registry path.' 'No PostgreSQL ODBC entries returned.' 'Inspect Windows ODBC registry driver entries' }
+        'D-14' { $targets = @($state.ConfigFiles + $state.HbaFiles + $state.DataDirs | Select-Object -Unique); $acl = foreach ($path in $targets) { Get-PostgreSqlBroadAclEvidence -Path $path -Role 'PostgreSqlPath' }; $bad = @($acl | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Unknown' }); if ($bad.Count -gt 0) { return New-PostgreSqlResult 'VULNERABLE' 'Broad local write or unknown ACL evidence was found on PostgreSQL files/directories.' (($bad | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Get-Acl PostgreSQL config files and data directories' }; if ($acl) { return New-PostgreSqlResult 'MANUAL' 'Broad local read ACL evidence was found on PostgreSQL paths; confirm sensitive files are excluded.' (($acl | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Get-Acl PostgreSQL config files and data directories' }; return New-PostgreSqlResult 'GOOD' 'No broad local user ACL entries were found on assessed PostgreSQL paths.' ($targets -join ', ') 'Get-Acl PostgreSQL config files and data directories' }
+        'D-15' { return New-PostgreSqlResult 'N/A' 'Oracle listener log/trace modification control is not applicable to PostgreSQL.' 'PostgreSQL has no Oracle listener component.' 'Map DBMS listener-log guideline applicability' }
+        'D-16' { return New-PostgreSqlResult 'N/A' 'SQL Server Windows authentication mode control is not applicable to PostgreSQL.' 'PostgreSQL does not use SQL Server Windows authentication mode.' 'Map DBMS Windows-auth guideline applicability' }
+        'D-17' { return New-PostgreSqlResult 'N/A' 'AuditTable DBA-only access control is Oracle-specific and not directly applicable to PostgreSQL.' 'PostgreSQL audit storage depends on logging/pgaudit implementation.' 'Map DBMS AuditTable guideline applicability' }
+        'D-18' { return Invoke-PostgreSqlSqlCheck $state "SELECT r.rolname FROM pg_roles r JOIN pg_auth_members m ON r.oid=m.roleid JOIN pg_roles u ON u.oid=m.member WHERE u.rolname='public';" { param($r) if ($r.Output -match '(?m)\S') { New-PostgreSqlResult 'VULNERABLE' 'PostgreSQL role grants to public-equivalent role evidence was found.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'No PostgreSQL role grant to public role evidence was returned.' 'No rows returned.' $r.Command } } 'public role restriction' }
+        'D-19' { return New-PostgreSqlResult 'N/A' 'OS_ROLES and REMOTE_OS_AUTHENTICATION controls are Oracle-specific and not applicable to PostgreSQL.' 'PostgreSQL does not expose OS_ROLES/REMOTE_OS_AUTHENTICATION/REMOTE_OS_ROLES parameters.' 'Map Oracle OS role guideline applicability' }
+        'D-20' { return Invoke-PostgreSqlSqlCheck $state "SELECT schema_name, schema_owner FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog','information_schema','public') AND schema_owner NOT IN ('postgres');" { param($r) if ($r.Output -match '(?m)\S') { New-PostgreSqlResult 'MANUAL' 'Non-default PostgreSQL object owners were found; confirm they are authorized.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'No unauthorized PostgreSQL object owner evidence was returned.' 'No rows returned.' $r.Command } } 'unauthorized object owner restriction' }
+        'D-21' { return Invoke-PostgreSqlSqlCheck $state "SELECT grantee, table_schema, table_name FROM information_schema.table_privileges WHERE is_grantable='YES' AND grantee NOT IN ('postgres');" { param($r) if ($r.Output -match '(?m)\S') { New-PostgreSqlResult 'MANUAL' 'PostgreSQL grant option evidence exists; confirm it is limited to approved DBA accounts.' $r.Output $r.Command } else { New-PostgreSqlResult 'GOOD' 'No PostgreSQL grant option evidence was returned.' 'No rows returned.' $r.Command } } 'GRANT OPTION restriction' }
+        'D-22' { if ($configText -match '(?im)^\s*(statement_timeout|idle_in_transaction_session_timeout|temp_file_limit)\s*=\s*[^0#]') { return New-PostgreSqlResult 'GOOD' 'PostgreSQL resource limit settings were found.' $configText 'Parse postgresql.conf resource limit settings' }; return New-PostgreSqlResult 'MANUAL' 'PostgreSQL resource limit evidence is missing or incomplete; confirm institutional resource policy.' $configText 'Parse postgresql.conf resource limit settings' }
+        'D-23' { return New-PostgreSqlResult 'N/A' 'SQL Server xp_cmdshell control is not applicable to PostgreSQL.' 'PostgreSQL has no xp_cmdshell feature.' 'Map SQL Server xp_cmdshell guideline applicability' }
+        'D-24' { return New-PostgreSqlResult 'N/A' 'SQL Server registry procedure permission control is not applicable to PostgreSQL.' 'PostgreSQL has no SQL Server registry procedures.' 'Map SQL Server registry procedure guideline applicability' }
+        'D-25' { return Invoke-PostgreSqlSqlCheck $state "SELECT version();" { param($r) New-PostgreSqlResult 'MANUAL' 'PostgreSQL was found. Compare detected version and patch policy against current vendor security advisories.' $r.Output $r.Command } 'vendor patch status' }
+        'D-26' { if ($configText -match '(?im)^\s*logging_collector\s*=\s*on\b|^\s*log_statement\s*=\s*''?(all|ddl|mod)') { return New-PostgreSqlResult 'GOOD' 'PostgreSQL audit/logging settings were found.' $configText 'Parse postgresql.conf logging settings' }; return New-PostgreSqlResult 'MANUAL' 'PostgreSQL audit logging evidence is incomplete; confirm institutional audit logging policy and pgaudit configuration.' $configText 'Parse postgresql.conf logging settings' }
+        default { return New-PostgreSqlResult 'MANUAL' "No PostgreSQL Windows diagnostic rule is defined for $ItemId." $evidence 'PostgreSQL Windows generic discovery' }
+    }
+}
