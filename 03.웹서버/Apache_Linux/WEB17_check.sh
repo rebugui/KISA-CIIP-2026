@@ -92,33 +92,41 @@ diagnose() {
     )
 
     local alias_settings=""
+    local readable_conf_found=false
     for conf_pattern in "${apache_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
-            if [ -f "${conf_file}" ]; then
-                local found_alias=$(grep -E "^\s*Alias" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
+            if [ -f "${conf_file}" ] && [ -r "${conf_file}" ]; then
+                readable_conf_found=true
+                # Alias / ScriptAlias / AliasMatch 등 가상 디렉터리 지시자 확인
+                local found_alias=$(grep -E "^\s*(Alias|AliasMatch|ScriptAlias|ScriptAliasMatch)\s" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
                 if [ -n "${found_alias}" ]; then
+                    # 발견된 각 Alias 라인을 개별 카운트
+                    local line_count
+                    line_count=$(echo "${found_alias}" | grep -cE "^\s*(Alias|AliasMatch|ScriptAlias|ScriptAliasMatch)\s" || true)
+                    alias_count=$((alias_count + line_count))
                     alias_settings="${alias_settings}"$'\n'"${found_alias}"
-                    alias_count=$((alias_count + 1))
                 fi
             fi
         done
     done
 
-    command_executed="grep -E '^\s*Alias' /etc/apache2/apache2.conf /etc/httpd/conf/httpd.conf /etc/apache2/sites-enabled/*.conf 2>/dev/null | grep -v '^\s*#' | head -10"
-    command_result="${alias_settings:-No Alias directives found}"
+    command_executed="grep -E '^\s*(Alias|ScriptAlias)' /etc/apache2/apache2.conf /etc/httpd/conf/httpd.conf /etc/apache2/sites-enabled/*.conf 2>/dev/null | grep -v '^\s*#' | head -10"
+    command_result="${alias_settings#$'\n'}"
+    [ -z "${command_result}" ] && command_result="No Alias directives found"
 
-    if [ ${alias_count} -eq 0 ]; then
+    if [ "${readable_conf_found}" != true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Apache 설정 파일을 읽을 수 없어 가상 디렉터리(Alias) 설정을 확인할 수 없습니다. 설정 파일에서 Alias/ScriptAlias 지시자를 수동으로 확인하세요."
+    elif [ ${alias_count} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="가상 디렉토리(Alias) 설정이 발견되지 않았습니다. (보안 권고사항 준수)"
-    elif [ ${alias_count} -le 3 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="가상 디렉토리 ${alias_count}개 발견. 필수 Alias만 사용 중인지 수동 확인 권장."
     else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="다수의 가상 디렉토리(${alias_count}개)가 발견되었습니다. 불필요한 Alias 제거 권장."
+        # Alias가 존재하는 경우, 정당성(불필요 여부)은 정적으로 판단할 수 없으므로 수동진단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="가상 디렉토리(Alias) ${alias_count}개가 발견되었습니다. 각 Alias가 업무상 필요한지 수동으로 확인하고 불필요한 가상 디렉터리는 제거하세요. (발견된 Alias: ${alias_settings#$'\n'})"
     fi
 
     # Run-all 모드 확인

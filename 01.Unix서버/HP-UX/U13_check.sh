@@ -57,93 +57,102 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # SHA512 또는更强 알고리즘 확인
+    # HP-UX: /etc/default/security의 CRYPT_DEFAULT 값 확인
+    # 가이드: CRYPT_DEFAULT = 5(SHA-256) 또는 6(SHA-512) → 안전
+    # 그 외(1/MD5/DES 등) 또는 미설정(기본 DES crypt) → 취약
 
+    local sec_file="/etc/default/security"
     local is_secure=false
+    local is_manual=false
     local details=""
-    local encrypt_method=""
-    local pam_algorithm=""
+    local crypt_raw=""
+    local crypt_default=""
 
-    # 1) HP-UX: /etc/default/security 확인 (PASSWORD_* 파라미터)
-    if [ -f /etc/default/security ]; then
-        # HP-UX에서는 CRYPT_* 또는 PASSWORD_ALGORITHM 파라미터 확인
-        encrypt_method=$(grep "^PASSWORD_ALGORITHM\|^CRYPT_ALGORITHM\|^CRYPT_ALGORITHMS_ALLOW" /etc/default/security 2>/dev/null | head -1)
-        if [ -n "$encrypt_method" ]; then
-            details="/etc/default/security: ${encrypt_method}"
+    # 1) /etc/default/security에서 CRYPT_DEFAULT 추출 (들여쓰기 허용, 주석 제외)
+    if [ -f "$sec_file" ]; then
+        if [ -r "$sec_file" ]; then
+            crypt_raw=$(grep -E '^[[:space:]]*CRYPT_DEFAULT[[:space:]]*=' "$sec_file" 2>/dev/null | grep -v '^[[:space:]]*#' || true)
+            crypt_default=$(echo "$crypt_raw" | tail -1 | cut -d= -f2- | tr -d '[:space:]' || true)
+        else
+            is_manual=true
+            details="${sec_file} 읽기 권한 없음"
         fi
+    else
+        details="${sec_file} 파일 없음 (CRYPT_DEFAULT 미설정 - 기본 DES crypt 사용)"
     fi
 
-    # 2) HP-UX PAM 설정 확인 (/etc/pam.d/passwd, /etc/pam.d/login, /etc/pam.d/su)
-    local pam_files=(
-        "/etc/pam.d/passwd"
-        "/etc/pam.d/login"
-        "/etc/pam.d/su"
-    )
+    # 2) CRYPT_DEFAULT 값 판정
+    if [ "$is_manual" = false ]; then
+        case "$crypt_default" in
+            6)
+                is_secure=true
+                details="CRYPT_DEFAULT=6 (SHA-512)"
+                ;;
+            5)
+                is_secure=true
+                details="CRYPT_DEFAULT=5 (SHA-256)"
+                ;;
+            "")
+                if [ -z "$details" ]; then
+                    details="CRYPT_DEFAULT 미설정 (기본 DES crypt 사용)"
+                fi
+                ;;
+            *)
+                details="CRYPT_DEFAULT=${crypt_default} (취약한 알고리즘)"
+                ;;
+        esac
+    fi
 
-    for pam_file in "${pam_files[@]}"; do
-        if [ -f "$pam_file" ]; then
-            # HP-UX PAM에서 pam_unix.so 알고리즘 확인
-            # SHA512 확인 (우선)
-            if grep -q "pam_unix.so.*sha512" "$pam_file" 2>/dev/null; then
-                pam_algorithm="sha512"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM (${pam_file}): ${pam_algorithm}"
+    # 3) CRYPT_DEFAULT 양호 시 /etc/shadow 실제 해시 확인
+    #    - shadow 미사용(11i v2+): 취약 (Trusted Mode(/tcb)는 별도 저장소 → 수동진단)
+    #    - 잠금/빈 값 외 해시 중 $5$/$6$가 아닌 항목 존재: 취약 (레거시 DES/MD5 잔존)
+    if [ "$is_manual" = false ] && [ "$is_secure" = true ]; then
+        if [ -f /etc/shadow ]; then
+            if [ -r /etc/shadow ]; then
+                local legacy_hash_users=""
+                legacy_hash_users=$(awk -F: '$2 != "" && $2 != "x" && $2 != "NP" && $2 !~ /^[!*]/ && $2 !~ /^\$[56]\$/ { print $1 }' /etc/shadow 2>/dev/null | head -10 | tr '\n' ' ' || true)
+                if [ -n "$legacy_hash_users" ]; then
+                    is_secure=false
+                    details="${details}, /etc/shadow에 SHA-2 이외 해시 잔존 계정: ${legacy_hash_users}"
                 else
-                    details="PAM (${pam_file}) pam_unix.so 알고리즘: ${pam_algorithm}"
+                    details="${details}, /etc/shadow 해시 SHA-2 확인"
                 fi
-                break
-            # SHA256 확인 (최소 허용)
-            elif grep -q "pam_unix.so.*sha256" "$pam_file" 2>/dev/null; then
-                pam_algorithm="sha256"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM (${pam_file}): ${pam_algorithm}"
-                else
-                    details="PAM (${pam_file}) pam_unix.so 알고리즘: ${pam_algorithm}"
-                fi
-                break
-            # yescrypt 확인 (더 강력함)
-            elif grep -q "pam_unix.so.*yescrypt" "$pam_file" 2>/dev/null; then
-                pam_algorithm="yescrypt"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM (${pam_file}): ${pam_algorithm}"
-                else
-                    details="PAM (${pam_file}) pam_unix.so 알고리즘: ${pam_algorithm}"
-                fi
-                break
+            else
+                is_manual=true
+                details="${details}, /etc/shadow 읽기 불가로 실제 해시 확인 필요"
             fi
-        fi
-    done || true
-
-    # 3) /etc/default/security의 알고리즘 확인
-    if [ "$is_secure" = false ] && [ -n "$encrypt_method" ]; then
-        # HP-UX에서 지원하는 안전한 알고리즘 확인
-        if echo "$encrypt_method" | grep -qiE "sha512|sha256|yescrypt|blowfish"; then
-            is_secure=true
+        elif [ -d /tcb ]; then
+            is_manual=true
+            details="${details}, /etc/shadow 미사용(Trusted Mode /tcb 사용) - 저장 해시 수동 확인 필요"
+        else
+            is_secure=false
+            details="${details}, /etc/shadow 미사용(쉐도우 패스워드 미적용)"
         fi
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$is_manual" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="비밀번호 암호화 알고리즘 설정 확인 불가 (${details}) - 수동 점검 필요"
+        command_result="[Command: grep -E '^[[:space:]]*CRYPT_DEFAULT' ${sec_file}]${newline}${details}"
+        command_executed="grep -E '^[[:space:]]*CRYPT_DEFAULT' ${sec_file}"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="안전한 비밀번호 암호화 알고리즘 사용됨 (${details})"
-        command_result="${details}"
-        command_executed="grep -E '^PASSWORD_ALGORITHM|^CRYPT_' /etc/default/security && grep 'pam_unix.so' /etc/pam.d/passwd /etc/pam.d/login"
+        command_result="[Command: grep -E '^[[:space:]]*CRYPT_DEFAULT' ${sec_file}]${newline}${crypt_raw}"
+        command_executed="grep -E '^[[:space:]]*CRYPT_DEFAULT' /etc/default/security"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        if [ -z "$details" ]; then
-            inspection_summary="비밀번호 암호화 알고리즘 미설정 또는 약한 알고리즘 사용 (MD5, DES 등)"
-            local encrypt_check=$(grep -E '^PASSWORD_ALGORITHM|^CRYPT_' /etc/default/security 2>/dev/null || echo "No encryption algorithm configured")
-            command_result="${encrypt_check}"
+        inspection_summary="취약한 비밀번호 암호화 알고리즘 사용 (${details})"
+        if [ -n "$crypt_raw" ]; then
+            command_result="[Command: grep -E '^[[:space:]]*CRYPT_DEFAULT' ${sec_file}]${newline}${crypt_raw}"
         else
-            inspection_summary="비밀번호 암호화 알고리즘 부적절 (${details})"
-            command_result="${details}"
+            command_result="[Command: grep -E '^[[:space:]]*CRYPT_DEFAULT' ${sec_file}]${newline}${details}"
         fi
-        command_executed="grep -E '^PASSWORD_ALGORITHM|^CRYPT_' /etc/default/security && grep 'pam_unix.so' /etc/pam.d/passwd /etc/pam.d/login"
+        command_executed="grep -E '^[[:space:]]*CRYPT_DEFAULT' /etc/default/security"
     fi
 
     # echo ""

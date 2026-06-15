@@ -77,15 +77,19 @@ diagnose() {
         local vsftpd_conf="/etc/vsftpd/vsftpd.conf"
         [ ! -f "$vsftpd_conf" ] && vsftpd_conf="/etc/vsftpd.conf"
 
-        # userlist_enable 확인
+        # userlist_enable 확인 (user_list에 실제 항목이 있어야 접근 제어로 인정)
         if grep -q "^userlist_enable=YES" "$vsftpd_conf" 2>/dev/null; then
-            access_configured=true
-            local userlist_file=$(grep "^userlist_file" "$vsftpd_conf" 2>/dev/null | awk '{print $2}' | head -1)
-            if [ -n "$userlist_file" ] && [ -f "$userlist_file" ]; then
-                local userlist_count=$(grep -v "^#" "$userlist_file" 2>/dev/null | grep -v "^$" | wc -l)
+            local userlist_file=$(grep "^userlist_file" "$vsftpd_conf" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '[:space:]')
+            [ -z "$userlist_file" ] && userlist_file="/etc/vsftpd/user_list"
+            local userlist_count=0
+            if [ -f "$userlist_file" ]; then
+                userlist_count=$(grep -v "^#" "$userlist_file" 2>/dev/null | grep -v "^$" | wc -l) || true
+            fi
+            if [ "$userlist_count" -gt 0 ]; then
+                access_configured=true
                 details="${details}[vsftpd] userlist 활성화 (${userlist_file}: ${userlist_count}개 계정). "
             else
-                details="${details}[vsftpd] userlist_enable=YES. "
+                details="${details}[vsftpd] userlist_enable=YES (user_list 항목 없음). "
             fi
         fi
 

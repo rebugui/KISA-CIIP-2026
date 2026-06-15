@@ -116,8 +116,17 @@ diagnose() {
 
         # 3) NTP 서비스 실행 여부 확인
         local ntp_service_running=false
+        local probe_available=false
         if [ -f /sbin/init.d/ntp ] || [ -f /sbin/init.d/xntpd ]; then
+            probe_available=true
             if /sbin/init.d/ntp status 2>/dev/null | grep -q "running" >/dev/null 2>&1 || /sbin/init.d/xntpd status 2>/dev/null | grep -q "running" >/dev/null 2>&1; then
+                ntp_running=true
+                ntp_service_running=true
+            fi
+        fi
+        if [ "$ntp_running" = false ] && command -v ps >/dev/null 2>&1; then
+            probe_available=true
+            if ps -ef 2>/dev/null | grep -v grep | grep -qE 'xntpd|ntpd|chronyd'; then
                 ntp_running=true
                 ntp_service_running=true
             fi
@@ -131,17 +140,57 @@ diagnose() {
 
         # 최종 판정
         if [ "$ntp_running" = true ] && [ "$ntp_configured" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="NTP 서비스 실행 중且 시간 동기화 설정됨: ${ntp_details}"
-            command_result="${ntp_details}, service: running"
-            command_executed="/sbin/init.d/ status ntp chrony systemd-timesyncd 2>/dev/null; cat ${config_files}"
-        elif [ "$ntp_installed" = true ] && [ "$ntp_configured" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="NTP 설정됨 (서비스 상태: ${ntp_service_running:-실행 중}): ${ntp_details}"
-            command_result="${ntp_details}, installed packages: ${ntp_packages:-none}"
-            command_executed="/sbin/init.d/ntp status 2>/dev/null | grep -q "running" chrony systemd-timesyncd 2>/dev/null"
+            # 실제 동기화 상태 확인 (ntpq -p '*' 동기화 피어 / chronyc tracking) - 미동기화는 취약
+            local sync_state="unknown"
+            local sync_evidence=""
+            if command -v ntpq >/dev/null 2>&1; then
+                sync_evidence=$(ntpq -pn 2>/dev/null | head -10 || true)
+                if echo "$sync_evidence" | grep -q '^\*'; then
+                    sync_state="synced"
+                elif [ -n "$sync_evidence" ]; then
+                    sync_state="unsynced"
+                fi
+            fi
+            if [ "$sync_state" = "unknown" ] && command -v chronyc >/dev/null 2>&1; then
+                sync_evidence=$(chronyc tracking 2>/dev/null || true)
+                if echo "$sync_evidence" | grep -qiE 'Leap status[[:space:]]*:[[:space:]]*Normal'; then
+                    sync_state="synced"
+                elif [ -n "$sync_evidence" ]; then
+                    sync_state="unsynced"
+                fi
+            fi
+
+            if [ "$sync_state" = "unsynced" ]; then
+                diagnosis_result="VULNERABLE"
+                status="취약"
+                inspection_summary="NTP 데몬은 실행 중이나 동기화된 피어가 없어 시간 동기화가 이루어지지 않음: ${ntp_details}"
+                command_result="${ntp_details}, service: running, sync: none${newline}${sync_evidence}"
+                command_executed="ntpq -pn; chronyc tracking; cat ${config_files}"
+            elif [ "$sync_state" = "unknown" ]; then
+                diagnosis_result="MANUAL"
+                status="수동진단"
+                inspection_summary="NTP 데몬 실행 및 서버 설정은 확인되었으나 동기화 상태(ntpq/chronyc)를 확인할 수 없음 - 수동 확인 필요: ${ntp_details}"
+                command_result="${ntp_details}, service: running, sync: unknown(probe unavailable)"
+                command_executed="ntpq -pn; chronyc tracking; cat ${config_files}"
+            else
+                diagnosis_result="GOOD"
+                status="양호"
+                inspection_summary="NTP 서비스 실행 중이며 시간 동기화 동작 확인됨: ${ntp_details}"
+                command_result="${ntp_details}, service: running, sync: active${newline}${sync_evidence}"
+                command_executed="ntpq -pn; chronyc tracking; cat ${config_files}"
+            fi
+        elif [ "$ntp_configured" = true ] && [ "$probe_available" = false ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="NTP 서버 설정은 확인되었으나 데몬 동작 상태를 확인할 수 없음 (init 스크립트/ps 사용 불가): ${ntp_details}"
+            command_result="${ntp_details}, probe: unavailable (daemon state unknown)"
+            command_executed="ls /sbin/init.d/ntp /sbin/init.d/xntpd 2>/dev/null; command -v ps"
+        elif [ "$ntp_configured" = true ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="NTP 서버 설정은 있으나 NTP 데몬이 중지되어 시간 동기화가 동작하지 않음: ${ntp_details}"
+            command_result="${ntp_details}, service: stopped"
+            command_executed="/sbin/init.d/xntpd status 2>/dev/null; ps -ef | grep ntpd; grep -E '^server|^pool' /etc/ntp.conf 2>/dev/null"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
@@ -153,7 +202,7 @@ diagnose() {
                 inspection_summary="NTP 설정 또는 서비스 실행 문제: ${ntp_details}"
                 command_result="${ntp_details}, service: ${ntp_service_running:-[inactive]}"
             fi
-            command_executed="/sbin/init.d/ntp status 2>/dev/null | grep -q "running" chrony systemd-timesyncd 2>/dev/null; grep '^server\|^pool' /etc/ntp.conf /etc/chrony.conf 2>/dev/null"
+            command_executed="/sbin/init.d/ntp status 2>/dev/null; ps -ef | grep -E 'xntpd|ntpd|chronyd'; grep -E '^server|^pool' /etc/ntp.conf /etc/chrony.conf 2>/dev/null"
         fi
     fi
 

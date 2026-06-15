@@ -56,55 +56,66 @@ diagnose() {
     local command_executed=""
     local newline=$'\n'
 
-    # automountd/autofs 비활성화 확인
+    # automountd/autofs 활성화 여부 확인 (서비스/프로세스 상태 기준 판정)
     local automount_running=false
+    local probe_available=false
     local automount_info=""
 
-    # 1) autofs 서비스 확인 (Solaris SMF)
-    if svcs autofs 2>/dev/null | grep -q "online"; then
-        automount_info="${automount_info}autofs 서비스: online\\n"
-        automount_running=true
-    else
-        automount_info="${automount_info}autofs 서비스: 미실행\\n"
-    fi
-
-    # 2) automountd 서비스 확인 (Solaris SMF)
-    if svcs automountd 2>/dev/null | grep -q "online"; then
-        automount_info="${automount_info}automountd 서비스: online\\n"
-        automount_running=true
-    else
-        automount_info="${automount_info}automountd 서비스: 미실행\\n"
-    fi
-
-    # 3) /etc/vfstab 확인 (automount 엔트리)
-    if [ -f /etc/vfstab ]; then
-        local automount_entries=$(grep "automount" /etc/vfstab 2>/dev/null || echo "")
-        if [ -n "$automount_entries" ]; then
-            automount_info="${automount_info}/etc/vfstab automount 엔트리 발견\\n${automount_entries}\\n"
+    # 1) autofs SMF 서비스 상태 확인 (판정 기준)
+    if command -v svcs >/dev/null 2>&1; then
+        probe_available=true
+        local autofs_state
+        autofs_state=$(svcs -H -o state svc:/system/filesystem/autofs 2>/dev/null || echo "")
+        automount_info="${automount_info}autofs SMF 서비스 상태: ${autofs_state:-미등록}\\n"
+        if [ "$autofs_state" = "online" ]; then
             automount_running=true
         fi
     fi
 
-    # 4) autofs 설정 파일 확인 (Solaris uses /etc/auto_master)
-    if [ -f /etc/auto_master ]; then
-        automount_info="${automount_info}autofs 설정 파일 존재\\n"
-        automount_info="${automount_info}$(head -5 /etc/auto_master 2>/dev/null)\\n"
-        automount_running=true
+    # 2) automountd 프로세스 확인 (판정 기준)
+    if command -v ps >/dev/null 2>&1; then
+        probe_available=true
+        local automountd_proc
+        automountd_proc=$(ps -ef 2>/dev/null | grep automountd | grep -v grep || true)
+        if [ -n "$automountd_proc" ]; then
+            automount_running=true
+            automount_info="${automount_info}automountd 프로세스 실행 중\\n${automountd_proc}\\n"
+        else
+            automount_info="${automount_info}automountd 프로세스: 미실행\\n"
+        fi
     fi
 
-    # 최종 판정
-    if [ "$automount_running" = false ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="automount 서비스 비활성화됨"
-        command_result="automount not used"
-        command_executed="svcs autofs automountd; cat /etc/auto_master 2>/dev/null"
-    else
+    # 3) 설정 파일 확인 (증적 전용 — Solaris 기본 제공 파일이므로 존재 자체는 활성화 근거가 아님)
+    if [ -f /etc/auto_master ]; then
+        automount_info="${automount_info}[증적] /etc/auto_master 존재 (기본 제공 설정 파일)\\n$(head -5 /etc/auto_master 2>/dev/null)\\n"
+    fi
+    if [ -f /etc/vfstab ]; then
+        local automount_entries
+        automount_entries=$(grep "automount" /etc/vfstab 2>/dev/null || true)
+        if [ -n "$automount_entries" ]; then
+            automount_info="${automount_info}[증적] /etc/vfstab automount 엔트리:\\n${automount_entries}\\n"
+        fi
+    fi
+
+    # 최종 판정 (서비스 활성 여부 기준)
+    if [ "$automount_running" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="automount 서비스 활성화됨"
+        inspection_summary="automount(autofs/automountd) 서비스 활성화됨"
         command_result="${automount_info}"
-        command_executed="svcs autofs automountd; cat /etc/auto_master 2>/dev/null; grep automount /etc/vfstab"
+        command_executed="svcs -H -o state svc:/system/filesystem/autofs; ps -ef | grep automountd; cat /etc/auto_master 2>/dev/null; grep automount /etc/vfstab"
+    elif [ "$probe_available" = true ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="automount(autofs/automountd) 서비스 비활성화됨"
+        command_result="${automount_info}"
+        command_executed="svcs -H -o state svc:/system/filesystem/autofs; ps -ef | grep automountd"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="svcs 및 ps 명령을 사용할 수 없어 automountd 서비스 상태를 수동으로 점검해야 합니다."
+        command_result="${automount_info:-svcs/ps 명령 사용 불가 환경}"
+        command_executed="svcs -H -o state svc:/system/filesystem/autofs; ps -ef | grep automountd"
     fi
 
     # echo ""

@@ -129,20 +129,24 @@ diagnose() {
     local vulnerable_accounts=()
     local secure_accounts=()
     local check_results=""
+    # pg_shadow/pg_authid 는 슈퍼유저만 조회 가능. 저권한 계정은 permission denied 되어
+    # account_info 가 비게 되는데, 이 경우 양호로 오판하지 않도록 조회 성공 여부를 추적함.
+    local account_read_ok=0
 
     for account in "${default_accounts[@]}"; do
         # pg_shadow에서 계정 정보 확인 (try Unix socket first)
         local account_info=$(psql -U "${DB_ADMIN_USER}" -d postgres -t -A -F"," -c \
-            "SELECT usename, usepasswd, valuntil, useconfig FROM pg_shadow WHERE usename='${account}';" 2>/dev/null)
+            "SELECT usename, passwd, valuntil, useconfig FROM pg_shadow WHERE usename='${account}';" 2>/dev/null)
 
         # Fall back to TCP if Unix socket fails
         if [ -z "$account_info" ]; then
             account_info=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -U "${DB_ADMIN_USER}" -h "${DB_HOST}" -p "${DB_PORT}" -d postgres -t -A -F"," -c \
-                "SELECT usename, usepasswd, valuntil, useconfig FROM pg_shadow WHERE usename='${account}';" 2>/dev/null)
+                "SELECT usename, passwd, valuntil, useconfig FROM pg_shadow WHERE usename='${account}';" 2>/dev/null)
         fi
 
         if [ -n "$account_info" ]; then
             echo "[INFO] 계정 발견: ${account}"
+            account_read_ok=1
 
             # usepasswd: '********' (비밀번호 있음) 또는 NULL (비밀번호 없음)
             local usepasswd=$(echo "$account_info" | cut -d',' -f2)
@@ -196,7 +200,15 @@ diagnose() {
     # 최종 판정
     local total_vulnerabilities=${#vulnerable_accounts[@]}
 
-    if [ ${total_vulnerabilities} -eq 0 ]; then
+    if [ ${total_vulnerabilities} -eq 0 ] && [ ${account_read_ok} -eq 0 ]; then
+        # 연결은 됐으나 pg_shadow/pg_authid 조회 권한이 없어 기본 계정 정보를 확보하지 못함.
+        # 증거 미확보 상태이므로 양호로 단정하지 않고 수동진단으로 처리.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="기본 계정 비밀번호 정보(pg_shadow)를 조회하지 못했습니다(슈퍼유저 권한 필요). 수동으로 기본 계정 비밀번호/잠금 설정을 확인하세요."
+        command_result="PostgreSQL 버전: ${pg_version}\\n${check_results}"
+        command_executed="psql -U ${DB_ADMIN_USER} -h ${DB_HOST} -p ${DB_PORT} -d postgres -c \"SELECT usename, passwd FROM pg_shadow WHERE usename='postgres';\""
+    elif [ ${total_vulnerabilities} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="모든 기본 계정의 비밀번호가 적절히 설정됨"

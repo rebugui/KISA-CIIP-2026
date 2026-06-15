@@ -54,6 +54,7 @@ diagnose() {
     local inspection_summary=""
     local command_result=""
     local command_executed=""
+    local newline=$'\n'
 
     # DNS Zone Transfer 설정 확인
     local dns_configured=false
@@ -90,15 +91,15 @@ diagnose() {
             dns_configured=true
             dns_info="${dns_info}${conf_file} 확인:${newline}"
 
-            # allow-transfer 설정 확인
-            local allow_transfer=$(grep -i "allow-transfer" "$conf_file" | grep -v "^//" | grep -v "^#" || echo "")
+            # allow-transfer 설정 확인 (멀티라인 블록 평탄화 후 판정)
+            local allow_transfer=$(grep -v '^[[:space:]]*//' "$conf_file" 2>/dev/null | grep -v '^[[:space:]]*#' | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || echo "")
             if [ -n "$allow_transfer" ]; then
-                dns_info="${dns_info}${allow_transfer}\${newline}"
+                dns_info="${dns_info}${allow_transfer}${newline}"
 
                 # "any" 또는 "none" 확인
-                if echo "$allow_transfer" | grep -qi "allow-transfer.*{.*any.*;"; then
+                if echo "$allow_transfer" | grep -qiE '(^|[{; ])any *;?'; then
                     issues+=("allow-transfer가 'any'로 설정됨 (취약)")
-                elif echo "$allow_transfer" | grep -qi "allow-transfer.*{.*none.*;"; then
+                elif echo "$allow_transfer" | grep -qiE '(^|[{; ])none *;?'; then
                     is_secure=true
                     dns_info="${dns_info}allow-transfer가 'none'으로 설정됨 (안전)${newline}"
                 else
@@ -114,17 +115,16 @@ diagnose() {
             # also-notify 확인 (안전한 설정)
             local also_notify=$(grep -i "also-notify" "$conf_file" | grep -v "^//" | grep -v "^#" || echo "")
             if [ -n "$also_notify" ]; then
-                dns_info="${dns_info}${also_notify}\${newline}"
+                dns_info="${dns_info}${also_notify}${newline}"
             fi
         fi
     done || true
 
-    # DNS 서비스 실행 확인 (Solaris SMF)
-    if svcs named 2>/dev/null | grep -q "online" || \
-       svcs server/dns 2>/dev/null | grep -q "online" || \
-       svcs bind9 2>/dev/null | grep -q "online"; then
+    # DNS 서비스 실행 확인 (Solaris SMF 정식 FMRI + ps 폴백)
+    if svcs -H -o state svc:/network/dns/server 2>/dev/null | grep -q "online" || \
+       ps -ef 2>/dev/null | grep -w "named" | grep -v "grep" | grep -q "."; then
         dns_configured=true
-        dns_info="${dns_info}\${newline}DNS 서비스 실행 중\${newline}"
+        dns_info="${dns_info}${newline}DNS 서비스 실행 중${newline}"
     fi
 
     # 최종 판정
@@ -133,7 +133,7 @@ diagnose() {
         status="양호"
         inspection_summary="DNS 서비스 미설치됨"
         command_result="DNS not used"
-        command_executed="svcs named server/dns bind9 2>/dev/null"
+        command_executed="svcs -H -o state svc:/network/dns/server; ps -ef | grep -w named"
     elif [ "$is_secure" = true ] && [ ${#issues[@]} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"

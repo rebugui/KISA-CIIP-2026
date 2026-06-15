@@ -96,25 +96,39 @@ diagnose() {
         # 3) SNMP 버전 설정 확인 (snmpd.conf)
         local snmp_conf="/etc/snmp/snmpd.conf"
         if [ -f "$snmp_conf" ]; then
-            # Capture raw SNMP config
-            raw_output=$(cat "$snmp_conf" 2>/dev/null | grep -v "^#" | grep -v "^$" | head -20 || echo "Empty or unreadable")
+            # includeDir/includeFile 지시자로 포함되는 설정 파일까지 점검 대상에 추가
+            # (stock Debian snmpd.conf의 includeDir /etc/snmp/snmpd.conf.d 누락 방지)
+            local conf_files=("$snmp_conf")
+            local inc_dir inc_file
+            while IFS= read -r inc_dir; do
+                [ -d "$inc_dir" ] || continue
+                for inc_file in "$inc_dir"/*.conf; do
+                    [ -f "$inc_file" ] && conf_files+=("$inc_file")
+                done
+            done < <(grep -Ei '^[[:space:]]*includeDir[[:space:]]+' "$snmp_conf" 2>/dev/null | awk '{print $2}' || true)
+            while IFS= read -r inc_file; do
+                [ -f "$inc_file" ] && conf_files+=("$inc_file")
+            done < <(grep -Ei '^[[:space:]]*includeFile[[:space:]]+' "$snmp_conf" 2>/dev/null | awk '{print $2}' || true)
 
-            # SNMP v1/v2c 사용 여부 확인
-            if grep -qi "com2sec" "$snmp_conf" 2>/dev/null; then
+            # Capture raw SNMP config
+            raw_output="[검사 파일: ${conf_files[*]}]"$'\n'"$(cat "${conf_files[@]}" 2>/dev/null | grep -v "^#" | grep -v "^$" | head -20 || echo "Empty or unreadable")"
+
+            # SNMP v1/v2c 사용 여부 확인 (com2sec/rocommunity/rwcommunity/community)
+            if grep -Eqi '^[[:space:]]*(com2sec|rocommunity6?|rwcommunity6?|community)[[:space:]]' "${conf_files[@]}" 2>/dev/null; then
                 snmp_version="v1/v2c"
-                config_details="com2sec 설정 발견 (SNMP v1/v2c 사용)"
+                config_details="v1/v2c 커뮤니티 설정 발견 (com2sec/rocommunity/rwcommunity/community)"
             fi
 
-            # SNMP v3 사용 여부 확인
-            if grep -qi "createUser\|rouser\|rwuser" "$snmp_conf" 2>/dev/null; then
+            # SNMP v3 사용 여부 확인 (행 시작 앵커: 주석 처리된 #createUser 오인 방지)
+            if grep -Eqi '^[[:space:]]*(createUser|rouser|rwuser)[[:space:]]' "${conf_files[@]}" 2>/dev/null; then
                 # v3 사용자 설정이 있으면 v3 사용 중
-                if grep -qi "com2sec" "$snmp_conf" 2>/dev/null; then
+                if [ "$snmp_version" = "v1/v2c" ]; then
                     # v1/v2c와 v3가 모두 설정된 경우
                     diagnosis_result="VULNERABLE"
                     status="취약"
                     inspection_summary="SNMP v1/v2c가 활성화됨 (v3와 공존): ${config_details}"
                     command_result="${raw_output}"
-                    command_executed="grep -E 'com2sec|createUser|rouser' ${snmp_conf}"
+                    command_executed="grep -E 'com2sec|rocommunity|rwcommunity|community|createUser|rouser|rwuser' ${snmp_conf}"
                 else
                     # v3만 사용하는 경우
                     diagnosis_result="GOOD"
@@ -129,7 +143,7 @@ diagnose() {
                 status="취약"
                 inspection_summary="SNMP v1/v2c 사용 중 (v3 권장): ${config_details}"
                 command_result="${raw_output}"
-                command_executed="grep com2sec ${snmp_conf}"
+                command_executed="grep -E 'com2sec|rocommunity|rwcommunity|community' ${snmp_conf}"
             else
                 # 설정을 찾을 수 없는 경우 (기본 설정일 수 있음)
                 diagnosis_result="MANUAL"

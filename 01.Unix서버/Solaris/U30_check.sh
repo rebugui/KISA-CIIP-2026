@@ -11,7 +11,7 @@
 # @Platform    : Solaris
 # @Severity    : 중
 # @Title       : UMASK 설정 관리
-# @Description : UMASK 022 또는 027 확인
+# @Description : UMASK 022 이상 설정 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -42,6 +42,40 @@ GUIDELINE_CRITERIA_BAD="UMASK 값이 022 미만으로 설정된 경우"
 GUIDELINE_REMEDIATION="설정 파일에 UMASK 값을 022로 설정"
 
 # ============================================================================
+# UMASK 판정 보조 함수
+# ============================================================================
+
+# umask 값이 022 이상(그룹 쓰기/기타 쓰기 차단 비트를 모두 포함)인지 검증
+# 반환: 0=양호(022 비트 모두 포함), 1=취약(022 미만), 2=8진수로 해석 불가
+check_umask_value() {
+    local val="$1"
+    case "${val}" in
+        ''|*[!0-7]*) return 2 ;;
+    esac
+    if [ $(( 8#${val} & 8#022 )) -eq $(( 8#022 )) ]; then
+        return 0
+    fi
+    return 1
+}
+
+# 발견된 umask 값을 집계 (diagnose의 지역 변수에 동적 스코프로 기록)
+record_umask_value() {
+    local source_name="$1"
+    local value="$2"
+    local rc=0
+    all_umask_values="${all_umask_values}${source_name}: ${value}, "
+    check_umask_value "${value}" || rc=$?
+    if [ "${rc}" -eq 0 ]; then
+        secure_found=true
+    elif [ "${rc}" -eq 1 ]; then
+        insecure_found=true
+    else
+        unparseable_found=true
+    fi
+    return 0
+}
+
+# ============================================================================
 # 진단 함수
 # ============================================================================
 
@@ -57,84 +91,76 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # UMASK 022 또는 027 확인
+    # UMASK 값이 022 이상(8진수 022의 마스크 비트를 모두 포함)인지 비트 연산으로 검증
+    # 여러 설정 파일 중 가장 허용적인(취약한) 값이 최종 판정을 결정
 
-    local is_secure=false
-    local umask_details=""
+    local insecure_found=false
+    local secure_found=false
+    local unparseable_found=false
+    local all_umask_values=""
     local config_files_checked=0
 
-    # Capture raw grep output for all umask settings
-    local umask_grep=$(grep -h 'umask' /etc/profile /etc/.login /etc/default/login /root/.bashrc 2>/dev/null | grep -v "^[[:space:]]*#" || echo "No umask settings found")
-    command_result="[Command: grep -h 'umask' /etc/profile /etc/.login /etc/default/login /root/.bashrc]${newline}${umask_grep}"
+    # 증적용: 설정 파일의 umask 관련 원본 라인 수집
+    local umask_grep=$(grep -h 'umask' /etc/profile /etc/.login /root/.bashrc /root/.profile 2>/dev/null | grep -v "^[[:space:]]*#" || echo "No umask settings found")
+    local deflogin_grep=$(grep "^[[:space:]]*UMASK=" /etc/default/login 2>/dev/null || echo "No UMASK setting in /etc/default/login")
+    command_result="[Command: grep -h 'umask' /etc/profile /etc/.login /root/.bashrc /root/.profile]${newline}${umask_grep}${newline}[Command: grep '^UMASK=' /etc/default/login]${newline}${deflogin_grep}"
 
-    # UMASK 설정 확인 대상 파일 목록 (Solaris: /etc/default/login 추가됨)
+    # UMASK 설정 확인 대상 파일 목록 (프로파일 계열)
     local umask_files=(
         "/etc/profile"
         "/etc/.login"
-        "/etc/default/login"
         "/root/.bashrc"
         "/root/.profile"
     )
 
-    # 각 설정 파일에서 UMASK 값 추출
-    declare -A found_umasks
-
+    # 각 설정 파일에서 umask 값 추출 (파일 내 모든 설정 중 마지막 값 적용)
     for umask_file in "${umask_files[@]}"; do
         # 와일드카드 처리
         for actual_file in $umask_file; do
-            if [ -f "$actual_file" ]; then
+            if [ -f "$actual_file" ] && [ -r "$actual_file" ]; then
                 ((config_files_checked++)) || true
-                # umask 또는 UMASK 키워드로 검색 (주석 제외)
-                local umask_value=$(grep "^[[:space:]]*umask" "$actual_file" 2>/dev/null | grep -v "^[[:space:]]*#" | awk '{print $2}' | head -1)
+                local umask_value
+                umask_value=$(grep "^[[:space:]]*umask[[:space:]]" "$actual_file" 2>/dev/null | awk '{print $2}' | tail -1) || true
 
                 if [ -n "$umask_value" ]; then
-                    found_umasks["$actual_file"]="$umask_value"
+                    record_umask_value "$actual_file" "$umask_value"
                 fi
             fi
         done 2>/dev/null || true
     done 2>/dev/null || true
 
-    # 발견된 UMASK 값 검증
-    local insecure_found=false
-    local secure_found=false
-    local all_umask_values=""
-
-    for file in "${!found_umasks[@]}"; do
-        local value="${found_umasks[$file]}"
-        all_umask_values="${all_umask_values}${file}: ${value}, "
-
-        # UMASk 값 검증 (022, 027 권장)
-        if [ "$value" = "022" ] || [ "$value" = "027" ]; then
-            secure_found=true
-        else
-            insecure_found=true
+    # Solaris 기본 정책: /etc/default/login 의 UMASK=NNN 확인 (대문자, = 구분)
+    if [ -f /etc/default/login ] && [ -r /etc/default/login ]; then
+        ((config_files_checked++)) || true
+        local deflogin_value
+        deflogin_value=$(grep "^[[:space:]]*UMASK=" /etc/default/login 2>/dev/null | tail -1 | awk -F= '{print $2}' | tr -d '[:space:]') || true
+        if [ -n "$deflogin_value" ]; then
+            record_umask_value "/etc/default/login" "$deflogin_value"
         fi
-    done || true
+    fi
 
-    # 최종 판정
-    if [ $config_files_checked -eq 0 ]; then
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="UMASK 설정 파일을 찾을 수 없음 (시스템 기본값 확인 필요)"
-        command_executed="grep -h 'umask' /etc/profile /etc/.login /etc/default/login /root/.bashrc 2>/dev/null"
-    elif [ "$insecure_found" = true ]; then
+    # 최종 판정 (가장 허용적인 값 기준)
+    command_executed="grep '^umask' /etc/profile /etc/.login /root/.bashrc /root/.profile; grep '^UMASK=' /etc/default/login"
+    if [ "$insecure_found" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="부적절한 UMASK 설정 존재: ${all_umask_values%, } (022 또는 027 권장)"
-        command_result="${all_umask_values%, }"
-        command_executed="grep -h '^umask' /etc/profile /etc/.login /etc/default/login /root/.bashrc 2>/dev/null"
+        inspection_summary="UMASK 값이 022 미만으로 설정된 항목 존재: ${all_umask_values%, } (022 이상 필요)"
+    elif [ "$unparseable_found" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="8진수로 해석할 수 없는 UMASK 값이 존재하여 수동 확인 필요: ${all_umask_values%, }"
     elif [ "$secure_found" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="적절한 UMASK 설정됨: ${all_umask_values%, } (022 또는 027)"
-        command_result="${all_umask_values%, }"
-        command_executed="grep -h '^umask' /etc/profile /etc/.login /etc/default/login /root/.bashrc 2>/dev/null"
+        inspection_summary="모든 UMASK 설정이 022 이상으로 적절함: ${all_umask_values%, }"
+    elif [ "$config_files_checked" -gt 0 ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="설정 파일에 UMASK 값이 설정되어 있지 않음 (UMASK 022 이상 명시 설정 필요)"
     else
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="UMASK 설정 없음 (기본값 확인 필요: 보통 022)"
-        command_result="UMASK setting not found"
-        command_executed="grep -h 'umask' /etc/profile /etc/.login /etc/default/login /root/.bashrc 2>/dev/null"
+        inspection_summary="UMASK 설정 파일을 읽을 수 없어 수동 확인 필요"
     fi
 
     # echo ""

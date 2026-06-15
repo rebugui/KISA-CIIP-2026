@@ -42,24 +42,160 @@ diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
     local diagnosis_result="MANUAL"
     local status="수동진단"
-    local inspection_summary="Apache 서버의 X-Frame-Options 헤더 설정 설정을 수동으로 확인해야 합니다. 웹 서버 설정 파일에서 해당 헤더 또는 메서드 제한을 검토하세요."
+    local inspection_summary=""
     local command_result=""
     local command_executed=""
-    
-    if [ 24 -eq 23 ]; then
-        # HTTP Methods restriction
-        inspection_summary="HTTP 메서드 제한 설정을 확인하세요. Apache: LimitExcept, Nginx: limit_except, IIS: Request Filtering, Tomcat: security-constraint"
-    elif [ 24 -eq 24 ]; then
-        # X-Frame-Options
-        inspection_summary="X-Frame-Options 헤더 설정을 확인하세요. Apache: Header always set X-Frame-Options DENY, Nginx: add_header X-Frame-Options DENY"
-    elif [ 24 -eq 25 ]; then
-        # X-XSS-Protection
-        inspection_summary="X-XSS-Protection 헤더 설정을 확인하세요. Apache/Nginx: add_header X-XSS-Protection '1; mode=block'"
-    elif [ 24 -eq 26 ]; then
-        # X-Content-Type-Options
-        inspection_summary="X-Content-Type-Options 헤더 설정을 확인하세요. Apache/Nginx: add_header X-Content-Type-Options nosniff"
+
+    # Apache 실행 여부 확인 (미실행 시 점검 대상 아님)
+    local apache_running=false
+    if command -v pgrep >/dev/null 2>&1; then
+        if pgrep -x "httpd" >/dev/null 2>&1 || pgrep -x "apache2" >/dev/null 2>&1; then
+            apache_running=true
+        fi
+    else
+        if ps aux 2>/dev/null | grep -E 'httpd|apache2' | grep -v grep | grep -q "httpd\|apache2"; then
+            apache_running=true
+        fi
     fi
-    
+
+    if [ "$apache_running" = false ]; then
+        diagnosis_result="N/A"
+        status="N/A"
+        inspection_summary="Apache 웹 서버가 실행 중이 아닙니다."
+        command_result="Apache process not found"
+        command_executed="pgrep -x 'httpd|apache2'"
+
+        save_dual_result \
+            "${ITEM_ID}" \
+            "${ITEM_NAME}" \
+            "${status}" \
+            "${diagnosis_result}" \
+            "${inspection_summary}" \
+            "${command_result}" \
+            "${command_executed}" \
+            "${GUIDELINE_PURPOSE}" \
+            "${GUIDELINE_THREAT}" \
+            "${GUIDELINE_CRITERIA_GOOD}" \
+            "${GUIDELINE_CRITERIA_BAD}" \
+            "${GUIDELINE_REMEDIATION}"
+
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
+
+    # 별도 업로드 디렉터리 탐색 및 일반 사용자 접근 권한 점검
+    # 판단기준(가이드): 별도 업로드 경로 사용 + 일반 사용자 접근 권한 미부여 -> 양호
+    #                  별도 경로 미사용 또는 일반 사용자 접근 권한 부여 -> 취약
+    # 결정 신호: 업로드 디렉터리 권한의 'others' 비트(world 접근 허용 시 일반 사용자 접근 가능 -> 취약)
+    # 웹 루트(DocumentRoot) 후보를 수집한다. 업로드 경로가 웹 루트 내부에 있으면
+    # criteria_bad('별도의 업로드 경로를 사용하지 않음')에 해당하여 취약으로 판단한다.
+    local web_roots=()
+    local conf_candidates=(
+        "/etc/apache2/apache2.conf"
+        "/etc/apache2/sites-enabled/"*.conf
+        "/etc/httpd/conf/httpd.conf"
+        "/etc/httpd/conf.d/"*.conf
+        "/usr/local/apache2/conf/httpd.conf"
+    )
+    for conf_pat in "${conf_candidates[@]}"; do
+        for conf_file in $conf_pat; do
+            [ -f "${conf_file}" ] || continue
+            [ -r "${conf_file}" ] || continue
+            while IFS= read -r dr; do
+                [ -n "${dr}" ] && web_roots+=("${dr%/}")
+            done < <(grep -hiE '^[[:space:]]*DocumentRoot[[:space:]]+' "${conf_file}" 2>/dev/null \
+                | grep -vE '^[[:space:]]*#' \
+                | sed -E 's/^[[:space:]]*DocumentRoot[[:space:]]+//; s/^"//; s/"[[:space:]]*$//; s/[[:space:]]*$//')
+        done
+    done
+    # 설정에서 못 읽었을 때를 대비한 기본 웹 루트 후보(잘 알려진 경로)
+    local default_roots=("/var/www/html" "/usr/local/apache2/htdocs" "/var/www")
+
+    is_inside_web_root() {
+        # $1 업로드 경로가 알려진/기본 웹 루트의 내부(또는 동일)인지 판별
+        local up="${1%/}"
+        local root
+        for root in "${web_roots[@]}" "${default_roots[@]}"; do
+            [ -n "${root}" ] || continue
+            if [ "${up}" = "${root}" ] || case "${up}/" in "${root}/"*) true;; *) false;; esac; then
+                printf '%s' "${root}"
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    local candidate_dirs=(
+        "/var/www/html/uploads"
+        "/var/www/html/upload"
+        "/usr/local/apache2/htdocs/uploads"
+        "/usr/local/apache2/htdocs/upload"
+        "/var/www/uploads"
+        "/data/uploads"
+        "/srv/uploads"
+        "/var/uploads"
+    )
+    local found_dir=""
+    local dirs_checked=""
+    local has_world_access=false
+    local inside_web_root=false
+    local inside_evidence=""
+
+    for d in "${candidate_dirs[@]}"; do
+        if [ -d "${d}" ]; then
+            local perm=$(stat -c "%a" "${d}" 2>/dev/null || echo "")
+            if [ -n "${perm}" ]; then
+                found_dir="${d}"
+                local matched_root
+                if matched_root=$(is_inside_web_root "${d}"); then
+                    inside_web_root=true
+                    inside_evidence="${inside_evidence}"$'\n'"[INSIDE-WEBROOT] ${d} ⊂ ${matched_root}"
+                    dirs_checked="${dirs_checked}"$'\n'"[DIR] ${d}: ${perm} (웹 루트 내부: ${matched_root})"
+                else
+                    dirs_checked="${dirs_checked}"$'\n'"[DIR] ${d}: ${perm} (웹 루트 외부)"
+                fi
+                # others 권한 비트 (3자리 또는 4자리 8진수의 마지막 자리)
+                local others_bit="${perm: -1}"
+                if [ "${others_bit}" != "0" ]; then
+                    has_world_access=true
+                fi
+            fi
+        fi
+    done
+
+    command_executed="grep DocumentRoot <apache conf>; stat -c '%a' <upload dir candidates> 2>/dev/null"
+
+    if [ -z "${found_dir}" ]; then
+        # 별도 업로드 경로를 자동으로 식별할 수 없음 -> 정책/구성 수동 확인 필요
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        command_result="No upload directory candidate found"
+        inspection_summary="업로드 디렉터리를 자동으로 식별하지 못했습니다. 애플리케이션이 사용하는 업로드 경로가 웹 루트(DocumentRoot)와 분리되어 있는지, 해당 경로에 일반 사용자 접근 권한이 제한(예: chmod 750)되어 있는지 수동으로 확인하세요."
+    elif [ "${inside_web_root}" = true ]; then
+        # criteria_bad: 별도의 업로드 경로를 사용하지 않음(웹 루트 내부 업로드)
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        command_result="${dirs_checked}"
+        inspection_summary="업로드 디렉터리가 웹 루트(DocumentRoot) 내부에 위치하여 별도의 업로드 경로를 사용하지 않습니다. 웹 루트 외부의 별도 경로로 이전하고 일반 사용자 접근 권한을 제한하세요.${inside_evidence}"
+    elif [ "${has_world_access}" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        command_result="${dirs_checked}"
+        inspection_summary="업로드 디렉터리에 일반 사용자(others) 접근 권한이 부여되어 있습니다. chmod 750 등으로 일반 사용자 접근 권한을 제거하고 적절한 소유자를 지정하세요."
+    elif [ "${#web_roots[@]}" -eq 0 ]; then
+        # 업로드 경로가 기본 웹 루트 외부이지만 DocumentRoot를 설정에서 확인하지 못해
+        # 분리 여부를 단정할 수 없음 -> GOOD 대신 MANUAL
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        command_result="${dirs_checked}"
+        inspection_summary="업로드 디렉터리가 기본 웹 루트 외부로 보이나 Apache 설정에서 DocumentRoot를 확인하지 못해 웹 루트와의 분리 여부를 단정할 수 없습니다. DocumentRoot 경로와 업로드 경로의 분리 여부를 수동으로 확인하세요."
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        command_result="${dirs_checked}"
+        inspection_summary="별도의 업로드 디렉터리가 웹 루트(DocumentRoot) 외부에 존재하며 일반 사용자(others) 접근 권한이 부여되지 않았습니다. (판단기준 충족)"
+    fi
+
     # Run-all 모드 확인
     save_dual_result \
         "${ITEM_ID}" \

@@ -78,10 +78,14 @@ diagnose() {
     # 2. Telnet 서비스 실행 확인 (HP-UX: inetd, ps -ef, netstat)
     # -------------------------------------------------------------------------
     # 2-1. inetd 프로세스 확인 (HP-UX는 inetd가 Telnet을 담당)
+    # inetd 실행만으로는 Telnet 사용으로 볼 수 없음 → /etc/inetd.conf에서 telnet 활성 라인까지 확인
     local inetd_ps_output=$(ps -ef 2>/dev/null | grep -E "inetd" | grep -v grep || echo "")
     if [ -n "$inetd_ps_output" ]; then
-        telnet_active=true
-        telnet_service_output="[inetd Process]${newline}${inetd_ps_output}${newline}${newline}"
+        local inetd_telnet_conf=$(grep -E "^[[:space:]]*telnet[[:space:]]" /etc/inetd.conf 2>/dev/null || echo "")
+        if [ -n "$inetd_telnet_conf" ]; then
+            telnet_active=true
+            telnet_service_output="[inetd Process]${newline}${inetd_ps_output}${newline}[inetd.conf telnet]${newline}${inetd_telnet_conf}${newline}${newline}"
+        fi
     fi
 
     # 2-2. telnetd 프로세스 확인
@@ -92,7 +96,9 @@ diagnose() {
     fi
 
     # 2-3. 포트 확인 (HP-UX: netstat -an | grep :23)
-    local telnet_port_output=$(netstat -an 2>/dev/null | grep -E "\.23 " || echo "")
+    # HP-UX netstat는 주소를 "*.23" 형태로 표시 → 포트 23이 LISTEN 상태이면 telnet 활성으로 판정
+    # (구분자 [.:] 뒤 23 다음에 공백, 동일 라인에 LISTEN 존재 — U-52 SAFE 패턴과 동일)
+    local telnet_port_output=$(netstat -an 2>/dev/null | grep -E '[.:]23[[:space:]].*LISTEN' || echo "")
     if [ -n "$telnet_port_output" ]; then
         telnet_active=true
         telnet_service_output="${telnet_service_output}[Telnet Port]${newline}${telnet_port_output}${newline}${newline}"
@@ -115,6 +121,7 @@ diagnose() {
         # 서비스 실행 중인 경우 상세 진단
         # ==========================================================================
         local ssh_secure=false
+        local ssh_manual=false
         local telnet_secure=false
         local config_details=""
         local ssh_config_output=""
@@ -124,15 +131,23 @@ diagnose() {
     # 1. SSH 진단 (SSH 서비스 실행 중인 경우에만 검사)
     # -------------------------------------------------------------------------
     if [ "$ssh_active" = true ]; then
+        # HP-UX 표준 경로(/opt/ssh/etc/sshd_config) 우선, 그 외 /etc/ssh/sshd_config
         local sshd_config_file="/etc/ssh/sshd_config"
+        local cfg_candidate
+        for cfg_candidate in /opt/ssh/etc/sshd_config /etc/ssh/sshd_config; do
+            if [ -f "$cfg_candidate" ]; then
+                sshd_config_file="$cfg_candidate"
+                break
+            fi
+        done
 
         # SSH 설정 파일 존재 확인
         if [ ! -f "$sshd_config_file" ]; then
-            diagnosis_result="MANUAL"
-            status="수동진단"
-            inspection_summary="SSH 설정 파일 없음 (${sshd_config_file})"
+            # 설정 파일을 찾지 못함 → 수동진단 대상 (최종 판정 단계에서 반영)
+            ssh_manual=true
+            config_details="[SSH] 설정 파일 없음 (/opt/ssh/etc/sshd_config, /etc/ssh/sshd_config)"
 
-            local ssh_config_ls=$(ls -l "$sshd_config_file" 2>/dev/null || echo "File not found: $sshd_config_file")
+            local ssh_config_ls=$(ls -l /opt/ssh/etc/sshd_config /etc/ssh/sshd_config 2>/dev/null || echo "File not found: sshd_config")
             ssh_config_output="${ssh_config_ls}"
             ssh_secure=false
         else
@@ -153,10 +168,10 @@ diagnose() {
             else
                 config_details="[SSH] PermitRootLogin ${permit_root_setting}"
                 case "$permit_root_setting" in
-                    no|prohibit-password|without-password)
+                    no)
                         ssh_secure=true
                         ;;
-                    yes)
+                    yes|prohibit-password|without-password)
                         ssh_secure=false
                         ;;
                     *)
@@ -243,8 +258,8 @@ diagnose() {
     # -------------------------------------------------------------------------
     # SSH 부분
     if [ "$ssh_active" = true ]; then
-        command_result="${ssh_service_output}[/etc/ssh/sshd_config]${newline}${ssh_config_output}${newline}${newline}"
-        command_executed="ps -ef | grep sshd; grep -E '^[\\s]*PermitRootLogin' /etc/ssh/sshd_config"
+        command_result="${ssh_service_output}[${sshd_config_file}]${newline}${ssh_config_output}${newline}${newline}"
+        command_executed="ps -ef | grep sshd; grep -E '^[\\s]*PermitRootLogin' ${sshd_config_file}"
     else
         local ssh_ps_check=$(ps -ef 2>/dev/null | grep -E "sshd.*-D|sshd$" | grep -v grep || echo "No SSH process found")
         command_result="[SSH Service Status]${newline}${ssh_ps_check}${newline}${newline}"
@@ -268,6 +283,11 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="root 계정 원격 접속 제한 적절 (${config_details})"
+    elif [ "$ssh_manual" = true ] && [ "$telnet_secure" = true ]; then
+        # SSH 설정 파일 미확인(수동진단)이며 다른 확인된 취약 요소 없음 → MANUAL 유지
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="SSH 설정 파일을 찾을 수 없어 PermitRootLogin 설정을 확인하지 못함 - 수동 점검 필요 (${config_details})"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

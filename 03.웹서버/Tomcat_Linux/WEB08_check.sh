@@ -11,7 +11,7 @@
 # @Platform    : Tomcat_Linux
 # @Severity    : 하
 # @Title       : 웹 서비스 파일 업로드 및 다운로드 용량 제한
-# @Description : 웹 서비스 접속 통제 설정 여부 점검
+# @Description : 파일 업로드/다운로드 용량 제한(maxPostSize/multipart) 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 
@@ -42,12 +42,11 @@ GUIDELINE_REMEDIATION="파일 업로드 및 다운로드 용량을 허용 가능
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local has_connection_limit=false
 
         # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -82,38 +81,88 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
+    # 파일 업로드 용량 제한 점검
+    # 가이드라인 기준: server.xml Connector의 maxPostSize 설정 또는
+    # web.xml multipart-config의 max-file-size/max-request-size 설정으로 업로드 용량 제한
+    # (criteria_bad: 파일 업로드 및 다운로드 용량을 제한하지 않은 경우 = 무제한 업로드)
+    # 참고: Tomcat에서 maxPostSize <= 0 은 무제한을 의미하므로 취약
     local server_xml_locations=(
         "/etc/tomcat*/server.xml"
         "/var/lib/tomcat*/conf/server.xml"
         "/usr/share/tomcat*/conf/server.xml"
     )
+    local web_xml_locations=(
+        "/etc/tomcat*/web.xml"
+        "/var/lib/tomcat*/conf/web.xml"
+        "/usr/share/tomcat*/conf/web.xml"
+    )
 
-    local connector_config=""
+    local upload_config=""
+    local has_upload_limit=false
+    local has_unlimited=false
+    local config_found=false
 
+    # server.xml: maxPostSize 점검
     for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                local found_connector=$(grep -E "maxThreads|acceptCount|maxConnections" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
-                if [ -n "${found_connector}" ]; then
-                    connector_config="${connector_config}"$'\n'"${found_connector}"
-                    has_connection_limit=true
+                config_found=true
+                local found_maxpost=$(grep -iE "maxPostSize" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                if [ -n "${found_maxpost}" ]; then
+                    upload_config="${upload_config}"$'\n'"[server.xml] ${found_maxpost}"
+                    # maxPostSize 값 추출 (음수 또는 0 이면 무제한 = 취약)
+                    local maxpost_val=$(echo "${found_maxpost}" | grep -oiE 'maxPostSize\s*=\s*"-?[0-9]+"' | grep -oE '\-?[0-9]+' | head -1 || true)
+                    if [ -n "${maxpost_val}" ]; then
+                        if [ "${maxpost_val}" -gt 0 ] 2>/dev/null; then
+                            has_upload_limit=true
+                        else
+                            has_unlimited=true
+                        fi
+                    fi
                 fi
                 break 2
             fi
         done
     done
 
-    command_executed="grep -E 'maxThreads|acceptCount' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -3"
-    command_result="${connector_config:-No connection limit found}"
+    # web.xml: multipart-config max-file-size / max-request-size 점검
+    for xml_pattern in "${web_xml_locations[@]}"; do
+        for xml_file in $xml_pattern; do
+            if [ -f "${xml_file}" ]; then
+                config_found=true
+                local found_multipart=$(grep -iE "max-file-size|max-request-size|multipart-config" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                if [ -n "${found_multipart}" ]; then
+                    # max-file-size 또는 max-request-size에 양수 값이 설정되어 있는지 확인
+                    local size_val=$(grep -ioE "<max-(file|request)-size>\s*[0-9]+\s*</max-(file|request)-size>" "${xml_file}" 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)
+                    if [ -n "${size_val}" ] && [ "${size_val}" -gt 0 ] 2>/dev/null; then
+                        upload_config="${upload_config}"$'\n'"[web.xml] ${found_multipart}"
+                        has_upload_limit=true
+                    fi
+                fi
+                break 2
+            fi
+        done
+    done
 
-    if [ "${has_connection_limit}" = true ]; then
+    command_executed="grep -iE 'maxPostSize' /etc/tomcat*/server.xml 2>/dev/null; grep -iE 'max-file-size|max-request-size' /etc/tomcat*/web.xml 2>/dev/null | head -5"
+    command_result="${upload_config:-No upload size limit (maxPostSize / multipart max-file-size) found}"
+
+    if [ "${config_found}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat 설정 파일(server.xml/web.xml)을 찾을 수 없습니다. Connector의 maxPostSize 또는 web.xml multipart-config의 max-file-size 설정으로 업로드 용량이 제한되어 있는지 수동으로 확인하세요."
+    elif [ "${has_upload_limit}" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="동시 연결 제한(maxThreads/acceptCount)이 설정되어 있습니다. (보안 권고사항 준수)"
+        inspection_summary="파일 업로드 용량 제한(maxPostSize 또는 multipart max-file-size)이 설정되어 있습니다. (보안 권고사항 준수)"
+    elif [ "${has_unlimited}" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="maxPostSize가 0 이하(무제한)로 설정되어 있어 파일 업로드 용량이 제한되지 않습니다. maxPostSize를 양수 값으로 설정하거나 web.xml multipart-config로 용량 제한 권장."
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="동시 연결 제한이 설정되지 않았습니다. DoS 공격 방지를 위한 연결 제한 설정 권장."
+        inspection_summary="파일 업로드 용량 제한(maxPostSize 또는 multipart max-file-size)이 설정되지 않았습니다. 업로드/다운로드 용량 제한 설정 권장."
     fi
 
     # Run-all 모드 확인

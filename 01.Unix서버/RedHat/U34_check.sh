@@ -50,7 +50,9 @@ diagnose() {
     local xinetd_file="/etc/xinetd.d/finger"
     local xinetd_status=""
     if [ -f "$xinetd_file" ]; then
-        xinetd_status=$(grep -i "disable" "$xinetd_file" | xargs || echo "설정 없음")
+        # 주석 제외 disable 설정값 추출 (마지막 설정값 기준, 없으면 빈 값 = xinetd 기본 활성)
+        xinetd_status=$(grep -E '^[[:space:]]*disable' "$xinetd_file" 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
+        xinetd_status=$(echo "$xinetd_status" | tr '[:upper:]' '[:lower:]')
     fi
 
     # 3. 판정 로직
@@ -58,7 +60,7 @@ diagnose() {
         status="취약"
         diagnosis_result="VULNERABLE"
         inspection_summary="Finger 서비스 프로세스가 실행 중입니다."
-    elif [ -f "$xinetd_file" ] && [[ "$xinetd_status" != *"yes"* ]]; then
+    elif [ -f "$xinetd_file" ] && [ "$xinetd_status" != "yes" ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
         inspection_summary="Finger 서비스가 xinetd에서 활성화되어 있습니다."

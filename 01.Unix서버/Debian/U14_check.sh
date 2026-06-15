@@ -42,6 +42,65 @@ GUIDELINE_CRITERIA_BAD="PATH 환경 변수에'.'이 맨 앞이나 중간에 포�
 GUIDELINE_REMEDIATION="root 계정의 환경 설정 파일(/.profile, /.bashrc 등)과 시스템 환경 설정 파일(/etc/profile 등)에 설정된 PATH 환경 변수에서 현재 디렉터리를 나타내는'.'을 PATH 환경 변수의 마지막으로 이동하도록 설정 ※ /etc/profile 파일,root 계정, 일반 사용자 계정의 환경 설정 파일을 순차적으로 검색하여 확인"
 
 # ============================================================================
+# PATH 점검 헬퍼 함수
+# ============================================================================
+
+# 환경 설정 파일에서 마지막 PATH 정의 값을 추출 (export/따옴표/주석 제거)
+extract_path_from_file() {
+    local config_file="$1"
+    local path_line=""
+
+    [ -f "$config_file" ] && [ -r "$config_file" ] || return 0
+    path_line=$(grep -E '^[[:space:]]*(export[[:space:]]+)?PATH=' "$config_file" 2>/dev/null | tail -n 1 \
+        | sed -e 's/^[[:space:]]*//' -e 's/^export[[:space:]]*//' -e 's/^PATH=//' \
+              -e 's/[[:space:]][[:space:]]*#.*$//' -e 's/[[:space:]]*$//' || true)
+    case "$path_line" in
+        \"*\") path_line="${path_line#\"}"; path_line="${path_line%\"}" ;;
+        \'*\') path_line="${path_line#\'}"; path_line="${path_line%\'}" ;;
+    esac
+    printf '%s' "$path_line"
+    return 0
+}
+
+# PATH 요소별 점검: 맨 앞/중간 위치의 '.' 또는 빈 요소만 취약으로 판정
+# - 가이드 조치 방법대로 '.'(또는 빈 요소)을 맨 마지막에 둔 경우는 양호
+# - PATH가 '.' 또는 빈 값 단독인 경우는 취약
+# 호출 측의 path_has_dot / path_issues 변수를 갱신함
+check_path_order() {
+    local path_value="$1"
+    local source_label="$2"
+    local -a path_elems=()
+    local elem_idx=0
+    local elem_count=0
+    local last_idx=0
+
+    # 뒤쪽 빈 요소 보존을 위해 sentinel을 붙여 분리
+    IFS=':' read -r -a path_elems <<< "${path_value}:__PATH_END__"
+    elem_count=$(( ${#path_elems[@]} - 1 ))
+    [ "$elem_count" -ge 1 ] || return 0
+    last_idx=$(( elem_count - 1 ))
+
+    if [ "$elem_count" -eq 1 ]; then
+        if [ "${path_elems[0]}" = "." ] || [ -z "${path_elems[0]}" ]; then
+            path_has_dot=true
+            path_issues="${path_issues}${source_label}: PATH가 '.'(현재 디렉터리) 단독으로 설정됨, "
+        fi
+        return 0
+    fi
+
+    for (( elem_idx = 0; elem_idx < last_idx; elem_idx++ )); do
+        if [ "${path_elems[$elem_idx]}" = "." ]; then
+            path_has_dot=true
+            path_issues="${path_issues}${source_label}: PATH $((elem_idx + 1))번째(맨 앞/중간) 위치에 '.' 포함, "
+        elif [ -z "${path_elems[$elem_idx]}" ]; then
+            path_has_dot=true
+            path_issues="${path_issues}${source_label}: PATH $((elem_idx + 1))번째(맨 앞/중간) 위치에 빈 경로(현재 디렉터리 의미) 포함, "
+        fi
+    done
+    return 0
+}
+
+# ============================================================================
 # 진단 함수
 # ============================================================================
 
@@ -65,35 +124,29 @@ diagnose() {
     local path_dirs_issues=""
 
     # 1) root 계정의 PATH 환경변수 확인
-    # /root/.bashrc, /root/.profile, /etc/profile 등에서 PATH 설정 확인
+    # root로 실행 시 런타임 PATH를 점검하고, root 환경 설정 파일의 PATH 정의도 함께 점검
     local root_path=""
+    local path_evidence=""
+    local checked_files=""
+    local config_file=""
+    local extracted=""
 
-    # root로 su하여 PATH 확인 (실제 환경에서만 작동)
     if [ "$EUID" -eq 0 ]; then
         root_path="$PATH"
-    else
-        # 현재 사용자가 root가 아닌 경우, 설정 파일에서 확인
-        if [ -f /root/.bashrc ]; then
-            root_path=$(grep "^export PATH=" /root/.bashrc 2>/dev/null | sed 's/export PATH=//')
-        fi
-        if [ -z "$root_path" ] && [ -f /root/.profile ]; then
-            root_path=$(grep "^PATH=" /root/.profile 2>/dev/null | sed 's/PATH=//')
-        fi
+        path_evidence="런타임 PATH=${root_path}; "
+        check_path_order "$root_path" "런타임 PATH"
     fi
 
-    # PATH에 "." 또는 "::" (빈 디렉토리, 현재 디렉토리 의미) 포함 확인
-    if [ -n "$root_path" ]; then
-        # 콜론으로 구분된 PATH 검사
-        local old_ifs="$IFS"
-        IFS=':'
-        for path_dir in $root_path; do
-            if [ "$path_dir" = "." ] || [ -z "$path_dir" ]; then
-                path_has_dot=true
-                path_issues="${path_issues}PATH에 현재 디렉토리(.) 또는 빈 경로 포함, "
-            fi
-        done || true
-        IFS="$old_ifs"
-    fi
+    for config_file in /.profile /root/.bash_profile /root/.bashrc /root/.profile /etc/profile; do
+        [ -f "$config_file" ] && [ -r "$config_file" ] || continue
+        checked_files="${checked_files}${config_file} "
+        extracted=$(extract_path_from_file "$config_file")
+        if [ -n "$extracted" ]; then
+            check_path_order "$extracted" "$config_file"
+            path_evidence="${path_evidence}${config_file}: PATH=${extracted}; "
+            [ -n "$root_path" ] || root_path="$extracted"
+        fi
+    done
 
     # 2) root 홈 디렉토리 권한 확인
     local root_home="/root"
@@ -140,20 +193,26 @@ diagnose() {
     if [ "$path_has_dot" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="root PATH에 현재 디렉토리(.) 포함: ${path_issues%, }"
-        command_result="${path_issues%, } | ${root_home_perms}"
-        command_executed="echo \$PATH | grep ':' | tr ':' '\\n' | grep '^.$'"
-    elif [ -n "$path_dirs_issues" ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="PATH 디렉토리 권한 문제: ${path_dirs_issues%, }"
-        command_result="${root_home_perms} | ${path_dirs_issues%, }"
-        command_executed="stat -c '%a:%n' \$(echo \$PATH | tr ':' ' ')"
+        inspection_summary="root PATH 맨 앞 또는 중간에 '.'(현재 디렉터리) 또는 빈 경로 포함: ${path_issues%, }"
+        command_result="${path_issues%, } | ${path_evidence}${root_home_perms}"
+        command_executed="echo \$PATH; grep -E '^(export )?PATH=' /root/.profile /root/.bashrc /etc/profile"
+    elif [ -z "$root_path" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="root 권한이 아니고 root 환경 설정 파일에서 PATH를 확인할 수 없어 root PATH 수동 점검 필요"
+        command_result="확인 시도 파일: ${checked_files:-접근 가능한 파일 없음} | ${root_home_perms}"
+        command_executed="grep -E '^(export )?PATH=' /root/.profile /root/.bashrc /etc/profile"
     else
+        # 판단 기준은 PATH 내 '.'/빈 경로 위치이므로 PATH 디렉토리 권한 문제는
+        # 판정에 반영하지 않고 참고 증거로만 기록 (기준 외 과탐 방지)
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="root PATH 및 홈 디렉토리 보안 설정 적절 (${root_home_perms})"
-        command_result="${root_home_perms}"
+        if [ -n "$path_dirs_issues" ]; then
+            inspection_summary="root PATH 맨 앞/중간에 '.' 또는 빈 경로 없음 (참고: PATH 디렉토리 권한 ${path_dirs_issues%, })"
+        else
+            inspection_summary="root PATH 맨 앞/중간에 '.' 또는 빈 경로 없음 (${root_home_perms})"
+        fi
+        command_result="${path_evidence}${root_home_perms}${path_dirs_issues:+ | 참고: ${path_dirs_issues%, }}"
         command_executed="echo \$PATH && stat -c '%a:%U:%G' /root"
     fi
 

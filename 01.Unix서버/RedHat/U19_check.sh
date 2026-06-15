@@ -49,13 +49,17 @@ diagnose() {
         local file_perm=$(stat -c "%a" "$file_path")
         local ls_out=$(ls -l "$file_path")
 
-        if [ "$owner_name" != "root" ] || [ "$file_perm" -gt 644 ]; then
+        # 644보다 강한 권한(600/400 등)은 양호, 644에 없는 추가 비트(쓰기 등)는 취약
+        if [ "$owner_name" != "root" ] || ! [[ "$file_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$file_perm & ~8#644 & 07777 ))" -ne 0 ]; then
             status="취약"
             diagnosis_result="VULNERABLE"
             inspection_summary="/etc/hosts 파일의 소유자 또는 권한 설정이 부적절합니다."
         fi
         command_result="설정 현황: [ ${ls_out} ]"
     else
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="/etc/hosts 파일이 존재하지 않아 자동 점검이 불가합니다. 수동 확인이 필요합니다."
         command_result="/etc/hosts 파일이 존재하지 않습니다."
     fi
 

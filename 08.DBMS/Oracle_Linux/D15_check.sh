@@ -75,9 +75,11 @@ diagnose() {
     local diagnosis_result="MANUAL" status="수동진단" inspection_summary="" command_result="" command_executed=""
 
     if ! systemctl is-active oracle &>/dev/null && ! pgrep -f "ora_pmon" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="서비스 미실행으로 리스너 로그/trace 파일 권한 확인 불가 (수동진단 필요). 서비스 시작 후 listener.log, listener.trc, *.trc 파일이 oracle 소유, 644 또는 600 권한인지 수동으로 확인하세요."
+        command_result="Oracle process not found"
+        command_executed="systemctl is-active oracle; pgrep -f ora_pmon"
         if declare -f save_dual_result >/dev/null 2>&1; then
             save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
         fi

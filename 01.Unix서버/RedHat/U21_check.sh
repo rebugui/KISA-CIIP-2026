@@ -52,14 +52,17 @@ diagnose() {
         local perm=$(stat -c "%a" "$target")
         local ls_out=$(ls -l "$target")
 
-        # 2. 판정 로직: 소유자 root 및 권한 640 이하
-        if [ "$owner" != "root" ] || [ "$perm" -gt 640 ]; then
+        # 2. 판정 로직: 소유자 root/bin/sys 및 권한 640 이하
+        if [[ ! "$owner" =~ ^(root|bin|sys)$ ]] || ! [[ "$perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perm & ~8#640 & 07777 ))" -ne 0 ]; then
             status="취약"
             diagnosis_result="VULNERABLE"
             inspection_summary="로그 설정 파일의 소유자 또는 권한 설정이 부적절합니다."
         fi
         command_result="설정 현황: [ ${ls_out} ]"
     else
+        status="N/A"
+        diagnosis_result="N/A"
+        inspection_summary="로그 설정 파일(/etc/rsyslog.conf, /etc/syslog.conf)이 존재하지 않습니다 (journald 단독 운용 등 (r)syslog 미사용 환경)."
         command_result="로그 설정 파일(/etc/syslog.conf 또는 rsyslog.conf)이 존재하지 않습니다."
     fi
 

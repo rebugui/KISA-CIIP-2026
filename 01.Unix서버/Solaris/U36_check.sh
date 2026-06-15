@@ -11,7 +11,7 @@
 # @Platform    : Solaris
 # @Severity    : 상
 # @Title       : r 계열 서비스 비활성화
-# @Description : TMOUT <= 600 seconds 확인
+# @Description : rlogin, rsh, rexec 서비스 비활성화 여부 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,68 +57,87 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # /etc/profile, /etc/bash.bashrc에서 TMOUT 또는 TIMEOUT 확인
+    # r 계열 서비스 (rsh, rlogin, rexec) 비활성화 여부 점검
+    # 가이드라인: 불필요한 r 계열 서비스가 비활성화된 경우 양호
+    # Solaris 10+: SMF(svcs/inetadm), Solaris 9 이하: /etc/inetd.conf
 
-    local is_secure=false
-    local config_details=""
-    local tmout_value=""
-    local timeout_value=""
+    local r_services_active=false
+    local probe_available=false
+    local active_services=""
+    local raw_output=""
+    local r_fmri_pattern='network/(shell|login|rexec)|rsh|rlogin|rexec'
 
-    # 1) /etc/profile 확인
-    if [ -f /etc/profile ]; then
-        local profile_tmout=$(grep -E "^TMOUT=" /etc/profile | awk -F= '{print $2}' | tr -d ' ')
-        if [ -n "$profile_tmout" ]; then
-            tmout_value=$profile_tmout
-        fi
-        local profile_timeout=$(grep -E "^TIMEOUT=" /etc/profile | awk -F= '{print $2}' | tr -d ' ')
-        if [ -n "$profile_timeout" ]; then
-            timeout_value=$profile_timeout
-        fi
-    fi
-
-    # 2) /etc/.login 확인 (Solaris csh)
-    if [ -z "$tmout_value" ] && [ -f /etc/.login ]; then
-        local login_tmout=$(grep -E "^setenv TMOUT" /etc/.login | awk '{print $3}' | tr -d ' ')
-        if [ -n "$login_tmout" ]; then
-            tmout_value=$login_tmout
-        fi
-    fi
-
-    # 값 검증 (TMOUT 또는 TIMEOUT)
-    local final_value=""
-    if [ -n "$tmout_value" ]; then
-        final_value=$tmout_value
-        config_details="TMOUT=${tmout_value} seconds"
-    elif [ -n "$timeout_value" ]; then
-        final_value=$timeout_value
-        config_details="TIMEOUT=${timeout_value} seconds"
-    fi
-
-    # 최종 판정 (600초 = 10분 이하이면 양호)
-    if [ -n "$final_value" ]; then
-        if [ "$final_value" -le 600 ]; then
-            is_secure=true
+    # 1) SMF 서비스 상태 확인 (Solaris 10 이상)
+    if command -v svcs >/dev/null 2>&1; then
+        probe_available=true
+        local svcs_out
+        svcs_out=$(svcs -H -o state,fmri 2>/dev/null | grep -E "${r_fmri_pattern}" || echo "")
+        local svcs_online
+        svcs_online=$(echo "$svcs_out" | grep -E '^(online|degraded)[[:space:]]' || echo "")
+        if [ -n "$svcs_online" ]; then
+            r_services_active=true
+            active_services="${active_services}SMF(svcs) "
+            raw_output="${raw_output}[svcs -H -o state,fmri]${newline}${svcs_online}${newline}"
+        else
+            raw_output="${raw_output}[svcs -H -o state,fmri] r 계열 서비스(shell/login/rexec) online 항목 없음${newline}"
         fi
     fi
 
-    if [ "$is_secure" = true ]; then
+    # 2) inetadm 확인 (svcs 부재 시 보조)
+    if [ "$probe_available" = false ] && command -v inetadm >/dev/null 2>&1; then
+        probe_available=true
+        local inetadm_out
+        inetadm_out=$(inetadm 2>/dev/null | grep -E 'network/(shell|login|rexec)' | grep -i 'enabled' || echo "")
+        if [ -n "$inetadm_out" ]; then
+            r_services_active=true
+            active_services="${active_services}inetadm(enabled) "
+            raw_output="${raw_output}[inetadm]${newline}${inetadm_out}${newline}"
+        else
+            raw_output="${raw_output}[inetadm] r 계열 서비스(shell/login/rexec) enabled 항목 없음${newline}"
+        fi
+    fi
+
+    # 3) 레거시 /etc/inetd.conf 확인 (Solaris 9 이하, 주석 해제된 shell/login/exec = 활성화)
+    if [ "$probe_available" = false ] && [ -r /etc/inetd.conf ]; then
+        probe_available=true
+        local inetd_r
+        inetd_r=$(grep -E '^(shell|login|exec)[[:space:]]' /etc/inetd.conf 2>/dev/null || echo "")
+        if [ -n "$inetd_r" ]; then
+            r_services_active=true
+            active_services="${active_services}inetd.conf(shell/login/exec) "
+            raw_output="${raw_output}[/etc/inetd.conf]${newline}${inetd_r}${newline}"
+        else
+            raw_output="${raw_output}[/etc/inetd.conf] shell/login/exec 항목이 주석 처리되었거나 존재하지 않음${newline}"
+        fi
+    fi
+
+    # 4) r 계열 포트 LISTEN 확인 (512=exec, 513=login, 514=shell)
+    local r_port
+    r_port=$(netstat -an 2>/dev/null | grep -E '\.51[234][[:space:]].*LISTEN' || echo "")
+    if [ -n "$r_port" ]; then
+        r_services_active=true
+        active_services="${active_services}port(512/513/514) "
+        raw_output="${raw_output}[netstat -an]${newline}${r_port}${newline}"
+    else
+        raw_output="${raw_output}[netstat -an] 512/513/514 포트 LISTEN 없음${newline}"
+    fi
+
+    # 최종 판정
+    command_executed="svcs -H -o state,fmri | grep -E '${r_fmri_pattern}'; inetadm | grep -E 'network/(shell|login|rexec)'; grep -E '^(shell|login|exec)[[:space:]]' /etc/inetd.conf; netstat -an | grep -E '\\.51[234] .*LISTEN'"
+    command_result="${raw_output}"
+
+    if [ "$r_services_active" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="r 계열 서비스가 활성화됨: ${active_services}"
+    elif [ "$probe_available" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="자동 로그아웃 설정 적절함 (${config_details} <= 600초)"
-        command_result="${config_details}"
-        command_executed="grep -E '^TMOUT=|^TIMEOUT=' /etc/profile; grep '^setenv TMOUT' /etc/.login"
-    elif [ -n "$final_value" ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="자동 로그아웃 설정됨但 시간 초과 (${config_details} > 600초)"
-        command_result="${config_details}"
-        command_executed="grep -E '^TMOUT=|^TIMEOUT=' /etc/profile; grep '^setenv TMOUT' /etc/.login"
+        inspection_summary="r 계열 서비스(rsh/rlogin/rexec)가 비활성화됨"
     else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="자동 로그아웃 미설정 (TMOUT 또는 TIMEOUT 변수 미설정)"
-        command_result="TMOUT/TIMEOUT setting not found"
-        command_executed="grep -E '^TMOUT=|^TIMEOUT=' /etc/profile; grep '^setenv TMOUT' /etc/.login"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="svcs/inetadm 명령 및 /etc/inetd.conf를 사용할 수 없어 r 계열 서비스 활성화 여부를 판정할 수 없음 (수동 확인 필요)"
     fi
 
     # echo ""

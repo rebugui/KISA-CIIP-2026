@@ -55,62 +55,69 @@ diagnose() {
     local newline=$'\n'
 
     local is_secure=true
+    local probe_available=false
     local active_services=()
-    local service_status=""
 
-    # 1) 취약한 RPC 프로세스 확인
-    local rpc_procs=$(ps -ef 2>/dev/null | grep -Ei "rusersd|rwalld|rstatd|rpc\.cmsd|rpc\.ttdbserverd|sprayd|walld" | grep -v grep || echo "")
-    if [ -n "$rpc_procs" ]; then
-        is_secure=false
-        local proc_names=$(echo "$rpc_procs" | awk '{print $8}' | sort -u | xargs)
-        active_services+=("RPC 프로세스: ${proc_names}")
-        service_status="${service_status}취약 RPC 프로세스 실행 중\\n"
+    # 가이드라인(U-42) 명시 불필요 RPC 서비스 목록 (15종)
+    local rpc_service_list=("rpc.cmsd" "rpc.ttdbserverd" "sadmind" "rusersd" "walld" "sprayd" "rstatd" "rpc.nisd" "rexd" "rpc.pcnfsd" "rpc.statd" "rpc.ypupdated" "rpc.rquotad" "kcms_server" "cachefsd")
+    # 데몬명(rpc.*)과 inetd 서비스명 표기를 모두 매칭 (rwalld→walld, ttdbserverd→ttdbserver, rpc.statd/rstatd→statd 포함)
+    local rpc_pattern='cmsd|ttdbserver|sadmind|rusersd|walld|sprayd|rstatd|statd|nisd|rexd|pcnfsd|ypupdated|rquotad|kcms_server|cachefsd'
+
+    # 1) 불필요 RPC 프로세스 확인
+    local ps_raw="ps command not found"
+    if command -v ps >/dev/null 2>&1; then
+        probe_available=true
+        local rpc_procs=$(ps -ef 2>/dev/null | grep -Ei "$rpc_pattern" | grep -v grep || echo "")
+        ps_raw="${rpc_procs:-No vulnerable RPC processes found}"
+        if [ -n "$rpc_procs" ]; then
+            is_secure=false
+            local proc_names=$(echo "$rpc_procs" | awk '{print $8}' | sort -u | xargs)
+            active_services+=("RPC 프로세스: ${proc_names}")
+        fi
     fi
 
-    # 2) AIX inetd.conf에서 RPC 서비스 확인
+    # 2) AIX /etc/inetd.conf에서 불필요 RPC 서비스 확인 (비주석 항목)
+    local inetd_raw="/etc/inetd.conf not found"
     if [ -f /etc/inetd.conf ]; then
-        for rpc_svc in rusersd rwalld rstatd sprayd; do
-            local inetd_entry=$(grep "$rpc_svc" /etc/inetd.conf 2>/dev/null | grep -v "^#" || echo "")
-            if [ -n "$inetd_entry" ]; then
-                is_secure=false
-                active_services+=("${rpc_svc} (inetd enabled)")
-                service_status="${service_status}${rpc_svc}: inetd.conf에서 활성화됨\\n"
-            fi
-        done || true
+        probe_available=true
+        local inetd_entries=$(grep -Ei "$rpc_pattern" /etc/inetd.conf 2>/dev/null | grep -Ev '^[[:space:]]*#' || echo "")
+        inetd_raw="${inetd_entries:-No active RPC entries in inetd.conf}"
+        if [ -n "$inetd_entries" ]; then
+            is_secure=false
+            local inetd_names=$(echo "$inetd_entries" | awk '{print $1}' | sort -u | xargs)
+            active_services+=("inetd.conf 활성 항목: ${inetd_names}")
+        fi
     fi
 
-    # 3) rpcinfo로 등록된 RPC 서비스 확인
+    # 3) rpcinfo로 등록된 불필요 RPC 서비스 확인 (rexd→rex, rpc.statd→status 등록명 포함)
+    local rpcinfo_raw="rpcinfo command not found"
     if command -v rpcinfo >/dev/null 2>&1; then
-        local rpc_info=$(rpcinfo -p 2>/dev/null | grep -Ei "rusersd|rwalld|rstatd|sprayd|cmsd|ttdbserverd" || echo "")
+        probe_available=true
+        rpcinfo_raw=$(rpcinfo -p 2>/dev/null || echo "rpcinfo not available")
+        local rpc_info=$(echo "$rpcinfo_raw" | grep -Ei "${rpc_pattern}|rex|status" || echo "")
         if [ -n "$rpc_info" ]; then
             is_secure=false
-            active_services+=("rpcinfo에 취약 RPC 서비스 등록됨")
-            service_status="${service_status}rpcinfo: 취약 RPC 서비스 발견\\n"
+            active_services+=("rpcinfo에 불필요 RPC 서비스 등록됨")
         fi
     fi
 
     # 명령어 결과 수집
-    local ps_raw=$(ps -ef 2>/dev/null | grep -Ei "rusersd|rwalld|rstatd|rpc\.cmsd|rpc\.ttdbserverd|sprayd" | grep -v grep || echo "No vulnerable RPC processes found")
-    local rpcinfo_raw=""
-    if command -v rpcinfo >/dev/null 2>&1; then
-        rpcinfo_raw=$(rpcinfo -p 2>/dev/null || echo "rpcinfo not available")
-    else
-        rpcinfo_raw="rpcinfo command not found"
-    fi
+    command_result="[점검 대상 RPC 서비스]${newline}${rpc_service_list[*]}${newline}${newline}[Command: ps -ef | grep -E (RPC 목록 패턴)]${newline}${ps_raw}${newline}${newline}[Command: grep -E (RPC 목록 패턴) /etc/inetd.conf]${newline}${inetd_raw}${newline}${newline}[Command: rpcinfo -p]${newline}${rpcinfo_raw}"
+    command_executed="ps -ef | grep -Ei '${rpc_pattern}'; grep -Ei '${rpc_pattern}' /etc/inetd.conf; rpcinfo -p"
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$probe_available" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="ps/inetd.conf/rpcinfo를 사용할 수 없어 불필요한 RPC 서비스 상태를 수동으로 점검해야 합니다."
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="불필요한 RPC 서비스가 비활성화되어 있습니다."
-        command_result="[Command: ps -ef | grep rpc]${newline}${ps_raw}${newline}${newline}[Command: rpcinfo -p]${newline}${rpcinfo_raw}"
-        command_executed="ps -ef | grep -Ei 'rusersd|rwalld|rstatd'; rpcinfo -p"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="보안에 취약한 RPC 서비스가 활성화되어 있습니다: ${active_services[*]}"
-        command_result="[Command: ps -ef | grep rpc]${newline}${ps_raw}${newline}${newline}[Command: rpcinfo -p]${newline}${rpcinfo_raw}"
-        command_executed="ps -ef | grep -Ei 'rusersd|rwalld|rstatd'; rpcinfo -p"
     fi
 
     save_dual_result \

@@ -35,36 +35,62 @@ if (-not (Test-RunallMode)) {
 }
 
 # 1. Check unnecessary services
+# 가이드 '일반적으로 불필요한 서비스' 표 전체(18+종)를 점검.
+# Windows 서비스명(Name)과 표시 이름(DisplayName)이 다른 경우가 있어 두 기준으로 모두 매칭한다.
+# (OS 버전에 따라 미제공 서비스는 자연히 미발견 처리됨)
 try {
-    $unnecessaryServices = @('Alerter', 'Clipbook', 'Messenger', 'Remote Registry', 'Simple TCP/IP Services')
+    # @{ Name = '가이드 항목명'; Match = @('서비스명/표시이름 후보들') }
+    $unnecessaryServices = @(
+        @{ Name = 'Alerter';                                  Match = @('Alerter') },
+        @{ Name = 'Automatic Updates';                        Match = @('wuauserv', 'Automatic Updates', 'Windows Update') },
+        @{ Name = 'Clipbook';                                 Match = @('ClipSrv', 'Clipbook') },
+        @{ Name = 'Computer Browser';                         Match = @('Browser', 'Computer Browser') },
+        @{ Name = 'Cryptographic Services';                   Match = @('CryptSvc', 'Cryptographic Services') },
+        @{ Name = 'DHCP Client';                              Match = @('Dhcp', 'DHCP Client') },
+        @{ Name = 'Distributed Link Tracking Client';         Match = @('TrkWks', 'Distributed Link Tracking Client') },
+        @{ Name = 'Distributed Link Tracking Server';         Match = @('TrkSvr', 'Distributed Link Tracking Server') },
+        @{ Name = 'DNS Client';                               Match = @('Dnscache', 'DNS Client') },
+        @{ Name = 'Error Reporting Service';                  Match = @('ERSvc', 'WerSvc', 'Error Reporting Service', 'Windows Error Reporting Service') },
+        @{ Name = 'Human Interface Device Access';            Match = @('HidServ', 'hidserv', 'Human Interface Device Access', 'Human Interface Device Service') },
+        @{ Name = 'IMAPI CD-Burning COM Service';             Match = @('ImapiService', 'IMAPI CD-Burning COM Service') },
+        @{ Name = 'Infrared Monitor';                         Match = @('Irmon', 'Infrared Monitor') },
+        @{ Name = 'Messenger';                                Match = @('Messenger') },
+        @{ Name = 'NetMeeting Remote Desktop Sharing';        Match = @('mnmsrvc', 'NetMeeting Remote Desktop Sharing') },
+        @{ Name = 'Portable Media Serial Number';             Match = @('WmdmPmSN', 'Portable Media Serial Number Service') },
+        @{ Name = 'Print Spooler';                            Match = @('Spooler', 'Print Spooler') },
+        @{ Name = 'Remote Registry';                          Match = @('RemoteRegistry', 'Remote Registry') },
+        @{ Name = 'Simple TCP/IP Services';                   Match = @('SimpTcp', 'Simple TCP/IP Services') },
+        @{ Name = 'Universal Plug and Play Device Host';      Match = @('upnphost', 'Universal Plug and Play Device Host') },
+        @{ Name = 'Wireless Zero Configuration';              Match = @('WZCSVC', 'Wzcsvc', 'Wireless Zero Configuration') }
+    )
+
+    $allServices = Get-Service -ErrorAction SilentlyContinue
     $runningServices = @()
 
-    foreach ($svcName in $unnecessaryServices) {
-        try {
-            $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
-            if ($svc -and $svc.Status -eq 'Running') {
-                $runningServices += $svcName
-            }
-        } catch {
-            # Service not found or error, skip
-            continue
+    foreach ($entry in $unnecessaryServices) {
+        $svc = $allServices | Where-Object {
+            ($entry.Match -contains $_.Name) -or ($entry.Match -contains $_.DisplayName)
+        } | Select-Object -First 1
+
+        if ($svc -and $svc.Status -eq 'Running') {
+            $runningServices += $entry.Name
         }
     }
 
     if ($runningServices.Count -eq 0) {
         $finalResult = "GOOD"
-        $summary = "불필요한 서비스가 모두 중지됨"
+        $summary = "일반적으로 불필요한 서비스가 모두 중지되었거나 설치되지 않음"
         $status = "양호"
         $commandOutput = "All unnecessary services are stopped or not installed"
     } else {
         $finalResult = "VULNERABLE"
         $runningList = $runningServices -join ', '
-        $summary = "불필요한 서비스가 구동 중임: $runningList"
+        $summary = "일반적으로 불필요한 서비스가 구동 중임: $runningList"
         $status = "취약"
         $commandOutput = "Running unnecessary services: $runningList"
     }
 
-    $commandExecuted = "Get-Service -Name 'Alerter','Clipbook','Messenger','Remote Registry','Simple TCP/IP Services'"
+    $commandExecuted = "Get-Service | 일반적으로 불필요한 서비스(가이드 표 전체) 구동 여부 확인"
 
 } catch {
     $finalResult = "MANUAL"

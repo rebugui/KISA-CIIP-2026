@@ -33,41 +33,91 @@ if (-not (Test-RunallMode)) {
     Write-Host "카테고리: $CATEGORY"
 }
 
-# 1. Check anonymous access permissions on shared folders
+# 1. Check anonymous/Everyone access on shared services (SMB + IIS FTP anonymous auth)
+# 가이드라인: 공유서비스(FTP, SMB, NFS, TFTP)에 익명 인증이 허용되면 취약.
+# SMB는 Everyone/Anonymous에 대한 모든 Allow 권한을 대상으로 하며(쓰기 한정 아님),
+# IIS FTP의 익명 인증(anonymousAuthentication)도 함께 점검한다. 점검 불가 영역은 MANUAL로 라우팅한다.
 try {
-    $shares = Get-SmbShare -ErrorAction SilentlyContinue | Where-Object { $_.Type -eq 'Windows' -and $_.Name -notlike '*$' }
-    $hasAnonymous = $false
-    $vulnerableShares = @()
+    $commandExecuted = "Get-SmbShare | Get-SmbShareAccess; Get-WebConfigurationProperty ftpServer/security/authentication/anonymousAuthentication"
 
+    $vulnerableFindings = @()
+    $manualNotes = @()
+
+    # --- (1) SMB 공유 익명/Everyone 접근 점검 ---
+    $shares = @(Get-SmbShare -ErrorAction SilentlyContinue | Where-Object { $_.Type -eq 'Windows' -and $_.Name -notlike '*$' })
     foreach ($share in $shares) {
         $acl = Get-SmbShareAccess -Name $share.Name -ErrorAction SilentlyContinue
         foreach ($access in $acl) {
-            if ($access.AccountName -match 'Anonymous|Everyone' -and $access.AccessControlType -eq 'Allow' -and ($access.AccessRight -match 'Full' -or $access.AccessRight -match 'Change')) {
-                $hasAnonymous = $true
-                $vulnerableShares += "$($share.Name): $($access.AccountName) has $($access.AccessRight)"
+            if ($access.AccessControlType -ne 'Allow') { continue }
+
+            # AccountName은 로캘에 따라 'Everyone'/'모든 사람', 'ANONYMOUS LOGON'/'익명 로그온' 등
+            # 현지화된 표시 이름으로 반환되므로 영문 문자열 매칭만으로는 한국어 로캘에서 누락됨.
+            # 따라서 잘 알려진 SID(Everyone=S-1-1-0, Anonymous=S-1-5-7)로 비교하고
+            # 문자열(영문/한글) 매칭을 보조 수단으로 사용한다(W-16/W-43/W-58 방식 미러링).
+            $acctName = $access.AccountName
+            $sid = $null
+            try {
+                $sid = (New-Object System.Security.Principal.NTAccount($acctName)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+            } catch {
+                $sid = $null
+            }
+
+            $isEveryone = ($sid -eq 'S-1-1-0') -or ($acctName -match 'Everyone|모든 사람')
+            $isAnonymous = ($sid -eq 'S-1-5-7') -or ($acctName -match 'Anonymous|익명')
+
+            # 권한 수준(Read/Change/Full)과 무관하게 Everyone/Anonymous에 대한 모든 Allow 권한을 취약으로 간주.
+            if ($isEveryone -or $isAnonymous) {
+                $vulnerableFindings += "SMB $($share.Name): $($access.AccountName) has $($access.AccessRight)"
             }
         }
     }
 
-    if ($hasAnonymous) {
-        $finalResult = "VULNERABLE"
-        $summary = "하나 이상의 공유 폴더에 Everyone 또는 Anonymous Logon에게 허용 권한 존재"
-        $status = "취약"
-        $commandOutput = $vulnerableShares -join '; '
+    # --- (2) IIS FTP 익명 인증 점검 ---
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
+    if (Get-Command Get-Website -ErrorAction SilentlyContinue) {
+        $sites = @(Get-Website -ErrorAction SilentlyContinue)
+        foreach ($site in $sites) {
+            $hasFtpBinding = $false
+            foreach ($b in @($site.Bindings.Collection)) {
+                if ($b.protocol -eq 'ftp') { $hasFtpBinding = $true }
+            }
+            if ($hasFtpBinding) {
+                $anon = Get-WebConfigurationProperty -Filter 'system.ftpServer/security/authentication/anonymousAuthentication' -Name 'enabled' -PSPath 'IIS:\' -Location $site.Name -ErrorAction SilentlyContinue
+                if ($null -eq $anon) {
+                    $manualNotes += "FTP site '$($site.Name)': anonymous auth state could not be determined"
+                } elseif ($anon.Value -eq $true) {
+                    $vulnerableFindings += "FTP $($site.Name): anonymous authentication enabled"
+                }
+            }
+        }
     } else {
-        $finalResult = "GOOD"
-        $summary = "공유 폴더에 익명 접근 권한이 제한됨"
-        $status = "양호"
-        $commandOutput = if ($shares) { "No anonymous access found on $($shares.Count) shares" } else { "No Windows shares found" }
+        # IIS 구성 모듈을 사용할 수 없으면 FTP 익명 인증 점검 결과를 단정할 수 없음.
+        $manualNotes += "WebAdministration module unavailable; IIS FTP anonymous auth not inspected"
     }
 
-    $commandExecuted = "Get-SmbShare | Get-SmbShareAccess"
+    if ($vulnerableFindings.Count -gt 0) {
+        $finalResult = "VULNERABLE"
+        $summary = "공유 서비스에 익명(Everyone/Anonymous) 접근이 허용됨"
+        $status = "취약"
+        $commandOutput = $vulnerableFindings -join '; '
+    } elseif ($manualNotes.Count -gt 0) {
+        # 알 수 없는 영역이 남아 있으면 GOOD으로 단정하지 않고 수동 진단.
+        $finalResult = "MANUAL"
+        $summary = "일부 공유 서비스의 익명 접근 설정을 자동으로 확인할 수 없어 수동 확인 필요"
+        $status = "수동진단"
+        $commandOutput = $manualNotes -join '; '
+    } else {
+        $finalResult = "GOOD"
+        $summary = "공유 서비스에 익명 접근 권한이 제한됨"
+        $status = "양호"
+        $commandOutput = "No anonymous/Everyone access on $($shares.Count) SMB shares; IIS FTP anonymous auth disabled or no FTP site"
+    }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-SmbShare | Get-SmbShareAccess"
+    $commandExecuted = "Get-SmbShare | Get-SmbShareAccess; Get-WebConfigurationProperty ftpServer/security/authentication/anonymousAuthentication"
     $commandOutput = "진단 실패: $_"
 }
 

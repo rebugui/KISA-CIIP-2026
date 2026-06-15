@@ -32,7 +32,7 @@ $remediation = "불필요한 스크립트 매핑 존재 여부 점검 및 제거
 
 try {
     $finalResult = "N/A"
-    $status = "not_applicable"
+    $status = "N/A"
     $summary = "Nginx for Windows is not a target platform for WEB-15 according to docs/04_웹서비스.md and docs/guideline_metadata.json."
     $commandOutput = "WEB-15 targets Tomcat, IIS, and JEUS. Existing Nginx_Linux script mapping logic is not migrated because the docs baseline excludes Nginx for this item."
     $commandExecuted = "docs/04_웹서비스.md and guideline_metadata.json WEB-15 target platform review"

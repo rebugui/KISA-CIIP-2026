@@ -44,23 +44,85 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="일반 사용자의 메일 서비스 실행 방지 설정이 적절합니다."
     local command_result=""
-    local command_executed="grep -i 'PrivacyOptions' /etc/mail/sendmail.cf"
+    local command_executed="grep '^O PrivacyOptions' /etc/mail/sendmail.cf; ls -l /usr/sbin/postsuper; systemctl is-active postfix"
 
-    # 1. 실제 데이터 추출 (Sendmail 기준)
+    local mta_checked=false
+    local is_vulnerable=false
+    local needs_manual=false
+    local findings=""
+
+    # 1. Sendmail 점검 (PrivacyOptions에 restrictqrun 설정 여부, 주석 라인 제외)
     local cf_file="/etc/mail/sendmail.cf"
     if [ -f "$cf_file" ]; then
-        local privacy_opts=$(grep -i "O PrivacyOptions" "$cf_file" | cut -d= -f2 || echo "")
-        
-        # 2. 판정 로직 (restrictmailq, restrictqrun 포함 여부 확인)
-        if [[ ! "$privacy_opts" =~ "restrictmailq" ]] || [[ ! "$privacy_opts" =~ "restrictqrun" ]]; then
-            status="취약"
-            diagnosis_result="VULNERABLE"
-            inspection_summary="PrivacyOptions 설정에 일반 사용자 제한 옵션이 누락되어 있습니다."
+        mta_checked=true
+        local privacy_opts=$(grep -E '^[[:space:]]*O[[:space:]]*PrivacyOptions' "$cf_file" 2>/dev/null | cut -d= -f2- || echo "")
+        if echo "$privacy_opts" | grep -q "restrictqrun"; then
+            findings="${findings}[Sendmail] PrivacyOptions에 restrictqrun 설정됨: ${privacy_opts} / "
+        else
+            is_vulnerable=true
+            findings="${findings}[Sendmail] PrivacyOptions에 restrictqrun 미설정: ${privacy_opts:-설정 없음} / "
         fi
-        command_result="설정된 PrivacyOptions: [ ${privacy_opts:-설정 없음} ]"
-    else
-        command_result="Sendmail 설정 파일이 존재하지 않습니다."
     fi
+
+    # 2. Postfix 점검 (postsuper 일반 사용자 실행 권한 o-x 여부)
+    local postfix_present=false
+    local postfix_running=false
+    if [ -f /etc/postfix/main.cf ] || command -v postconf >/dev/null 2>&1; then
+        postfix_present=true
+    fi
+    if { command -v systemctl >/dev/null 2>&1 && systemctl is-active postfix >/dev/null 2>&1; } || \
+       { command -v pgrep >/dev/null 2>&1 && pgrep -x master >/dev/null 2>&1; }; then
+        postfix_running=true
+        postfix_present=true
+    fi
+    if [ "$postfix_present" = true ]; then
+        mta_checked=true
+        local postsuper_path=""
+        if [ -e /usr/sbin/postsuper ]; then
+            postsuper_path="/usr/sbin/postsuper"
+        else
+            postsuper_path=$(command -v postsuper 2>/dev/null || echo "")
+        fi
+        if [ -n "$postsuper_path" ]; then
+            local postsuper_perms=$(stat -c '%a' "$postsuper_path" 2>/dev/null || echo "")
+            if [ -n "$postsuper_perms" ]; then
+                local other_perm="${postsuper_perms: -1}"
+                if [ $(( other_perm & 1 )) -ne 0 ]; then
+                    is_vulnerable=true
+                    findings="${findings}[Postfix] postsuper(${postsuper_path}) 일반 사용자 실행 권한(o+x) 존재: ${postsuper_perms} / "
+                else
+                    findings="${findings}[Postfix] postsuper(${postsuper_path}) 일반 사용자 실행 권한 제거됨(o-x): ${postsuper_perms} / "
+                fi
+            else
+                # postfix 운용 중이나 권한 판독 불가 → 기본 GOOD 금지, 수동 점검
+                needs_manual=true
+                findings="${findings}[Postfix] postsuper 권한 확인 불가(실행 중: ${postfix_running}) — 수동 점검 필요 / "
+            fi
+        else
+            needs_manual=true
+            findings="${findings}[Postfix] postfix 사용 중(실행 중: ${postfix_running})이나 postsuper 경로 확인 불가 — 수동 점검 필요 / "
+        fi
+    fi
+
+    # 3. 최종 판정 (취약 > 수동 > 양호 / 메일 서비스 미사용 → 양호)
+    if [ "$is_vulnerable" = true ]; then
+        status="취약"
+        diagnosis_result="VULNERABLE"
+        inspection_summary="일반 사용자의 메일 서비스 실행 방지 설정이 미흡합니다."
+    elif [ "$needs_manual" = true ]; then
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="메일 서비스(Postfix) 사용 중이나 일반 사용자 실행 제한 여부를 자동 판정할 수 없어 수동 점검이 필요합니다."
+    elif [ "$mta_checked" = true ]; then
+        status="양호"
+        diagnosis_result="GOOD"
+        inspection_summary="일반 사용자의 메일 서비스 실행 방지 설정이 적절합니다."
+    else
+        status="양호"
+        diagnosis_result="GOOD"
+        inspection_summary="메일 서비스(Sendmail/Postfix)가 사용되지 않습니다."
+    fi
+    command_result="${findings:-메일 서비스 미검출: sendmail.cf 부재, postfix 미설치/미실행}"
 
     save_dual_result \
         "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \

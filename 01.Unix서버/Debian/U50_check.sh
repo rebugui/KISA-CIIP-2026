@@ -75,6 +75,9 @@ diagnose() {
     if [ -f "/etc/bind/named.conf.options" ]; then
         bind_conf_files+=("/etc/bind/named.conf.options")
     fi
+    if [ -f "/etc/bind/named.conf.default-zones" ]; then
+        bind_conf_files+=("/etc/bind/named.conf.default-zones")
+    fi
 
     # RedHat/CentOS/Rocky/AlmaLinux 계열
     if [ -f "/etc/named.conf" ]; then
@@ -86,20 +89,43 @@ diagnose() {
         bind_conf_files=("/etc/bind/named.conf" "/etc/bind/named.conf.local" "/etc/bind/named.conf.options" "/etc/named.conf")
     fi
 
+    # include 지시자 추적 (포함 파일 내 zone 단위 allow-transfer 'any' 미탐 방지, 2단계)
+    local include_pass included_file existing already
+    for include_pass in 1 2; do
+        local new_includes=()
+        for conf_file in "${bind_conf_files[@]}"; do
+            [ -f "$conf_file" ] || continue
+            while IFS= read -r included_file; do
+                [ -n "$included_file" ] || continue
+                [ -f "$included_file" ] || continue
+                already=false
+                for existing in "${bind_conf_files[@]}" ${new_includes[@]+"${new_includes[@]}"}; do
+                    if [ "$existing" = "$included_file" ]; then already=true; break; fi
+                done
+                if [ "$already" = false ]; then new_includes+=("$included_file"); fi
+            done < <(grep -hoE '^[[:space:]]*include[[:space:]]+"[^"]+"' "$conf_file" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/' || true)
+        done
+        [ ${#new_includes[@]} -eq 0 ] && break
+        bind_conf_files+=("${new_includes[@]}")
+    done
+
+    local transfer_seen=false
     for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
             dns_info="${dns_info}${conf_file} 확인:${newline}"
 
-            # allow-transfer 설정 확인
-            local allow_transfer=$(grep -i "allow-transfer" "$conf_file" | grep -v "^//" | grep -v "^#" || echo "")
+            # allow-transfer 설정 확인 (멀티라인 블록 대응: 주석 제거 후 평탄화하여 블록 전체 추출)
+            local allow_transfer
+            allow_transfer=$(grep -v "^[[:space:]]*//" "$conf_file" 2>/dev/null | grep -v "^[[:space:]]*#" | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || echo "")
             if [ -n "$allow_transfer" ]; then
+                transfer_seen=true
                 dns_info="${dns_info}${allow_transfer}${newline}"
 
-                # "any" 또는 "none" 확인
-                if echo "$allow_transfer" | grep -qi "allow-transfer.*{.*any.*;"; then
+                # "any" 또는 "none" 확인 (평탄화된 블록 기준)
+                if echo "$allow_transfer" | grep -qiE '(^|[{; ])any *;'; then
                     issues+=("allow-transfer가 'any'로 설정됨 (취약)")
-                elif echo "$allow_transfer" | grep -qi "allow-transfer.*{.*none.*;"; then
+                elif echo "$allow_transfer" | grep -qiE '(^|[{; ])none *;'; then
                     is_secure=true
                     dns_info="${dns_info}allow-transfer가 'none'으로 설정됨 (안전)${newline}"
                 else
@@ -108,8 +134,9 @@ diagnose() {
                     dns_info="${dns_info}allow-transfer가 특정 호스트로 제한됨${newline}"
                 fi
             else
-                # 기본값은 any이므로 명시적 제한이 필요함
-                issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
+                # 개별 파일에 allow-transfer가 없는 것은 정상일 수 있으므로 기록만 함
+                # (전체 설정에 allow-transfer가 전혀 없는 경우에만 취약으로 판정)
+                dns_info="${dns_info}allow-transfer 설정 없음${newline}"
             fi
 
             # also-notify 확인 (안전한 설정)
@@ -126,6 +153,11 @@ diagnose() {
         dns_info="${dns_info}\\nDNS 서비스 실행 중\\n"
     fi
 
+    # 전체 설정에서 allow-transfer가 전혀 발견되지 않으면 기본값(any)이 적용되므로 취약
+    if [ "$dns_configured" = true ] && [ "$transfer_seen" = false ]; then
+        issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
+    fi
+
     # 최종 판정
     if [ "$dns_configured" = false ]; then
         diagnosis_result="GOOD"
@@ -138,13 +170,13 @@ diagnose() {
         status="양호"
         inspection_summary="DNS Zone Transfer 제한 적절히 설정됨"
         command_result="${dns_info}"
-        command_executed="grep -i 'allow-transfer' /etc/bind/named.conf* /etc/named.conf 2>/dev/null || true"
+        command_executed="grep -v '^//' /etc/bind/named.conf* /etc/named.conf 2>/dev/null | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || true"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="DNS Zone Transfer 제한 미흡: ${issues[*]}"
         command_result="${dns_info}${newline}[Issues: ${issues[*]}]"
-        command_executed="grep -i 'allow-transfer' /etc/bind/named.conf* /etc/named.conf 2>/dev/null || true"
+        command_executed="grep -v '^//' /etc/bind/named.conf* /etc/named.conf 2>/dev/null | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || true"
     fi
 
     # echo ""

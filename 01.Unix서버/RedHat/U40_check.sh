@@ -44,22 +44,41 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="NFS 접근 통제 설정이 적절하게 이루어져 있습니다."
     local command_result=""
-    local command_executed="cat /etc/exports"
+    local command_executed="cat /etc/exports; stat -c '%a %U' /etc/exports"
 
     # 1. 실제 데이터 추출
     local exports_file="/etc/exports"
     if [ -f "$exports_file" ]; then
         # 와일드카드(*)를 사용하여 모든 호스트에 개방된 설정 탐색
         local unsafe_configs=$(grep -v "^#" "$exports_file" | grep "*" || echo "")
-        
-        # 2. 판정 로직
-        if [ -n "$unsafe_configs" ]; then
+
+        # 설정 파일 권한 점검 (소유자 root + 644 초과 비트 없음)
+        local file_owner=$(stat -c '%U' "$exports_file" 2>/dev/null || echo "")
+        local file_perms=$(stat -c '%a' "$exports_file" 2>/dev/null || echo "")
+        local perm_issues=""
+        if [ "$file_owner" != "root" ]; then
+            perm_issues="소유자가 root가 아님(${file_owner:-확인불가})"
+        fi
+        if [ -n "$file_perms" ]; then
+            # 644(rw-r--r--)를 초과하는 비트(그룹/기타 쓰기, 실행, 특수비트) 존재 여부 (비트 연산)
+            if [ $(( 8#${file_perms} & 8#7133 )) -ne 0 ]; then
+                perm_issues="${perm_issues:+${perm_issues}, }파일 권한이 644를 초과함(${file_perms})"
+            fi
+        else
+            perm_issues="${perm_issues:+${perm_issues}, }파일 권한 확인 불가"
+        fi
+
+        # 2. 판정 로직 (접근 통제 + 설정 파일 권한)
+        if [ -n "$unsafe_configs" ] || [ -n "$perm_issues" ]; then
             status="취약"
             diagnosis_result="VULNERABLE"
-            inspection_summary="NFS 공유가 모든 호스트(*)에 허용되어 있어 보안에 취약합니다."
-            command_result="취약 설정 내역: [ ${unsafe_configs} ]"
+            local vuln_detail=""
+            [ -n "$unsafe_configs" ] && vuln_detail="NFS 공유가 모든 호스트(*)에 허용됨"
+            [ -n "$perm_issues" ] && vuln_detail="${vuln_detail:+${vuln_detail}; }${perm_issues}"
+            inspection_summary="NFS 접근 통제 미흡: ${vuln_detail}"
+            command_result="취약 설정 내역: [ ${unsafe_configs:-없음} ] / 파일 소유자·권한: [ ${file_owner:-확인불가} ${file_perms:-확인불가} ]"
         else
-            command_result="공유 설정 내역: [ $(grep -v "^#" "$exports_file" | xargs || echo "설정 없음") ]"
+            command_result="공유 설정 내역: [ $(grep -v "^#" "$exports_file" | xargs || echo "설정 없음") ] / 파일 소유자·권한: [ ${file_owner} ${file_perms} ]"
         fi
     else
         command_result="NFS 설정 파일(/etc/exports)이 존재하지 않습니다."

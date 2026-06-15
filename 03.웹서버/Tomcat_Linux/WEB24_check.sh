@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="기본 경로가 아닌 별도의 업로드 경로를 지
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -105,11 +105,14 @@ diagnose() {
     if [ -n "${upload_info}" ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="업로드 디렉토리가 발견되었습니다. 업로드 경로 분리 및 실행 권한 제한 여부를 수동으로 확인하세요."
+        inspection_summary="업로드 디렉토리가 발견되었습니다. 별도의 업로드 경로 분리 사용 여부 및 일반 사용자 접근 권한 제한 여부를 수동으로 확인하세요."
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="명백한 업로드 디렉토리가 발견되지 않았습니다. 애플리케이션 내 업로드 기능을 수동으로 확인하세요."
+        # 업로드 디렉터리 부재는 경로 분리/권한 충족을 증명하지 못함.
+        # 업로드 서블릿이 *upload* 이외의 경로(예: /var/data/files, /opt/uploads)를
+        # 사용할 수 있으므로 GOOD으로 단정할 수 없음 → MANUAL 처리.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="*upload* 이름의 업로드 디렉토리가 발견되지 않았습니다. 업로드 디렉터리 부재만으로는 별도 경로 분리 및 접근 권한 제한 충족 여부를 확인할 수 없습니다. 애플리케이션의 실제 업로드 경로(server.xml/context.xml/web.xml 설정 및 비표준 경로 포함)와 권한을 수동으로 확인하세요."
     fi
 
     # Run-all 모드 확인

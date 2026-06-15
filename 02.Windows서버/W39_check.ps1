@@ -36,45 +36,43 @@ Write-Host ""
 
 # 1. Run diagnostic
 try {
+    # NOTE: The signature/engine *currency* (whether the latest definition update is
+    # installed) cannot be determined statically. The AV executable LastWriteTime is
+    # NOT a proxy for definition freshness (the .exe is touched by OS/installer updates
+    # while the signature DB may be stale, and vice versa). For Microsoft Defender we
+    # can read an authoritative signature age; otherwise this is an inherently MANUAL
+    # determination (also covers the air-gapped-procedure criterion).
     $avProducts = Get-WmiObject -Namespace 'root/SecurityCenter2' -Class 'AntiVirusProduct' -ErrorAction SilentlyContinue
-    $out = ""
+    $avInfo = @()
 
     if ($avProducts) {
-        $recentUpdate = $false
-        $avInfo = @()
-
         foreach ($av in $avProducts) {
-            $path = $av.pathToSignedProductExe
-            if ($path) {
-                $file = Get-Item $path -ErrorAction SilentlyContinue
-                if ($file) {
-                    $days = (New-TimeSpan -Start $file.LastWriteTime).Days
-                    $avInfo += "백신: $($av.displayName), 경로: $path, 최근 수정: $($file.LastWriteTime), 경과 일수: ${days}일"
-
-                    if ($days -le 7) {
-                        $recentUpdate = $true
-                    }
-                }
-            }
+            $avInfo += "백신: $($av.displayName), 경로: $($av.pathToSignedProductExe)"
         }
-
-        $out = $avInfo -join "`n"
-
-        if ($recentUpdate) {
-            $finalResult = "GOOD"
-            $summary = "백신 프로그램의 최신 엔진 업데이트가 설치되어 있음 (최근 7일 이내 업데이트 확인됨)"
-            $status = "양호"
-        } else {
-            $finalResult = "MANUAL"
-            $summary = "백신 프로그램 상태를 수동으로 확인 필요 (망 격리 환경의 경우 업데이트 절차 및 적용 방법 수립 여부 확인)"
-            $status = "수동진단"
-        }
-    } else {
-        $out = "백신 프로그램 정보를 찾을 수 없음 (SecurityCenter2 WMI 접근 불가 또는 백신 미설치)"
-        $finalResult = "MANUAL"
-        $summary = "백신 프로그램 상태를 수동으로 확인 필요 (망 격리 환경의 경우 업데이트 절차 및 적용 방법 수립 여부 확인)"
-        $status = "수동진단"
     }
+
+    # Microsoft Defender exposes a real signature age; surface it as evidence.
+    $defenderEvidence = $null
+    try {
+        $mp = Get-MpComputerStatus -ErrorAction Stop
+        if ($mp) {
+            $defenderEvidence = "Microsoft Defender: AntivirusSignatureLastUpdated=$($mp.AntivirusSignatureLastUpdated), SignatureAge=$($mp.AntivirusSignatureAge)일, AntivirusEnabled=$($mp.AntivirusEnabled)"
+            $avInfo += $defenderEvidence
+        }
+    } catch {
+        # Get-MpComputerStatus unavailable (non-Defender or older OS); ignore.
+    }
+
+    if ($avInfo.Count -gt 0) {
+        $out = $avInfo -join "`n"
+    } else {
+        $out = "백신 프로그램 정보를 찾을 수 없음 (SecurityCenter2 WMI/Defender 접근 불가 또는 백신 미설치)"
+    }
+
+    # Definition currency is not statically decidable -> MANUAL with evidence.
+    $finalResult = "MANUAL"
+    $summary = "백신 엔진/시그니처 최신 여부는 정적으로 판단 불가하여 수동 확인 필요 (망 격리 환경의 경우 업데이트 절차 및 적용 방법 수립 여부 포함)"
+    $status = "수동진단"
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"

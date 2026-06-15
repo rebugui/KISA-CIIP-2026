@@ -85,17 +85,24 @@ diagnose() {
         fi
     fi
 
-    # 3) Telnet 포트Listening 확인
-    if command -v ss >/dev/null 2>&1; then
-        if ss -tuln 2>/dev/null | grep -q ":23 "; then
+    # 3) Telnet 포트 Listening 확인 (HP-UX netstat 점 표기 *.23 및 콜론 표기 모두 매칭)
+    local port_probe_cmd="netstat -an | grep -E '[.:]23[[:space:]].*LISTEN'"
+    local port_probe_out=""
+    local port_evidence=""
+    local port_cmd_note=""
+    if command -v netstat >/dev/null 2>&1; then
+        port_probe_out=$(netstat -an 2>/dev/null | grep -E '[.:]23[[:space:]].*LISTEN' || true)
+        port_cmd_note="${port_probe_cmd}"
+        if [ -n "$port_probe_out" ]; then
             telnet_running=true
             telnet_details="${telnet_details}, 포트 23 listening"
+            port_evidence="[Command: ${port_probe_cmd}]${newline}${port_probe_out}"
+        else
+            port_evidence="[Command: ${port_probe_cmd}]${newline}출력 없음 (포트 23 LISTEN 미검출)"
         fi
-    elif command -v netstat >/dev/null 2>&1; then
-        if netstat -tuln 2>/dev/null | grep -q ":23 "; then
-            telnet_running=true
-            telnet_details="${telnet_details}, 포트 23 listening"
-        fi
+    else
+        port_cmd_note="netstat 사용 불가 (포트 23 확인 생략)"
+        port_evidence="netstat 명령을 사용할 수 없어 포트 23 상태 확인 불가"
     fi
 
     # 4) Telnet 패키지 설치 여부 확인
@@ -109,7 +116,7 @@ diagnose() {
         status="취약"
         inspection_summary="Telnet 서비스가 실행 중임: ${telnet_details#, }${telnet_installed:+ ($telnet_installed)}"
         command_result="${telnet_details#, }${telnet_installed:+, $telnet_installed}"
-        command_executed="/sbin/init.d/ status telnetd 2>/dev/null; ss -tuln | grep ':23 '; grep -E '^disable' /etc/xinetd.d/telnet 2>/dev/null"
+        command_executed="/sbin/init.d/telnetd status 2>/dev/null; grep -E '^disable' /etc/xinetd.d/telnet 2>/dev/null; ${port_cmd_note}"
     else
         diagnosis_result="GOOD"
         status="양호"
@@ -119,10 +126,10 @@ diagnose() {
             command_result="${telnet_check}"
         else
             inspection_summary="Telnet 서비스가 설치되어 있지 않거나 비활성화됨"
-            local telnet_inactive=$(/sbin/init.d/telnetd status 2>/dev/null | head -2; ss -tuln 2>/dev/null | grep ':23' || echo "Telnet service inactive")
-            command_result="${telnet_inactive}"
+            local telnet_inactive=$(/sbin/init.d/telnetd status 2>/dev/null | head -2 || true)
+            command_result="[Command: /sbin/init.d/telnetd status]${newline}${telnet_inactive:-Telnet service not found}${newline}${newline}${port_evidence}"
         fi
-        command_executed="/sbin/init.d/telnetd status 2>/dev/null | grep -q "running" 2>/dev/null; ss -tuln | grep ':23 '"
+        command_executed="/sbin/init.d/telnetd status 2>/dev/null; ${port_cmd_note}"
     fi
 
     # echo ""

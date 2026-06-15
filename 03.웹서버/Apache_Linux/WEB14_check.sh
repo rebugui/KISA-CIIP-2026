@@ -11,7 +11,7 @@
 # @Platform    : Apache_Linux
 # @Severity    : 상
 # @Title       : 웹 서비스 경로 내 파일의 접근 통제
-# @Description : 웹 서비스 경로 내 파일의 접근 통제 설정 여부 점검
+# @Description : 주요 설정 파일/디렉터리의 일반 사용자 접근 권한(파일 권한) 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 
@@ -82,51 +82,77 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
-    local apache_conf_locations=(
+    # 가이드라인 판단기준: 주요 설정 파일/디렉터리에 일반 사용자(group/other)의
+    # 불필요한 접근 권한(읽기/쓰기)이 부여되어 있으면 취약. (조치: chmod 750, chown)
+    local target_paths=(
         "/etc/apache2/apache2.conf"
+        "/etc/apache2/ports.conf"
+        "/etc/apache2"
         "/etc/httpd/conf/httpd.conf"
+        "/etc/httpd/conf.d"
+        "/etc/httpd"
         "/usr/local/apache2/conf/httpd.conf"
-        "/etc/apache2/sites-enabled/*.conf"
-        "/etc/httpd/conf.d/*.conf"
     )
 
-    local access_control_settings=""
-    local has_require_granted=false
-    local has_restrictive_access=false
+    local perm_report=""
+    local checked_any=false
+    local insecure_found=false
 
-    for conf_pattern in "${apache_conf_locations[@]}"; do
-        for conf_file in $conf_pattern; do
-            if [ -f "${conf_file}" ]; then
-                # Require 지시어 확인
-                local found_require=$(grep -E "^\s*Require" "${conf_file}" 2>/dev/null | grep -v "^\s*#" | head -3 || true)
-                if [ -n "${found_require}" ]; then
-                    access_control_settings="${access_control_settings}"$'\n'"${found_require}"
-                    if echo "${found_require}" | grep -q "all granted"; then
-                        has_require_granted=true
-                    fi
-                    if echo "${found_require}" | grep -qE "(denied|ip|host)"; then
-                        has_restrictive_access=true
-                    fi
-                fi
+    for tpath in "${target_paths[@]}"; do
+        if [ -e "${tpath}" ]; then
+            checked_any=true
+            # 8진수 권한(예: 644, 0750)과 소유자 확인
+            local octal owner group
+            octal=$(stat -c "%a" "${tpath}" 2>/dev/null || true)
+            owner=$(stat -c "%U" "${tpath}" 2>/dev/null || true)
+            group=$(stat -c "%G" "${tpath}" 2>/dev/null || true)
+            if [ -z "${octal}" ]; then
+                continue
             fi
-        done
+            # 마지막 3자리(소유자/그룹/기타)만 평가 (setuid 등 4자리 권한 대응)
+            local perm3="${octal: -3}"
+            local g_perm="${perm3:0:1}"
+            local o_perm="${perm3:2:1}"
+            local insecure_reason=""
+            # other에 어떤 권한이라도 있으면 취약 (trailing octal != 0)
+            if [ "${o_perm}" != "0" ]; then
+                insecure_reason="other 접근 허용(${o_perm})"
+            fi
+            # group 쓰기 권한(2,3,6,7)이 있으면 취약
+            case "${g_perm}" in
+                2|3|6|7)
+                    if [ -n "${insecure_reason}" ]; then
+                        insecure_reason="${insecure_reason}, group 쓰기 허용(${g_perm})"
+                    else
+                        insecure_reason="group 쓰기 허용(${g_perm})"
+                    fi
+                    ;;
+            esac
+            if [ -n "${insecure_reason}" ]; then
+                insecure_found=true
+                perm_report="${perm_report}"$'\n'"[취약] ${tpath} (${octal}, ${owner}:${group}) - ${insecure_reason}"
+            else
+                perm_report="${perm_report}"$'\n'"[양호] ${tpath} (${octal}, ${owner}:${group})"
+            fi
+        fi
     done
 
-    command_executed="grep -E '^\s*Require' /etc/apache2/apache2.conf /etc/httpd/conf/httpd.conf /etc/apache2/sites-enabled/*.conf 2>/dev/null | grep -v '^\s*#' | head -5"
-    command_result="${access_control_settings:-No Require directives found}"
+    command_executed="stat -c '%a %U:%G %n' /etc/apache2/apache2.conf /etc/apache2 /etc/httpd/conf/httpd.conf /etc/httpd 2>/dev/null"
+    command_result="${perm_report#$'\n'}"
 
-    if [ "${has_require_granted}" = true ] && [ "${has_restrictive_access}" = false ]; then
+    if [ "${checked_any}" != true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Apache 주요 설정 파일/디렉터리를 찾을 수 없어 접근 권한을 확인할 수 없습니다. 설정 파일/디렉터리의 권한(chmod 750 권장)을 수동으로 확인하세요."
+        command_result="No Apache config file/directory found"
+    elif [ "${insecure_found}" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="Require all granted만 설정되어 있습니다. 제한적인 접근 제어 권장."
-    elif [ "${has_restrictive_access}" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="적절한 접근 제어 설정이 발견되었습니다. (보안 권고사항 준수)"
+        inspection_summary="주요 설정 파일/디렉터리에 일반 사용자(group 쓰기 또는 other 접근)의 불필요한 접근 권한이 부여되어 있습니다. chmod 750 등으로 불필요한 권한을 제거하세요."
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="명시적인 Require all granted 설정이 발견되지 않았습니다. 기본 정책 적용."
+        inspection_summary="주요 설정 파일/디렉터리에 일반 사용자의 불필요한 접근 권한(group 쓰기/other 접근)이 부여되어 있지 않습니다. (보안 권고사항 준수)"
     fi
 
     # Run-all 모드 확인

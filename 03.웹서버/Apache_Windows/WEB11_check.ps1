@@ -80,20 +80,57 @@ try {
             '^[A-Za-z]:\\Program Files \(x86\)\\?$'
         )
 
+        # 기본/시스템 웹 트리 prefix. 경로 자체뿐 아니라 그 하위(예: C:\Apache24\htdocs\app)도
+        # '분리되지 않은 경로'로 간주하기 위해 prefix 비교를 추가한다.
+        $defaultTreePrefixes = @(
+            'C:\Apache24\htdocs',
+            'C:\Apache\htdocs',
+            'C:\xampp\htdocs',
+            'C:\wamp\www',
+            'C:\wamp64\www'
+        )
+        $systemTreePrefixes = @(
+            'C:\Windows',
+            'C:\Program Files',
+            'C:\Program Files (x86)',
+            'C:\Users'
+        )
+
         $defaultRoots = @()
         $dangerousRoots = @()
         foreach ($root in $documentRoots) {
             $normalized = $root.Trim('"').TrimEnd('\')
-            foreach ($pattern in $defaultRootPatterns) {
-                if ($normalized -match $pattern) {
-                    $defaultRoots += $root
-                    break
-                }
-            }
+            $matched = $false
             foreach ($pattern in $dangerousRootPatterns) {
                 if ($normalized -match $pattern) {
                     $dangerousRoots += $root
+                    $matched = $true
                     break
+                }
+            }
+            if (-not $matched) {
+                foreach ($p in $systemTreePrefixes) {
+                    if ($normalized -ieq $p -or $normalized -like ($p + '\*')) {
+                        $dangerousRoots += $root
+                        $matched = $true
+                        break
+                    }
+                }
+            }
+            if ($matched) { continue }
+            foreach ($pattern in $defaultRootPatterns) {
+                if ($normalized -match $pattern) {
+                    $defaultRoots += $root
+                    $matched = $true
+                    break
+                }
+            }
+            if (-not $matched) {
+                foreach ($p in $defaultTreePrefixes) {
+                    if ($normalized -ieq $p -or $normalized -like ($p + '\*')) {
+                        $defaultRoots += $root
+                        break
+                    }
                 }
             }
         }

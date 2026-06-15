@@ -102,14 +102,21 @@ diagnose() {
     # 공유 계정 의심 이름 확인 (shared, public, common 등)
     local shared_accounts=$(echo "$command_result" | tail -n +2 | grep -v "^$" | grep -iE "^(shared|public|common|generic|group|team)" || echo "")
 
-    if [ -n "$shared_accounts" ]; then
+    if [ -z "$command_result" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="계정 목록 조회 실패 - 공유 계정 사용 여부 수동 확인 필요"
+    elif [ -n "$shared_accounts" ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="의심되는 공유 계정 발견: $(echo "$shared_accounts" | head -5 | tr '\n' ', ')"
     else
+        # docs D-06 criteria_good: 사용자별 계정을 사용하고 있는 경우 양호.
+        # 공유 의심 계정명이 없다는 것은 개별 계정 사용의 "증거 부재"일 뿐 적극적 증명이 아니므로
+        # (실제 계정 공유는 이름만으로 판별 불가) 양호로 단정하지 않고 수동진단으로 처리한다.
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="공유 계정 여부는 수동 확인 필요 (계정 목록: $(echo "$command_result" | wc -l)개)"
+        inspection_summary="공유 성격의 계정명은 발견되지 않았으나, 계정명만으로는 실제 공유 사용 여부를 확정할 수 없습니다. 사용자별 개별 계정 사용 여부를 수동으로 확인하세요. 조회된 계정 목록: $(echo "$command_result" | tail -n +2 | grep -v "^$" | tr '\n' ', ')"
     fi
 
     # Save results (only if library function exists)

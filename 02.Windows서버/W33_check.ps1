@@ -40,38 +40,60 @@ try {
     $iisInstalled = Get-WindowsFeature -Name Web-Server -ErrorAction SilentlyContinue
 
     if ($iisInstalled -and $iisInstalled.InstallState -eq 'Installed') {
-        $bannerFound = $false
+        $bannerFindings = @()
+        $manualNotes = @()
 
-        # Check HTTP banner
+        # --- HTTP: Server 응답 헤더 존재 여부 ---
+        # 주의: customHeaders에 'Server' 항목이 명시되어 있으면 배너가 노출되는 것으로 본다.
+        # (URL Rewrite 아웃바운드 규칙을 통한 제거는 이 컬렉션으로 확인되지 않으므로 별도 안내.)
         $httpBanner = Get-WebConfigurationProperty -Filter 'system.webServer/httpProtocol' -Name 'customHeaders' -ErrorAction SilentlyContinue
+        $httpServerHeaderDeclared = $false
         if ($httpBanner) {
             foreach ($header in $httpBanner.Collection) {
                 if ($header.Name -eq 'Server') {
-                    $bannerFound = $true
+                    $httpServerHeaderDeclared = $true
                 }
             }
         }
-
-        # Check FTP installation
-        $ftpInstalled = Get-WindowsFeature -Name Web-Ftp-Server -ErrorAction SilentlyContinue
-        if ($ftpInstalled -and $ftpInstalled.InstallState -eq 'Installed') {
-            # FTP 설치됨 - 실제 배너 노출 여부는 수동 확인 필요
-            $bannerFound = $false  # 자동 판단 불가, 수동 확인 항목으로 별도 처리
+        if ($httpServerHeaderDeclared) {
+            $bannerFindings += "HTTP: Server response header is present"
         }
 
-        if ($bannerFound) {
+        # --- FTP: 설치 시 기본 배너 노출 여부는 자동 단정 불가 → MANUAL로 라우팅 ---
+        # (이전 버그: 이 분기에서 $bannerFound를 무조건 $false로 재할당하여 HTTP 탐지 결과를 지웠음)
+        $ftpInstalled = Get-WindowsFeature -Name Web-Ftp-Server -ErrorAction SilentlyContinue
+        if ($ftpInstalled -and $ftpInstalled.InstallState -eq 'Installed') {
+            $manualNotes += "FTP service installed; FTP banner exposure requires manual verification"
+        }
+
+        # --- SMTP: connectresponse 배너는 IIS6 메타베이스(adsutil)로만 확인 가능 → MANUAL로 라우팅 ---
+        $smtpFeature = Get-WindowsFeature -Name SMTP-Server -ErrorAction SilentlyContinue
+        $smtpService = Get-Service -Name 'SMTPSVC' -ErrorAction SilentlyContinue
+        if (($smtpFeature -and $smtpFeature.InstallState -eq 'Installed') -or $smtpService) {
+            $manualNotes += "SMTP service present; SMTP connectresponse banner requires manual verification"
+        }
+
+        if ($bannerFindings.Count -gt 0) {
+            # 배너 노출이 확인된 경우 취약 (다른 항목의 수동 확인 필요 여부와 무관하게 우선).
             $finalResult = "VULNERABLE"
             $status = "취약"
             $summary = "HTTP/FTP/SMTP 서비스 배너 정보가 노출됨"
-            $commandOutput = "Banner information exposed in HTTP/FTP/SMTP services"
+            $commandOutput = ($bannerFindings -join '; ')
+            if ($manualNotes.Count -gt 0) { $commandOutput += "; (also: " + ($manualNotes -join '; ') + ")" }
+        } elseif ($manualNotes.Count -gt 0) {
+            # HTTP 배너는 미탐지지만 FTP/SMTP 배너를 자동 단정할 수 없으면 GOOD으로 단정하지 않는다.
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "HTTP 배너는 미탐지이나 FTP/SMTP 배너 노출 여부를 자동으로 확인할 수 없어 수동 확인 필요"
+            $commandOutput = ($manualNotes -join '; ')
         } else {
             $finalResult = "GOOD"
             $status = "양호"
             $summary = "HTTP/FTP/SMTP 서비스 배너 정보가 차단됨"
-            $commandOutput = "Banner information properly blocked"
+            $commandOutput = "No Server response header declared; FTP/SMTP not installed"
         }
 
-        $commandExecuted = "Get-WindowsFeature -Name Web-Server; Get-WebConfigurationProperty -Filter 'system.webServer/httpProtocol'"
+        $commandExecuted = "Get-WindowsFeature Web-Server,Web-Ftp-Server,SMTP-Server; Get-WebConfigurationProperty system.webServer/httpProtocol; Get-Service SMTPSVC"
     } else {
         $finalResult = "GOOD"
         $status = "양호"

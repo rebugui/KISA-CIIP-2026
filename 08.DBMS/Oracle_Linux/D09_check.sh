@@ -16,6 +16,9 @@
 # ============================================================================
 
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="${SCRIPT_DIR}/../../lib"
+
 source "${LIB_DIR}/common.sh"
 source "${LIB_DIR}/command_validator.sh"
 source "${LIB_DIR}/timeout_handler.sh"

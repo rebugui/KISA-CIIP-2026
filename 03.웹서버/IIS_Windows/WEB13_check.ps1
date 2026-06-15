@@ -10,7 +10,7 @@
 # @Platform    : IIS_Windows
 # @Severity    : 상
 # @Title       : 웹 서비스 설정 파일 노출 제한
-# @Description : 웹 서버의 디렉터리 리스팅(Directory Listing) 기능을 제거하여 웹 서버 디렉터리 정보 노출을 방지합니다. 이 항목은 WEB-04와 동일한 내용을 다루지만 제거를 강조합니다.
+# @Description : IIS 처리기 매핑(handler mappings)에서 *.asa/*.asax 스크립트 매핑 존재 여부와 요청 필터링(requestFiltering)의 파일 확장명 거부 목록(.asa/.asax 등록) 여부를 점검합니다. 스크립트 매핑이 존재하거나 파일 필터링이 설정되지 않은 경우 취약으로 판단합니다. (가이드: asa/asax 스크립트 매핑 또는 파일 필터링 중 하나라도 설정 시 취약)
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -28,51 +28,80 @@ $SEVERITY = "상"
 Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
-    # IIS 디렉터리 리스팅 제거 확인 (WEB-04와 동일하지만 다름을 강조)
+    # IIS 대상: *.asa/*.asax 처리기 매핑 및 요청 필터링 거부 목록 점검
+    # 가이드: asa/asax 스크립트 매핑이 존재하거나, 파일 확장명 거부 목록에 미등록 시 취약.
     $sites = Get-Website
-    $dirListingEnabled = $false
-    $siteInfo = @()
+    $commandExecuted = "Get-WebConfiguration -Filter '/system.webServer/handlers'; Get-WebConfiguration -Filter '/system.webServer/security/requestFiltering/fileExtensions'"
+    $dangerousExts = @(".asa", ".asax")
+    $vulnSites = @()
+    $details = @()
 
     foreach ($site in $sites) {
         $siteName = $site.Name
-        $path = $site.PhysicalPath
+        $activeMappings = @()
+        $deniedExts = @()
 
-        $webConfig = Join-Path $path "web.config"
-        if (Test-Path $webConfig) {
-            [xml]$config = Get-Content $webConfig
-            $dirBrowse = $config.configuration.'system.webServer'.directoryBrowse
-            if ($dirBrowse -and $dirBrowse.enabled -eq "true") {
-                $dirListingEnabled = $true
-                $siteInfo += "Site: $siteName, DirectoryBrowse: Enabled"
+        # 1) 처리기 매핑에서 *.asa / *.asax 확인
+        $handlers = Get-WebConfiguration -Filter "/system.webServer/handlers" -Location $siteName -ErrorAction SilentlyContinue
+        if ($handlers) {
+            foreach ($handler in $handlers.Collection) {
+                $hPath = "$($handler.path)"
+                foreach ($ext in $dangerousExts) {
+                    if ($hPath -like "*$ext") {
+                        $activeMappings += "$hPath -> $($handler.name)"
+                    }
+                }
             }
         }
 
-        $iisConfig = Get-WebConfiguration -Filter "/system.webServer/directoryBrowse" -Location $siteName
-        if ($iisConfig -and $iisConfig.Attributes.value.enabled -eq "true") {
-            $dirListingEnabled = $true
-            $siteInfo += "Site: $siteName, IIS Config: Enabled"
+        # 2) 요청 필터링 파일 확장명 거부 목록 확인
+        $fileExts = Get-WebConfiguration -Filter "/system.webServer/security/requestFiltering/fileExtensions" -Location $siteName -ErrorAction SilentlyContinue
+        if ($fileExts) {
+            foreach ($fe in $fileExts.Collection) {
+                $feName = "$($fe.fileExtension)".ToLower()
+                $allowed = $fe.allowed
+                if (($allowed -eq $false) -or ("$allowed" -ieq "false")) {
+                    $deniedExts += $feName
+                }
+            }
+        }
+
+        # 거부 목록 미등록 확장자(참고용 — 1차 완화책인 매핑 제거 시 취약 아님)
+        $missingDeny = @()
+        foreach ($ext in $dangerousExts) {
+            if ($deniedExts -notcontains $ext) {
+                $missingDeny += $ext
+            }
+        }
+
+        $details += "Site: $siteName, 활성 매핑: $($activeMappings -join '|'), 거부목록: $($deniedExts -join '|'), 거부목록 미등록: $($missingDeny -join '|')"
+
+        # 취약 판정: 활성 *.asa/*.asax 스크립트 매핑이 존재(미제거)하는 경우에만 취약.
+        # 처리기 매핑이 제거되면 1차 완화가 충족되므로(criteria_good) 거부 목록 미등록만으로는 취약 아님.
+        # (거부 목록 등록은 매핑 제거에 대한 보조/대체 통제임)
+        if ($activeMappings.Count -gt 0) {
+            $vulnSites += "Site: $siteName, 활성 asa/asax 매핑 존재: $($activeMappings -join ', ')"
         }
     }
 
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter `"/system.webServer/directoryBrowse`""
+    $commandOutput = $details -join "`n"
 
-    if ($dirListingEnabled) {
+    if ($vulnSites.Count -gt 0) {
         $finalResult = "VULNERABLE"
-        $summary = "디렉터리 리스팅이 활성화되어 있습니다. 제거 필요: " + ($siteInfo -join ", ")
+        $summary = "활성 asa/asax 스크립트 매핑이 제거되지 않은 사이트가 있습니다: " + ($vulnSites -join "; ")
         $status = "취약"
-        $commandOutput = $siteInfo -join "`n"
+        $commandOutput = $commandOutput + "`n`n취약 항목:`n" + ($vulnSites -join "`n")
     } else {
         $finalResult = "GOOD"
-        $summary = "모든 웹사이트에서 디렉터리 리스팅이 비활성화되어 있습니다. (보안 권고사항 준수)"
+        $summary = "모든 웹사이트에서 불필요한 asa/asax 스크립트 매핑이 제거되어 있습니다. (보안 권고사항 준수)"
         $status = "양호"
-        $commandOutput = "DirectoryBrowse: Disabled on all sites"
     }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter `"/system.webServer/directoryBrowse`""
+    $commandExecuted = "Get-WebConfiguration -Filter '/system.webServer/handlers'; Get-WebConfiguration -Filter '/system.webServer/security/requestFiltering/fileExtensions'"
     $commandOutput = "진단 실패: $_"
 }
 

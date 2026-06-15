@@ -58,80 +58,104 @@ diagnose() {
 
     # DNS 동적 업데이트 설정 제한 확인
     local dns_configured=false
-    local is_secure=true
+    local is_secure=""
     local dns_info=""
     local issues=()
+    local service_running=false
+    local service_probe=""
 
-    # BIND 설정 파일 경로 확인
-    local bind_conf="/etc/bind/named.conf"
-    local bind_conf_local="/etc/bind/named.conf.local"
-    local bind_conf_opts="/etc/bind/named.conf.options"
+    # BIND 설정 파일 경로 확인 (HP-UX 실제 경로 + Debian 계열 추가 경로)
+    local bind_conf_files=(
+        "/etc/named.conf"
+        "/etc/named.boot"
+        "/var/named/named.conf"
+        "/etc/bind/named.conf"
+        "/etc/bind/named.conf.local"
+        "/etc/bind/named.conf.options"
+    )
 
-    for conf_file in "$bind_conf" "$bind_conf_local" "$bind_conf_opts"; do
+    for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
-            dns_info="${dns_info}${conf_file} 확인:\\n"
+            dns_info="${dns_info}${conf_file} 확인:${newline}"
 
-            # allow-update 설정 확인
-            local allow_update=$(grep -i "allow-update" "$conf_file" | grep -v "^//" | grep -v "^#" || echo "")
-            if [ -n "$allow_update" ]; then
-                dns_info="${dns_info}${allow_update}\\n"
+            # allow-update 설정 확인 (주석 제거 → 평탄화 → 블록 전체('}'까지) 추출)
+            # sed 범위(/allow-update/,/;/)는 첫 ';' 줄에서 끊겨 멀티라인 블록 내 any를 놓치므로 사용 금지
+            local allow_update_block=""
+            allow_update_block=$(sed -e 's://.*$::' -e 's:#.*$::' "$conf_file" 2>/dev/null | tr -s '[:space:]' ' ' | grep -oiE 'allow-update[^{};]*\{[^}]*' || true)
 
-                # "any" 확인
-                if echo "$allow_update" | grep -qi "allow-update.*{.*any.*;"; then
-                    is_secure=false
-                    issues+=("allow-update가 'any'로 설정됨 (취약)")
-                elif echo "$allow_update" | grep -qi "allow-update.*{.*none.*;"; then
-                    dns_info="${dns_info}allow-update가 'none'으로 설정됨 (안전)\\n"
+            if echo "$allow_update_block" | grep -qi "allow-update"; then
+                dns_info="${dns_info}allow-update 설정: ${allow_update_block}${newline}"
+
+                if echo "$allow_update_block" | grep -qiE '(^|[^[:alnum:]_-])any([^[:alnum:]_-]|$)'; then
+                    # any 허용: 비인가 동적 업데이트 가능 (취약)
+                    is_secure="false"
+                    issues+=("${conf_file}: allow-update가 'any'로 설정됨 (취약)")
+                elif echo "$allow_update_block" | grep -qiE '(^|[^[:alnum:]_-])none([^[:alnum:]_-]|$)'; then
+                    # none: 동적 업데이트 비활성화 (양호)
+                    if [ -z "$is_secure" ]; then is_secure="true"; fi
+                    dns_info="${dns_info}allow-update가 'none'으로 설정됨 (동적 업데이트 비활성화, 양호)${newline}"
+                elif echo "$allow_update_block" | grep -qi "key"; then
+                    # 키 기반 접근 통제 (양호)
+                    if [ -z "$is_secure" ]; then is_secure="true"; fi
+                    dns_info="${dns_info}allow-update가 키 기반으로 제한됨 (접근 통제 수행, 양호)${newline}"
                 else
-                    # 키 기반 업데이트인 경우 확인
-                    if echo "$allow_update" | grep -qi "key"; then
-                        dns_info="${dns_info}allow-update가 키로 제한됨\\n"
-                    else
-                        is_secure=false
-                        issues+=("allow-update가 IP로 제한됨 (키 기반 권장)")
-                    fi
+                    # 특정 IP 제한: 가이드 조치방법(allow-update { <허용 IP>; };)에 따른 접근 통제 (양호)
+                    if [ -z "$is_secure" ]; then is_secure="true"; fi
+                    dns_info="${dns_info}allow-update가 특정 IP로 제한됨 (접근 통제 수행, 양호)${newline}"
                 fi
             else
-                # 기본값은 none이므로 안전함
-                dns_info="${dns_info}allow-update 설정 없음 (기본값 none, 안전)\\n"
+                # allow-update 미설정: BIND 기본값은 동적 업데이트 거부이므로 비활성화 상태 (양호)
+                if [ -z "$is_secure" ]; then is_secure="true"; fi
+                dns_info="${dns_info}allow-update 설정 없음 (BIND 기본값 거부, 동적 업데이트 비활성화)${newline}"
             fi
 
-            # update-policy 확인 (더 안전한 대안)
-            local update_policy=$(grep -i "update-policy" "$conf_file" | grep -v "^//" | grep -v "^#" || echo "")
+            # update-policy 확인 (키 기반 접근 통제 대안)
+            local update_policy=""
+            update_policy=$(grep -i "update-policy" "$conf_file" 2>/dev/null | grep -v "^[[:space:]]*//" | grep -v "^[[:space:]]*#" || true)
             if [ -n "$update_policy" ]; then
-                dns_info="${dns_info}${update_policy}\\n"
-                dns_info="${dns_info}update-policy 사용됨 (안전)\\n"
+                dns_info="${dns_info}${update_policy}${newline}update-policy 사용됨 (접근 통제 수행)${newline}"
             fi
         fi
-    done || true
+    done
 
-    # DNS 서비스 실행 확인
-    if /sbin/init.d/named status 2>/dev/null | grep -q "running" &>/dev/null || /sbin/init.d/bind9 status 2>/dev/null | grep -q "running" &>/dev/null; then
+    # DNS 서비스 실행 확인 (HP-UX init 스크립트 + ps 폴백)
+    service_probe=$( { /sbin/init.d/named status 2>/dev/null; ps -ef 2>/dev/null | grep -w "named" | grep -v "grep"; } | tr -d '\r' || true)
+    if /sbin/init.d/named status 2>/dev/null | grep -qi "running"; then
+        service_running=true
+    elif ps -ef 2>/dev/null | grep -w "named" | grep -v "grep" | grep -q "."; then
+        service_running=true
+    fi
+    if [ "$service_running" = true ]; then
         dns_configured=true
-        dns_info="${dns_info}\\nDNS 서비스 실행 중\\n"
+        dns_info="${dns_info}DNS 서비스(named) 실행 중${newline}"
     fi
 
-    # 최종 판정
+    # 최종 판정 (증거 기반: is_secure는 설정 근거가 있을 때만 결정됨)
     if [ "$dns_configured" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="DNS 서비스 미설치됨"
-        local dns_check=$(/sbin/init.d/named status 2>/dev/null | head -2; /sbin/init.d/bind9 status 2>/dev/null | head -2 || echo "DNS service not configured")
-        command_result="${dns_check}"
-        command_executed="/sbin/init.d/named status 2>/dev/null | grep -q "running" bind9"
-    elif [ "$is_secure" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="DNS 동적 업데이트 제한 적절히 설정됨"
-        command_result="${dns_info}"
-        command_executed="grep -i 'allow-update|update-policy' /etc/bind/named.conf*"
-    else
+        inspection_summary="DNS 서비스 미사용 (BIND 미실행 및 설정 파일 없음)"
+        command_result="[Command: /sbin/init.d/named status; ps -ef | grep -w named]${newline}${service_probe:-DNS service not found}${newline}[Config] /etc/named.conf, /etc/named.boot, /var/named/named.conf, /etc/bind/named.conf* 없음"
+        command_executed="/sbin/init.d/named status; ps -ef | grep -w named; ls /etc/named.conf /etc/named.boot /var/named/named.conf /etc/bind/named.conf*"
+    elif [ "$is_secure" = "false" ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="DNS 동적 업데이트 제한 미흡: ${issues[*]}"
-        command_result="${dns_info}${newline}[Issues:] ${issues[*]}"
-        command_executed="grep -i 'allow-update|update-policy' /etc/bind/named.conf*"
+        inspection_summary="DNS 동적 업데이트 제한 미흡: ${issues[*]-}"
+        command_result="${dns_info}${newline}[Issues] ${issues[*]-}"
+        command_executed="grep -oiE 'allow-update[^{};]*\{[^}]*' /etc/named.conf /etc/named.boot /var/named/named.conf /etc/bind/named.conf*"
+    elif [ "$is_secure" = "true" ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="DNS 동적 업데이트가 비활성화되었거나 적절한 접근 통제가 설정됨"
+        command_result="${dns_info}"
+        command_executed="grep -oiE 'allow-update[^{};]*\{[^}]*' /etc/named.conf /etc/named.boot /var/named/named.conf /etc/bind/named.conf*"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="DNS 서비스 실행 중이나 BIND 설정 파일을 확인하지 못해 동적 업데이트 설정 수동 점검 필요"
+        command_result="${dns_info}${newline}[Service probe]${newline}${service_probe:-N/A}"
+        command_executed="/sbin/init.d/named status; ps -ef | grep -w named; sed -n '/allow-update/,/;/p' <named.conf>"
     fi
 
     # echo ""

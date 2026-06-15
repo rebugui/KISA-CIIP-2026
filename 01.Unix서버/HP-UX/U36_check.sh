@@ -11,7 +11,7 @@
 # @Platform    : HP-UX
 # @Severity    : 상
 # @Title       : r 계열 서비스 비활성화
-# @Description : TMOUT <= 600 seconds 확인
+# @Description : rlogin, rsh(remsh), rexec 서비스 비활성화 여부 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,81 +57,69 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # /etc/profile, /etc/bash.bashrc에서 TMOUT 또는 TIMEOUT 확인
+    # r 계열 서비스 (rsh/remsh, rlogin, rexec) 비활성화 여부 점검
+    # 가이드라인: 불필요한 r 계열 서비스가 비활성화된 경우 양호
+    # HP-UX: inetd.conf 서비스명은 shell/login/exec, 데몬명은 remshd/rlogind/rexecd
 
-    local is_secure=false
-    local config_details=""
-    local tmout_value=""
-    local timeout_value=""
+    local r_services_active=false
+    local inetd_readable=false
+    local active_services=""
+    local raw_output=""
 
-    # 1) /etc/profile 확인
-    if [ -f /etc/profile ]; then
-        local profile_tmout=$(grep -E "^TMOUT=" /etc/profile | awk -F= '{print $2}' | tr -d ' ')
-        if [ -n "$profile_tmout" ]; then
-            tmout_value=$profile_tmout
+    # 1) /etc/inetd.conf 확인 (주석 해제된 shell/login/exec 항목 = 활성화)
+    if [ -r /etc/inetd.conf ]; then
+        inetd_readable=true
+        local inetd_r
+        inetd_r=$(grep -E '^(shell|login|exec)[[:space:]]' /etc/inetd.conf 2>/dev/null || echo "")
+        if [ -n "$inetd_r" ]; then
+            r_services_active=true
+            active_services="${active_services}inetd.conf(shell/login/exec) "
+            raw_output="${raw_output}[/etc/inetd.conf]${newline}${inetd_r}${newline}"
+        else
+            raw_output="${raw_output}[/etc/inetd.conf] shell/login/exec 항목이 주석 처리되었거나 존재하지 않음${newline}"
         fi
-        local profile_timeout=$(grep -E "^TIMEOUT=" /etc/profile | awk -F= '{print $2}' | tr -d ' ')
-        if [ -n "$profile_timeout" ]; then
-            timeout_value=$profile_timeout
-        fi
+    else
+        raw_output="${raw_output}[/etc/inetd.conf] 파일이 없거나 읽을 수 없음${newline}"
     fi
 
-    # 2) /etc/bash.bashrc 확인
-    if [ -z "$tmout_value" ] && [ -f /etc/bash.bashrc ]; then
-        local bashrc_tmout=$(grep -E "^TMOUT=" /etc/bash.bashrc | awk -F= '{print $2}' | tr -d ' ')
-        if [ -n "$bashrc_tmout" ]; then
-            tmout_value=$bashrc_tmout
-        fi
-        local bashrc_timeout=$(grep -E "^TIMEOUT=" /etc/bash.bashrc | awk -F= '{print $2}' | tr -d ' ')
-        if [ -n "$bashrc_timeout" ]; then
-            timeout_value=$bashrc_timeout
-        fi
+    # 2) r 계열 데몬 프로세스 확인 (remshd, rlogind, rexecd)
+    local r_ps
+    r_ps=$(ps -ef 2>/dev/null | grep -E 'remshd|rlogind|rexecd' | grep -v grep || echo "")
+    if [ -n "$r_ps" ]; then
+        r_services_active=true
+        active_services="${active_services}daemon(remshd/rlogind/rexecd) "
+        raw_output="${raw_output}[ps -ef]${newline}${r_ps}${newline}"
+    else
+        raw_output="${raw_output}[ps -ef] remshd/rlogind/rexecd 프로세스 없음${newline}"
     fi
 
-    # 3) /etc/profile.d/*.sh 확인
-    if [ -z "$tmout_value" ] && [ -d /etc/profile.d ]; then
-        local profile_d_tmout=$(grep -h -E "^TMOUT=" /etc/profile.d/*.sh 2>/dev/null | awk -F= '{print $2}' | tr -d ' ' | head -1)
-        if [ -n "$profile_d_tmout" ]; then
-            tmout_value=$profile_d_tmout
-        fi
+    # 3) r 계열 포트 LISTEN 확인 (512=exec, 513=login, 514=shell)
+    local r_port
+    r_port=$(netstat -an 2>/dev/null | grep -E '\.(512|513|514) .*LISTEN' || echo "")
+    if [ -n "$r_port" ]; then
+        r_services_active=true
+        active_services="${active_services}port(512/513/514) "
+        raw_output="${raw_output}[netstat -an]${newline}${r_port}${newline}"
+    else
+        raw_output="${raw_output}[netstat -an] 512/513/514 포트 LISTEN 없음${newline}"
     fi
 
-    # 값 검증 (TMOUT 또는 TIMEOUT)
-    local final_value=""
-    if [ -n "$tmout_value" ]; then
-        final_value=$tmout_value
-        config_details="TMOUT=${tmout_value} seconds"
-    elif [ -n "$timeout_value" ]; then
-        final_value=$timeout_value
-        config_details="TIMEOUT=${timeout_value} seconds"
-    fi
+    # 최종 판정
+    command_executed="grep -E '^(shell|login|exec)[[:space:]]' /etc/inetd.conf; ps -ef | grep -E 'remshd|rlogind|rexecd' | grep -v grep; netstat -an | grep -E '\\.(512|513|514) .*LISTEN'"
+    command_result="${raw_output}"
 
-    # 최종 판정 (600초 = 10분 이하이면 양호)
-    if [ -n "$final_value" ]; then
-        if [ "$final_value" -le 600 ]; then
-            is_secure=true
-        fi
-    fi
-
-    if [ "$is_secure" = true ]; then
+    if [ "$r_services_active" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="r 계열 서비스가 활성화됨: ${active_services}"
+    elif [ "$inetd_readable" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="자동 로그아웃 설정 적절함 (${config_details} <= 600초)"
-        command_result="${config_details}"
-        command_executed="grep -E '^TMOUT=|^TIMEOUT=' /etc/profile /etc/bash.bashrc"
-    elif [ -n "$final_value" ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="자동 로그아웃 설정됨但 시간 초과 (${config_details} > 600초)"
-        command_result="${config_details}"
-        command_executed="grep -E '^TMOUT=|^TIMEOUT=' /etc/profile /etc/bash.bashrc"
+        inspection_summary="r 계열 서비스(shell/login/exec)가 비활성화됨"
     else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="자동 로그아웃 미설정 (TMOUT 또는 TIMEOUT 변수 미설정)"
-        local tmout_check=$(grep -E '^TMOUT=|^TIMEOUT=' /etc/profile /etc/bash.bashrc 2>/dev/null || echo "No TMOUT/TIMEOUT settings found")
-        command_result="${tmout_check}"
-        command_executed="grep -E '^TMOUT=|^TIMEOUT=' /etc/profile /etc/bash.bashrc"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="/etc/inetd.conf를 읽을 수 없어 r 계열 서비스 활성화 여부를 판정할 수 없음 (수동 확인 필요)"
     fi
 
     # echo ""

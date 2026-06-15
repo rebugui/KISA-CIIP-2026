@@ -66,6 +66,7 @@ diagnose() {
     local checked_homedirs=0
     local system_uid_threshold=1000
     local raw_find_output=""  # 원본 find 명령어 결과 누적
+    local unreadable_areas=""  # 읽기 불가로 점검하지 못한 영역(→ 수동진단)
 
     # 정상적인 숨겨진 파일 목록 (백도어 후보에서 제외)
     local normal_hidden_patterns=(
@@ -87,8 +88,9 @@ diagnose() {
 
     # 사용자 홈 디렉토리 확인
     while IFS=: read -r username password uid gid gecos home shell; do
-        # 시스템 계정 제외 (UID >= 1000인 일반 사용자만 확인)
-        if [ "$uid" -lt "$system_uid_threshold" ]; then
+        # 시스템 계정 제외 (root(UID 0) 및 UID >= 1000인 일반 사용자 확인)
+        # root 홈(/root)의 숨김 백도어 미탐(false-good) 방지를 위해 root 포함
+        if [ "$uid" -ne 0 ] && [ "$uid" -lt "$system_uid_threshold" ]; then
             continue
         fi
 
@@ -105,8 +107,14 @@ diagnose() {
         ((checked_homedirs++)) || true
 
         # 숨겨진 파일 및 디렉토리 검색 (.)
-        # 원본 find 명령어 실행 및 결과 저장
-        local find_result=$(find "$home" -maxdepth 1 -name ".*" 2>/dev/null)
+        # 홈 디렉터리 하위 트리 전체를 스캔(백도어가 1단계 하위에만 숨지 않음).
+        # 단, 출력은 head -50으로 제한하여 타임아웃 방지(whole-/ 스캔은 하지 않음).
+        # 홈 디렉터리가 읽기 불가일 경우 수동 점검 대상으로 표시.
+        if [ ! -r "$home" ]; then
+            unreadable_areas="${unreadable_areas}${home} "
+            continue
+        fi
+        local find_result=$(find "$home" -name ".*" 2>/dev/null | head -50)
 
         if [ -n "$find_result" ]; then
             raw_find_output="${raw_find_output}[Directory: $home]\\n${find_result}\\n\\n"
@@ -125,7 +133,7 @@ diagnose() {
             # 정상적인 숨겨진 파일인지 확인
             local is_normal=false
             for pattern in "${normal_hidden_patterns[@]}"; do
-                if [[ "$filename" =~ $pattern ]]; then
+                if [[ "$filename" =~ ^${pattern}$ ]]; then
                     is_normal=true
                     break
                 fi
@@ -160,22 +168,60 @@ diagnose() {
                     ((suspicious_count++)) || true
                 fi
             fi
-        done < <(find "$home" -maxdepth 1 -name ".*" 2>/dev/null | head -50) || true
+        done < <(find "$home" -name ".*" 2>/dev/null | head -50) || true
     done < /etc/passwd || true
+
+    # 공용 임시/공유 디렉터리(/tmp, /var/tmp, /dev/shm)의 숨김 파일 점검 (백도어 은닉 상습 경로)
+    local tmp_dir
+    for tmp_dir in /tmp /var/tmp /dev/shm; do
+        [ -d "$tmp_dir" ] || continue
+        if [ ! -r "$tmp_dir" ]; then
+            unreadable_areas="${unreadable_areas}${tmp_dir} "
+            continue
+        fi
+        local tmp_find=$(find "$tmp_dir" -maxdepth 1 -name ".*" 2>/dev/null | head -50 || true)
+        if [ -n "$tmp_find" ]; then
+            raw_find_output="${raw_find_output}[Directory: $tmp_dir]\\n${tmp_find}\\n\\n"
+        fi
+        while IFS= read -r hidden_file; do
+            [ -z "$hidden_file" ] && continue
+            ((total_hidden++)) || true
+            local tmp_name=$(basename "$hidden_file")
+            # X11/ICE 등 표준 소켓·락 항목은 정상으로 간주
+            case "$tmp_name" in
+                .X11-unix|.ICE-unix|.XIM-unix|.font-unix|.Test-unix|.X*-lock)
+                    continue ;;
+            esac
+            local tmp_type="file"
+            if [ -d "$hidden_file" ]; then tmp_type="dir"; fi
+            if [ -L "$hidden_file" ]; then tmp_type="symlink"; fi
+            suspicious_files="${suspicious_files}${hidden_file}(${tmp_type}), "
+            ((suspicious_count++)) || true
+        done <<< "$tmp_find" || true
+    done
 
     command_executed="while IFS=: read -r user pw uid gid gecos home shell; do find \"\$home\" -maxdepth 1 -name \".*\" 2>/dev/null; done < /etc/passwd | grep -v -E '\.(bashrc|bash_profile|profile|ssh|gitconfig|gitignore|vimrc|viminfo)$'" || true
 
+    # 점검 범위 안내(홈 디렉터리 하위 트리 + /tmp,/var/tmp,/dev/shm 1단계)
+    local scope_note="[점검 범위] 로그인 사용자 홈 디렉터리 하위 트리(출력 head -50 제한) + /tmp, /var/tmp, /dev/shm. 전체 파일시스템(/) 스캔은 타임아웃 방지를 위해 제외함."
+    [ -n "$unreadable_areas" ] && scope_note="${scope_note}${newline}[읽기 불가로 미점검] ${unreadable_areas% }"
+
     # 최종 판정
-    if [ "$suspicious_count" -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="의심스러운 숨겨진 파일이 발견되지 않았습니다. (확인된 홈 디렉토리: ${checked_homedirs}개, 전체 숨겨진 파일: ${total_hidden}개)"
-        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[No suspicious files found (checked ${checked_homedirs} home directories, ${total_hidden} total hidden files)]"
-    else
+    if [ "$suspicious_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="의심스러운 숨겨진 파일 ${suspicious_count}개가 발견되었습니다: ${suspicious_files%, }. 해당 파일들을 검토한 후 불필요하거나 악성적인 경우 제거하세요: rm -rf <file>"
-        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Suspicious files found]${newline}${suspicious_files%, }"
+        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Suspicious files found]${newline}${suspicious_files%, }${newline}${scope_note}"
+    elif [ -n "$unreadable_areas" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="의심스러운 숨겨진 파일은 발견되지 않았으나 일부 영역을 읽을 수 없어 수동 점검 필요 (읽기 불가: ${unreadable_areas% }). 확인된 홈 디렉토리: ${checked_homedirs}개, 전체 숨겨진 파일: ${total_hidden}개"
+        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}${scope_note}"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="의심스러운 숨겨진 파일이 발견되지 않았습니다. (확인된 홈 디렉토리: ${checked_homedirs}개, 전체 숨겨진 파일: ${total_hidden}개)"
+        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[No suspicious files found (checked ${checked_homedirs} home directories, ${total_hidden} total hidden files)]${newline}${scope_note}"
     fi
 
     # echo ""

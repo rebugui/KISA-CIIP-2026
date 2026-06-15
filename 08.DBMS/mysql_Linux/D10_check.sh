@@ -92,6 +92,9 @@ diagnose() {
         fi
     fi
 
+    # 연결 가드 통과 후이므로, 모든 조회가 공백/오류면 자동 판단 불가(MANUAL)로 처리하기 위한 추적 변수
+    local any_query_ok=0
+
     # 1. bind-address 설정 확인
     local bind_address_query="SHOW VARIABLES LIKE 'bind_address';"
     command_executed="mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e \"${bind_address_query}\""
@@ -99,6 +102,7 @@ diagnose() {
 
     local bind_vulnerable=0
     if [ -n "$command_result" ]; then
+        any_query_ok=1
         local bind_value=$(echo "$command_result" | tail -n +2 | awk '{print $2}' | head -1)
         if [ "$bind_value" = "0.0.0.0" ] || [ "$bind_value" = "::" ]; then
             ((vulnerabilities_found++)) || true
@@ -117,6 +121,7 @@ diagnose() {
 
     local remote_count=0
     if [ -n "$remote_result" ]; then
+        any_query_ok=1
         remote_count=$(echo "$remote_result" | tail -n +2 | grep -v "^$" | wc -l)
         if [ "$remote_count" -gt 0 ]; then
             ((vulnerabilities_found++)) || true
@@ -139,6 +144,11 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="원격 접속 제한 미준수:\n${inspection_summary}"
+    elif [ $any_query_ok -eq 0 ]; then
+        # bind_address / 원격 사용자 조회가 모두 공백/오류 → 자동 판단 불가
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="쿼리 결과 확인 불가 - 권한 부족 가능. bind_address 및 원격 접속 허용 계정(host='%')을 수동으로 확인 필요"
     else
         diagnosis_result="GOOD"
         status="양호"

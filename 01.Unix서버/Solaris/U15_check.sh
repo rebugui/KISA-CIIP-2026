@@ -57,55 +57,38 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # /etc/passwd의 사용자 홈 디렉토리 권한 확인
+    # 가이드 Step 1) 소유자와 그룹이 존재하지 않는 파일 및 디렉터리 확인
+    # find의 -nouser/-nogroup/-xdev는 POSIX 옵션으로 Solaris 기본 find에서 지원됨 (GNU stat 미사용)
+    command_executed="find / \\( -nouser -o -nogroup \\) -xdev -ls 2>/dev/null"
 
-    local vulnerable_homes=""
-    local vulnerable_count=0
-    local total_users=0
+    local find_output=""
+    local find_status=0
+    find_output=$(find / \( -nouser -o -nogroup \) -xdev -ls 2>/dev/null) || find_status=$?
 
-    # /etc/passwd에서 사용자별 홈 디렉토리 권한 확인
-    while IFS= read -r user_line; do
-        local username=$(echo "$user_line" | cut -d: -f1)
-        local uid=$(echo "$user_line" | cut -d: -f3)
-        local home_dir=$(echo "$user_line" | cut -d: -f6)
+    # 증거 출력 제한(최대 50건) 전에 전체 건수를 먼저 집계
+    local orphan_count=0
+    if [ -n "$find_output" ]; then
+        orphan_count=$(printf '%s\n' "$find_output" | grep -c '.' || true)
+    fi
 
-        # 홈 디렉토리가 존재하고, UID가 100 이상인 일반 사용자 확인 (Solaris: UID >= 100)
-        if [ -d "$home_dir" ] && [ "$uid" -ge 100 ] 2>/dev/null; then
-            ((total_users++)) || true
-
-            # 디렉토리 권한 및 소유자 확인
-            local perms=$(stat -c "%a" "$home_dir" 2>/dev/null)
-            local owner=$(stat -c "%U" "$home_dir" 2>/dev/null)
-
-            if [ -n "$perms" ] && [ -n "$owner" ]; then
-                # 취약한 권한 확인: 777, 775, 755 (others에 읽기 권한) 등
-                # others에 쓰기 권한이 있거나, 소유자가 해당 사용자가 아닌 경우
-                local others_write=${perms: -1}
-
-                if [ "$owner" != "$username" ]; then
-                    ((vulnerable_count++)) || true
-                    vulnerable_homes="${vulnerable_homes}${username}: ${home_dir} (소유자: ${owner}, 권한: ${perms}), "
-                elif [ "$others_write" = "7" ] || [ "$others_write" = "6" ] || [ "$others_write" = "3" ] || [ "$others_write" = "2" ]; then
-                    ((vulnerable_count++)) || true
-                    vulnerable_homes="${vulnerable_homes}${username}: ${home_dir} (권한: ${perms}, others 쓰기 가능), "
-                fi
-            fi
-        fi
-    done < /etc/passwd || true
-
-    if [ "$vulnerable_count" -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="사용자 홈 디렉토리 권한 양호 (검사된 사용자: ${total_users}명)"
-        local home_output=$(awk -F: '$3 >= 100 {print $1, $3, $6}' /etc/passwd 2>/dev/null | while read user uid home; do stat -c '%a:%U' "$home" 2>/dev/null; done)
-        command_result="[Command: awk -F: '\$3 >= 100 {print \$1, \$3, \$6}' /etc/passwd | while read user uid home; do stat -c '%a:%U' \"\$home\"; done]${newline}${home_output}"
-        command_executed="awk -F: '\$3 >= 100 {print \$1, \$3, \$6}' /etc/passwd | while read user uid home; do stat -c '%a:%U' \"\$home\" 2>/dev/null; done"
-    else
+    if [ -n "$find_output" ] && [ "$orphan_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="취약한 홈 디렉토리 ${vulnerable_count}개 발견: ${vulnerable_homes%, }"
-        command_result="${vulnerable_homes%, }"
-        command_executed="awk -F: '\$3 >= 100 {print \$1, \$3, \$6}' /etc/passwd | while read user uid home; do stat -c '%a:%U' \"\$home\" 2>/dev/null; done"
+        inspection_summary="소유자 또는 그룹이 존재하지 않는 파일 및 디렉터리 ${orphan_count}건이 발견되었습니다."
+        local capped_list=""
+        capped_list=$(printf '%s\n' "$find_output" | head -50) || true
+        command_result="[Command: ${command_executed}]${newline}발견 건수: ${orphan_count}건 (최대 50건 표시)${newline}${capped_list}"
+    elif [ "$find_status" -ne 0 ]; then
+        # find 명령 자체가 실패한 경우(권한 부족, 시간 초과 등) → 수동 진단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="find 명령 수행이 실패하여(종료코드: ${find_status}) 소유자 없는 파일 및 디렉터리 존재 여부를 자동 판정할 수 없습니다. root 권한으로 수동 확인이 필요합니다."
+        command_result="[Command: ${command_executed}]${newline}find 종료코드: ${find_status}, 출력 없음 (권한 부족 또는 시간 초과 가능성)"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="소유자 또는 그룹이 존재하지 않는 파일 및 디렉터리가 발견되지 않았습니다."
+        command_result="[Command: ${command_executed}]${newline}발견된 파일/디렉터리 없음"
     fi
 
     # echo ""

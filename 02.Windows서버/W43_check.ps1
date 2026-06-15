@@ -48,7 +48,17 @@ try {
                 $identity = $access.IdentityReference.Value
                 $accessList += "$identity : $($access.FileSystemRights)"
 
-                if ($identity -like '*Everyone*') {
+                # The Everyone account localizes (Korean: '모든 사람'), so a name
+                # substring match is unreliable. Compare by the well-known SID
+                # S-1-1-0 after translating the identity reference.
+                $sid = $null
+                try {
+                    $sid = $access.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+                } catch {
+                    $sid = $null
+                }
+
+                if ($sid -eq 'S-1-1-0' -or $identity -like '*Everyone*') {
                     $hasEveryone = $true
                 }
             }

@@ -94,9 +94,11 @@ diagnose() {
     )
 
     # Apache 설정 파일에서 Proxy 지시어 확인
+    local conf_files_read=0
     for conf_pattern in "${apache_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
             if [ -f "${conf_file}" ]; then
+                conf_files_read=$((conf_files_read + 1))
                 # ProxyPass, ProxyPassReverse, ProxyRequests 지시어 확인 (주석 제외)
                 local found_proxy=$(grep -E "^\s*(ProxyPass|ProxyPassReverse|ProxyRequests)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
                 if [ -n "${found_proxy}" ]; then
@@ -109,23 +111,30 @@ diagnose() {
 
     command_executed="grep -E '^\s*(ProxyPass|ProxyPassReverse|ProxyRequests)' /etc/apache2/apache2.conf /etc/httpd/conf/httpd.conf /etc/apache2/sites-enabled/*.conf 2>/dev/null | grep -v '^\s*#'"
 
-    if [ ${proxy_count} -eq 0 ]; then
+    # Apache는 실행 중이나 설정 파일을 한 개도 읽지 못한 경우, 양호로 단정 불가 → 수동진단
+    if [ ${conf_files_read} -eq 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Apache가 실행 중이나 설정 파일을 찾거나 읽을 수 없습니다. Proxy 설정(ProxyRequests/ProxyPass 등) 존재 여부를 수동으로 확인하세요."
+        command_result="No readable Apache configuration file found (Apache process running)"
+    elif [ ${proxy_count} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="불필요한 Proxy 설정이 발견되지 않았습니다. (보안 권고사항 준수)"
         command_result="No proxy settings found"
     else
-        # ProxyRequests On인 경우 취약
+        # ProxyRequests On인 경우 명백히 취약 (Forward Proxy)
         if echo "${proxy_settings}" | grep -iq "ProxyRequests.*On"; then
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="ProxyRequests On 설정이 발견되었습니다. Forward Proxy 활성화로 인한 보안 위험."
             command_result="${proxy_settings}"
         else
-            # ProxyPass/ProxyPassReverse만 있는 경우 (Reverse Proxy)
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="Reverse Proxy 설정만 존재합니다 (${proxy_count}개). Forward Proxy는 비활성화되어 있습니다."
+            # ProxyPass/ProxyPassReverse 등 Proxy 지시어 존재 → 불필요 여부는 자동 단정 불가.
+            # 가이드라인상 '불필요한' Proxy 설정 점검이므로 수동 검토 필요(자동 GOOD 금지).
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="Proxy 지시어(ProxyPass/ProxyPassReverse 등)가 ${proxy_count}건 발견되었습니다. 해당 Proxy 설정이 업무상 필요한지(불필요한 Proxy 여부) 수동으로 검토하세요."
             command_result="${proxy_settings}"
         fi
     fi

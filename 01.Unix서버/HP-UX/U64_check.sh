@@ -58,56 +58,35 @@ diagnose() {
 
     # 진단 로직 구현
     # 주기적 보안 패치 및 벤더 권고 사항 적용 확인
+    # 패치 정책 수립/최신성 여부는 벤더 공지 대비 수동 판단이 필요하므로 항상 수동진단으로 판정
 
     local kernel_version=""
-    local package_updates=0
-    local security_updates=0
-    local last_update_info=""
+    local product_list=""
+    local patch_list=""
     local details=""
     local raw_output=""
 
     # 1) 커널 버전 확인
-    kernel_version=$(uname -r 2>/dev/null)
+    kernel_version=$(uname -r 2>/dev/null || true)
 
-    # 2) 업데이트 가능한 패키지 확인 (HP-UX uses swlist/swmodify)
+    # 2) 설치 제품/패치 현황 수집 (HP-UX swlist)
     if command -v swlist >/dev/null 2>&1; then
-        # HP-UX 패키지 확인
-        local installed_patches=$(swlist 2>/dev/null | grep -i "patch" | wc -l)
-        package_updates=$installed_patches
-
-        # Capture raw output for HP-UX
-        raw_output=$(echo "=== Kernel Version ===" && uname -r && echo -e "\n=== Installed Patches ===" && swlist 2>/dev/null | head -20)
-
-        details="커널: ${kernel_version}, 설치된 패치: ${package_updates}개"
-
-        # 마지막 패치 시간 확인 (HP-UX specific)
-        if [ -f /var/adm/sw/patch/PATCH* ]; then
-            local last_patch_file=$(ls -lt /var/adm/sw/patch/PATCH* 2>/dev/null | head -1 | awk '{print $NF}')
-            if [ -n "$last_patch_file" ]; then
-                last_update_info=$(perl -e 'use POSIX qw(strftime); print strftime "%Y-%m-%d %H:%M:%S", localtime((stat(shift))[9])' "$last_patch_file" 2>/dev/null)
-            fi
-        fi
-        [ -n "$last_update_info" ] && details="${details}, 마지막 패치: ${last_update_info}"
-    else
-        # 다른 배포판의 경우 커널 버전만 확인
-        raw_output=$(echo "=== Kernel Version ===" && uname -r)
-        details="커널: ${kernel_version}, 패키지 매니저: 확인 불가"
+        product_list=$(swlist -l product 2>/dev/null | head -20 || true)
+        patch_list=$(swlist -l patch 2>/dev/null | head -20 || true)
     fi
+    [ -z "$product_list" ] && product_list="확인 불가 (swlist 미존재 또는 결과 없음)"
+    [ -z "$patch_list" ] && patch_list="확인 불가 (swlist 미존재 또는 결과 없음)"
 
-    # 3) 판정
-    if [ "$package_updates" -eq 0 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="설치된 패치가 없습니다: ${details}"
-        command_result="${raw_output}"
-        command_executed="uname -r; swlist 2>/dev/null | head -20"
-    else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="시스템 패치 확인됨: ${details}"
-        command_result="${raw_output}"
-        command_executed="uname -r; swlist 2>/dev/null | grep -i patch | wc -l"
-    fi
+    raw_output="=== Kernel Version ===${newline}${kernel_version}${newline}=== Installed Products (swlist -l product, 상위 20) ===${newline}${product_list}${newline}=== Installed Patches (swlist -l patch, 상위 20) ===${newline}${patch_list}"
+
+    details="커널: ${kernel_version}, 설치 제품/패치 현황: swlist 수집 결과 참조"
+
+    # 3) 판정 (HP-UX): 설치 패치 존재 여부만으로 최신성 판단 불가 — 항상 수동진단
+    diagnosis_result="MANUAL"
+    status="수동진단"
+    inspection_summary="패치 적용 현황 수동 확인 필요 (최신 보안패치 적용 여부는 벤더 공지 대비 수동 판단). ${details}. 설치된 패치 개수만으로는 최신 보안패치 적용 여부를 판단할 수 없음."
+    command_result="${raw_output}"
+    command_executed="uname -r; swlist -l product 2>/dev/null | head -20; swlist -l patch 2>/dev/null | head -20"
 
     # echo ""
     # echo "진단 결과: ${status}"

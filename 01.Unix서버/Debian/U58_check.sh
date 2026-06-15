@@ -61,6 +61,8 @@ diagnose() {
 
     local snmp_running=false
     local service_details=""
+    local probe_available=false
+    local probe_evidence=""
 
     # systemctl 사용 가능한지 확인
     if command -v systemctl >/dev/null 2>&1; then
@@ -76,22 +78,40 @@ diagnose() {
             fi
         done || true
 
-        command_executed="systemctl list-units --type=service --all | grep -E 'snmp|SNMP'"
+        probe_available=true
+        command_executed="systemctl is-active snmpd.service snmptrapd.service net-snmp.service"
+        probe_evidence="[systemctl is-active snmpd.service snmptrapd.service net-snmp.service]${newline}$(systemctl is-active snmpd.service snmptrapd.service net-snmp.service 2>&1 || true)"
     else
         # systemctl이 없는 경우 (legacy init)
         if command -v service >/dev/null 2>&1; then
-            if service snmpd status 2>/dev/null | grep -q "running\|active"; then
+            local service_status_out trapd_status_out
+            service_status_out="$(service snmpd status 2>&1 || true)"
+            trapd_status_out="$(service snmptrapd status 2>&1 || true)"
+            if echo "$service_status_out" | grep -q "running\|active"; then
                 snmp_running=true
                 service_details="snmpd: running"
             fi
-            command_executed="service snmpd status"
-        elif [ -f /etc/init.d/snmpd ]; then
-            # /etc/init.d/snmpd 스크립트 확인
-            if /etc/init.d/snmpd status 2>/dev/null | grep -q "running\|active"; then
+            if echo "$trapd_status_out" | grep -q "running\|active"; then
                 snmp_running=true
-                service_details="snmpd: running"
+                service_details="${service_details:+${service_details}, }snmptrapd: running"
             fi
-            command_executed="/etc/init.d/snmpd status"
+            probe_available=true
+            command_executed="service snmpd status; service snmptrapd status"
+            probe_evidence="[service snmpd status]${newline}$(echo "$service_status_out" | head -3)${newline}[service snmptrapd status]${newline}$(echo "$trapd_status_out" | head -3)"
+        elif [ -f /etc/init.d/snmpd ] || [ -f /etc/init.d/snmptrapd ]; then
+            # /etc/init.d/snmpd, /etc/init.d/snmptrapd 스크립트 확인
+            local initd_status_out initd_svc
+            for initd_svc in snmpd snmptrapd; do
+                [ -f "/etc/init.d/${initd_svc}" ] || continue
+                initd_status_out="$(/etc/init.d/${initd_svc} status 2>&1 || true)"
+                if echo "$initd_status_out" | grep -q "running\|active"; then
+                    snmp_running=true
+                    service_details="${service_details:+${service_details}, }${initd_svc}: running"
+                fi
+                probe_available=true
+                command_executed="${command_executed:+${command_executed}; }/etc/init.d/${initd_svc} status"
+                probe_evidence="${probe_evidence:+${probe_evidence}${newline}}[/etc/init.d/${initd_svc} status]${newline}$(echo "$initd_status_out" | head -3)"
+            done
         else
             # 모든 확인 방법 실패 - 수동 진단으로 설정하고 계속 진행
             diagnosis_result="MANUAL"
@@ -105,11 +125,17 @@ diagnose() {
 
     # 프로세스 확인 (백업 방법)
     if ! $snmp_running && command -v pgrep >/dev/null 2>&1; then
-        if pgrep -x "snmpd" >/dev/null 2>&1; then
-            snmp_running=true
-            service_details="${service_details}snmpd 프로세스 실행 중"
-            command_executed="${command_executed}; pgrep -x snmpd"
-        fi
+        probe_available=true
+        local pgrep_proc
+        for pgrep_proc in snmpd snmptrapd; do
+            if pgrep -x "$pgrep_proc" >/dev/null 2>&1; then
+                snmp_running=true
+                service_details="${service_details}${pgrep_proc} 프로세스 실행 중 "
+            else
+                probe_evidence="${probe_evidence}${probe_evidence:+${newline}}[pgrep -x ${pgrep_proc}]${newline}${pgrep_proc} 프로세스 없음"
+            fi
+        done
+        command_executed="${command_executed:+${command_executed}; }pgrep -x snmpd; pgrep -x snmptrapd"
     fi
 
     # 최종 판정
@@ -118,11 +144,18 @@ diagnose() {
         status="취약"
         inspection_summary="SNMP 서비스가 활성화되어 있습니다 (${service_details%, }). 불필요한 경우 서비스를 중지하고 비활성화해야 합니다: systemctl stop snmpd; systemctl disable snmpd"
         command_result="${service_details%, }"
-    else
+    elif [ "$probe_available" = true ]; then
+        # 점검 명령이 실제로 수행되었고 SNMP 구동 흔적이 없는 경우에만 양호
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="SNMP 서비스가 비활성화되어 있습니다."
-        command_result="[SNMP Service Status]${newline}$(systemctl is-active snmpd 2>&1 || echo 'inactive')${newline}$(systemctl is-active snmp 2>&1 || echo 'inactive')"
+        command_result="[SNMP Service Status]${newline}${probe_evidence:-inactive}"
+    else
+        # 확인 수단 없음 - 위에서 설정된 수동진단 결과 유지
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="${inspection_summary:-SNMP 서비스 상태를 확인할 수 없어 수동 점검이 필요합니다 (systemctl, service, init.d, pgrep 사용 불가)}"
+        command_result="${command_result:-[Cannot determine] 사용 가능한 점검 명령이 없음}"
     fi
 
     # echo ""

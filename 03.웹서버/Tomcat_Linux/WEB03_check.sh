@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="비밀번호 파일 권한 600 이하로 설정"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -106,20 +106,29 @@ diagnose() {
             file_permissions=$(stat -c "%a" "${found_file}" 2>/dev/null || echo "")
             command_executed="stat -c '%a' ${found_file}"
 
-            # 권한 확인: 600 또는 400이면 양호
-            if [ "${file_permissions}" = "600" ] || [ "${file_permissions}" = "400" ]; then
-                is_secure=true
-            elif [ "${file_permissions}" = "640" ]; then
-                # 640도 허용 (group에 읽기 권한만 있는 경우)
-                is_secure=true
+            # 판단기준(가이드): 비밀번호 파일 권한 '600 이하'만 양호.
+            # group/other 비트는 모두 0이어야 하며 owner는 최대 rw(6).
+            # 640(group read)은 600 초과이므로 취약.
+            if [ -n "${file_permissions}" ]; then
+                # 선행 특수권한 자리(setuid 등 4자리)를 제거하고 3자리 8진수만 평가
+                local perm3="${file_permissions: -3}"
+                local owner_digit="${perm3:0:1}"
+                local group_digit="${perm3:1:1}"
+                local other_digit="${perm3:2:1}"
+                if [ "${group_digit}" = "0" ] && [ "${other_digit}" = "0" ] \
+                    && [ -n "${owner_digit}" ] && [ "${owner_digit}" -le 6 ] 2>/dev/null; then
+                    is_secure=true
+                fi
             fi
         else
             # stat 명령어가 없는 경우 ls -l 사용
             file_permissions=$(ls -l "${found_file}" 2>/dev/null | awk '{print $1}' || echo "")
             command_executed="ls -l ${found_file}"
 
-            # -rw------- (600) 또는 -r-------- (400) 또는 -rw-r----- (640) 확인
-            if [[ "${file_permissions}" == "-rw-------" ]] || [[ "${file_permissions}" == "-r--------" ]] || [[ "${file_permissions}" == "-rw-r-----" ]]; then
+            # 600 이하만 양호: group/other 권한이 전혀 없어야 함.
+            # -rw------- (600), -r-------- (400), --------- (000) 등.
+            # -rw-r----- (640, group read)은 600 초과이므로 취약.
+            if [[ "${file_permissions}" =~ ^-[r-][w-]------- ]]; then
                 is_secure=true
             fi
         fi
@@ -128,8 +137,8 @@ diagnose() {
     else
         command_executed="ls -la /etc/tomcat*/tomcat-users.xml /var/lib/tomcat*/conf/tomcat-users.xml 2>/dev/null"
         command_result="tomcat-users.xml file not found"
-        diagnosis_result="UNKNOWN"
-        status="파일없음"
+        diagnosis_result="MANUAL"
+        status="수동진단"
         inspection_summary="tomcat-users.xml 파일을 찾을 수 없습니다."
 
         # Run-all 모드 확인

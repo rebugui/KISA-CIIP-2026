@@ -41,12 +41,16 @@ try {
     }
     else {
         $cgi = @($state.ActiveLines | Where-Object { $_ -match '^(?i)(fastcgi_pass|scgi_pass|uwsgi_pass|cgi_pass)\s+' })
-        $unrestricted = @($cgi | Where-Object { $_ -match '(?i)127\.0\.0\.1|localhost|unix:|fastcgi|cgi' })
         $commandExecuted = "Parse active fastcgi/scgi/uwsgi/cgi pass directives from Nginx Windows configuration"
         $commandOutput = if ($cgi) { ($cgi -join "`n") } else { "No CGI/FastCGI pass directives found." }
-        if ($cgi.Count -eq 0) { $finalResult = "GOOD"; $status = "양호"; $summary = "No CGI/FastCGI execution directives were found." }
-        elseif ($unrestricted.Count -gt 0) { $finalResult = "MANUAL"; $status = "수동진단"; $summary = "CGI/FastCGI execution is configured; confirm it is restricted to approved locations and not upload paths." }
-        else { $finalResult = "GOOD"; $status = "양호"; $summary = "No unrestricted CGI/FastCGI evidence was found." }
+        # CGI/FastCGI 매핑이 존재하면 (백엔드 주소와 무관하게) 실행 가능 디렉터리 제한 여부를
+        # 정적 설정만으로 확인할 수 없으므로 양호로 단정하지 않고 수동진단으로 분류한다.
+        if ($cgi.Count -eq 0) {
+            $finalResult = "GOOD"; $status = "양호"; $summary = "No CGI/FastCGI execution directives were found."
+        }
+        else {
+            $finalResult = "MANUAL"; $status = "수동진단"; $summary = "CGI/FastCGI execution is configured. Confirm execution is restricted to approved directories (and not upload/board paths); this cannot be proven from static configuration alone."
+        }
     }
 }
 catch {

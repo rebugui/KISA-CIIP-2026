@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="응답 헤더에 표시되는 정보를 최소한으로 �
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -87,6 +87,7 @@ diagnose() {
     )
 
     local connector_config=""
+    local valve_hidden=false
 
     for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
@@ -94,9 +95,22 @@ diagnose() {
                 # Connector server 속성 확인
                 local server_attr=$(grep -E "Connector.*server=" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 if [ -n "${server_attr}" ]; then
-                    connector_config="${server_attr}"
-                    if echo "${server_attr}" | grep -q 'server=""'; then
+                    connector_config="${connector_config}"$'\n'"[Connector] ${server_attr}"
+                    # server="" 또는 비어있지 않은 임의 값으로 마스킹된 경우 양호로 판단.
+                    # 단, 기본값/식별 가능 값(Apache-Coyote/Tomcat/Catalina)은 여전히 취약.
+                    if echo "${server_attr}" | grep -qiE 'server\s*=\s*"(Apache-Coyote|Tomcat|Catalina)'; then
+                        : # 기본값/식별값 노출 → 취약 (server_hidden 유지: false)
+                    elif echo "${server_attr}" | grep -qE 'server\s*=\s*"[^"]*"'; then
                         server_hidden=true
+                    fi
+                fi
+
+                # ErrorReportValve showServerInfo="false" 확인 (에러 페이지 서버 정보 노출 제한)
+                local valve_attr=$(grep -iE "ErrorReportValve|showServerInfo" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                if [ -n "${valve_attr}" ]; then
+                    connector_config="${connector_config}"$'\n'"[Valve] ${valve_attr}"
+                    if echo "${valve_attr}" | grep -qiE 'showServerInfo\s*=\s*"false"'; then
+                        valve_hidden=true
                     fi
                 fi
                 break 2
@@ -104,17 +118,17 @@ diagnose() {
         done
     done
 
-    command_executed="grep -E 'Connector.*server=' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -2"
-    command_result="${connector_config:-No server attribute found (default: Apache-Coyote/1.1)}"
+    command_executed="grep -iE 'Connector.*server=|ErrorReportValve|showServerInfo' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -4"
+    command_result="${connector_config:-No server attribute / ErrorReportValve found (default: Apache-Coyote/1.1)}"
 
-    if [ "${server_hidden}" = true ]; then
+    if [ "${server_hidden}" = true ] || [ "${valve_hidden}" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="Connector에 server=\"\" 설정이 되어 있습니다. Server 헤더 정보가 숨겨집니다. (보안 권고사항 준수)"
+        inspection_summary="Connector server=\"\" 마스킹 또는 ErrorReportValve showServerInfo=\"false\" 설정으로 서버 정보 노출이 제한되어 있습니다. (보안 권고사항 준수)"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="Server 헤더에 Tomcat 버전 정보가 노출될 수 있습니다. server=\"\" 설정으로 Server 헤더 숨김 권장."
+        inspection_summary="응답 헤더 또는 에러 페이지에 Tomcat 버전 정보가 노출될 수 있습니다. Connector server=\"\" 마스킹 및 ErrorReportValve showServerInfo=\"false\" 설정 권장."
     fi
 
     # Run-all 모드 확인

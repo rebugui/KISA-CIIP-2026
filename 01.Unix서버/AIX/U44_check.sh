@@ -62,7 +62,7 @@ diagnose() {
     local running_services=()
 
     # 1) tftp 서비스 확인 (AIX: inetd 또는 lssrc)
-    local tftp_state=$(lssrc -s tftp 2>/dev/null | grep tftp | awk '{print $2}' || echo "inoperative")
+    local tftp_state=$(lssrc -s tftp 2>/dev/null | grep tftp | awk '{print $NF}' || echo "inoperative")
     service_info="${service_info}tftp: ${tftp_state}\\n"
     if [ "$tftp_state" = "active" ]; then
         services_running=true
@@ -81,7 +81,7 @@ diagnose() {
 
     # 2) talk/ntalk 서비스 확인 (AIX에서는 일반적으로 사용하지 않음)
     for svc in talk ntalk; do
-        local svc_state=$(lssrc -s "$svc" 2>/dev/null | grep "$svc" | awk '{print $2}' || echo "inoperative")
+        local svc_state=$(lssrc -s "$svc" 2>/dev/null | grep "$svc" | awk '{print $NF}' || echo "inoperative")
         service_info="${service_info}${svc}: ${svc_state}\\n"
         if [ "$svc_state" = "active" ]; then
             services_running=true

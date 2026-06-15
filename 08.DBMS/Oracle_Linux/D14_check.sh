@@ -75,9 +75,11 @@ diagnose() {
     local diagnosis_result="MANUAL" status="수동진단" inspection_summary="" command_result="" command_executed=""
 
     if ! systemctl is-active oracle &>/dev/null && ! pgrep -f "ora_pmon" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="서비스 미실행으로 자동 점검 불가 (수동진단 필요). 서비스 시작 후 주요 설정/비밀번호 파일의 접근 권한을 수동으로 확인하세요."
+        command_result="Oracle process not found"
+        command_executed="systemctl is-active oracle; pgrep -f ora_pmon"
         if declare -f save_dual_result >/dev/null 2>&1; then
             save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
         fi
@@ -125,14 +127,14 @@ diagnose() {
     if [ -d "$oracle_home/dbs" ]; then
         while IFS= read -r -d '' pw_file; do
             config_files+=("$pw_file")
-        done < <(find "$oracle_home/dbs" -name "orapw*" -type f -print 0 2>/dev/null || true)
+        done < <(find "$oracle_home/dbs" -name "orapw*" -type f -print0 2>/dev/null || true)
     fi
 
     # 파라미터 파일 찾기 (spfile<SID>.ora)
     if [ -d "$oracle_home/dbs" ]; then
         while IFS= read -r -d '' sp_file; do
             config_files+=("$sp_file")
-        done < <(find "$oracle_home/dbs" -name "spfile*.ora" -type f -print 0 2>/dev/null || true)
+        done < <(find "$oracle_home/dbs" -name "spfile*.ora" -type f -print0 2>/dev/null || true)
     fi
 
     command_executed="ls -la ${oracle_home}/network/admin/*.ora 2>/dev/null; ls -la ${oracle_home}/dbs/orapw* ${oracle_home}/dbs/spfile*.ora 2>/dev/null"
@@ -154,10 +156,11 @@ diagnose() {
         command_result+="$file_info\n"
 
         # 취약성 판단
-        # oracle 소유가 아니거나, 600/640보다 권한이 넓은 경우
+        # oracle/root 소유가 아니거나, 640 을 초과하는 권한 비트가 있는 경우 취약
+        # (8진수 권한을 비트 연산으로 비교: 640 이하면 ~640 마스크에 걸리는 비트가 없어야 함)
         if [ "$owner" != "oracle" ] && [ "$owner" != "root" ]; then
             vulnerable_files+=("$file (owner=$owner)")
-        elif [ "$perms" -gt 640 ]; then
+        elif ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & ~8#640 & 07777 ))" -ne 0 ]; then
             vulnerable_files+=("$file (perms=$perms)")
         else
             good_files+=("$file")

@@ -11,7 +11,7 @@
 # @Platform    : HP-UX
 # @Severity    : 상
 # @Title       : 불필요한 NFS 서비스 비활성화
-# @Description : SSH 보안 설정 확인 - Protocol 2, PermitRootLogin no, X11Forwarding no, MaxAuthTries <= 3
+# @Description : NFS 서버 데몬(nfsd, rpc.mountd) 및 dfstab/nfsconf 설정 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,82 +57,76 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # /opt/ssh/etc/sshd_config 보안 설정 확인 (HP-UX SSH 경로)
+    # HP-UX NFS 서버 데몬(nfsd, rpc.mountd) 및 설정 파일 점검
+    # 가이드라인: 불필요한 NFS 서비스 관련 데몬이 비활성화된 경우 양호
+    # ※ rpcbind/portmap은 NFS 전용 데몬이 아니므로 참고 증적으로만 수집
 
-    local is_secure=true
-    local config_details=""
-    local issues=()
+    local nfs_active=false
+    local probe_available=false
+    local active_evidence=()
+    local raw_output=""
 
-    local sshd_config="/opt/ssh/etc/sshd_config"
+    # 1) NFS 서버 데몬 프로세스 확인 (nfsd, rpc.mountd)
+    local ps_output=""
+    if command -v ps >/dev/null 2>&1; then
+        probe_available=true
+        ps_output=$(ps -ef 2>/dev/null | grep -E 'nfsd|rpc\.mountd' | grep -v grep || echo "")
+        if [ -n "$ps_output" ]; then
+            nfs_active=true
+            active_evidence+=("NFS 서버 데몬(nfsd/rpc.mountd) 실행 중")
+        fi
+        raw_output="${raw_output}[Command: ps -ef | grep -E 'nfsd|rpc.mountd']${newline}${ps_output:-실행 중인 NFS 서버 데몬 없음}${newline}"
 
-    if [ ! -f "$sshd_config" ]; then
+        # 2) rpcbind/portmap 상태 (참고 증적 - 단독으로는 취약 판정 근거 아님)
+        local rpc_output=$(ps -ef 2>/dev/null | grep -E 'rpcbind|portmap' | grep -v grep || echo "")
+        raw_output="${raw_output}[Command: ps -ef | grep -E 'rpcbind|portmap'] (참고용)${newline}${rpc_output:-실행 중인 rpcbind/portmap 없음}${newline}"
+    else
+        raw_output="${raw_output}[Command: ps] 명령을 사용할 수 없음${newline}"
+    fi
+
+    # 3) /etc/dfs/dfstab 공유(share) 설정 확인
+    local dfstab_entries=""
+    if [ -f /etc/dfs/dfstab ]; then
+        probe_available=true
+        dfstab_entries=$(grep -v '^#' /etc/dfs/dfstab 2>/dev/null | grep -v '^[[:space:]]*$' || echo "")
+        raw_output="${raw_output}[Command: cat /etc/dfs/dfstab]${newline}${dfstab_entries:-공유(share) 설정 없음}${newline}"
+        if [ -n "$dfstab_entries" ] && [ "$nfs_active" = true ]; then
+            active_evidence+=("/etc/dfs/dfstab에 공유(share) 설정 존재")
+        fi
+    else
+        raw_output="${raw_output}[File: /etc/dfs/dfstab] 파일 없음${newline}"
+    fi
+
+    # 4) /etc/rc.config.d/nfsconf NFS_SERVER 설정 확인
+    local nfsconf_setting=""
+    if [ -f /etc/rc.config.d/nfsconf ]; then
+        probe_available=true
+        nfsconf_setting=$(grep -E '^[[:space:]]*NFS_SERVER=' /etc/rc.config.d/nfsconf 2>/dev/null | tail -1 || echo "")
+        raw_output="${raw_output}[Command: grep NFS_SERVER /etc/rc.config.d/nfsconf]${newline}${nfsconf_setting:-NFS_SERVER 설정 없음}${newline}"
+        if echo "$nfsconf_setting" | grep -q 'NFS_SERVER=1'; then
+            nfs_active=true
+            active_evidence+=("/etc/rc.config.d/nfsconf에 NFS_SERVER=1 설정(부팅 시 NFS 서버 기동)")
+        fi
+    else
+        raw_output="${raw_output}[File: /etc/rc.config.d/nfsconf] 파일 없음${newline}"
+    fi
+
+    command_executed="ps -ef | grep -E 'nfsd|rpc.mountd'; ps -ef | grep -E 'rpcbind|portmap'; cat /etc/dfs/dfstab; grep NFS_SERVER /etc/rc.config.d/nfsconf"
+    command_result="${raw_output}"
+
+    # 최종 판정
+    if [ "$nfs_active" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="NFS 서비스가 활성화되어 있습니다: ${active_evidence[*]}"
+    elif [ "$probe_available" = true ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="NFS 서버 데몬(nfsd/rpc.mountd)이 비활성화되어 있고 부팅 시 NFS 서버 기동 설정이 없습니다."
+    else
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="SSH 설정 파일 없음 (서비스 미설치)"
-        local ssh_ls=$(ls -la "$sshd_config" 2>/dev/null || echo "File not found: $sshd_config")
-        command_result="${ssh_ls}"
-        command_executed="ls -la $sshd_config"
-    else
-        # 1) Protocol 설정 확인 (Protocol 2 또는 Protocol 2,1)
-        local protocol=$(grep -E "^Protocol" "$sshd_config" | awk '{print $2}')
-        if [ -z "$protocol" ]; then
-            # 기본값은 2 (OpenSSH 5.4+는 Protocol 2만 지원)
-            protocol="2"
-        fi
-        if [ "$protocol" != "2" ]; then
-            is_secure=false
-            issues+=("Protocol=${protocol} (2여야 함)")
-        fi
-
-        # 2) PermitRootLogin 확인
-        local root_login=$(grep -E "^PermitRootLogin" "$sshd_config" | awk '{print $2}')
-        if [ -z "$root_login" ]; then
-            root_login=$(ssh -G root 2>/dev/null | grep permitrootlogin | awk '{print $2}' || echo "yes")
-        fi
-        if [ "$root_login" != "no" ]; then
-            is_secure=false
-            issues+=("PermitRootLogin=${root_login} (no여야 함)")
-        fi
-
-        # 3) X11Forwarding 확인
-        local x11_forwarding=$(grep -E "^X11Forwarding" "$sshd_config" | awk '{print $2}')
-        if [ -z "$x11_forwarding" ]; then
-            x11_forwarding="yes"  # 기본값
-        fi
-        if [ "$x11_forwarding" != "no" ]; then
-            is_secure=false
-            issues+=("X11Forwarding=${x11_forwarding} (no여야 함)")
-        fi
-
-        # 4) MaxAuthTries 확인 (<= 3)
-        local max_auth_tries=$(grep -E "^MaxAuthTries" "$sshd_config" | awk '{print $2}')
-        if [ -n "$max_auth_tries" ]; then
-            if [ "$max_auth_tries" -gt 3 ]; then
-                is_secure=false
-                issues+=("MaxAuthTries=${max_auth_tries} (<= 3이어야 함)")
-            fi
-        else
-            # 기본값은 6
-            is_secure=false
-            issues+=("MaxAuthTries 미설정 (기본값 6, <= 3이어야 함)")
-        fi
-
-        config_details="Protocol=${protocol}, PermitRootLogin=${root_login}, X11Forwarding=${x11_forwarding}"
-        [ -n "$max_auth_tries" ] && config_details="${config_details}, MaxAuthTries=${max_auth_tries}"
-
-        if [ "$is_secure" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="SSH 보안 설정 적절함 (${config_details})"
-            command_result="${config_details}"
-            command_executed="grep -E '^Protocol|^PermitRootLogin|^X11Forwarding|^MaxAuthTries' /opt/ssh/etc/sshd_config"
-        else
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="SSH 보안 설정 미흡: ${issues[*]}"
-            command_result="${config_details}"
-            command_executed="grep -E '^Protocol|^PermitRootLogin|^X11Forwarding|^MaxAuthTries' /opt/ssh/etc/sshd_config"
-        fi
+        inspection_summary="ps 명령 및 NFS 설정 파일(/etc/dfs/dfstab, /etc/rc.config.d/nfsconf)을 확인할 수 없어 NFS 서비스 상태를 수동으로 점검해야 합니다."
     fi
 
     # echo ""

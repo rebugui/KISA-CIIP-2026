@@ -33,42 +33,72 @@ if (-not (Test-RunallMode)) {
 }
 
 # 1. Check FTP IP restriction settings
+# 'FTP*' 이름 와일드카드는 'Default FTP Site' 등 비-FTP-접두 사이트를 놓친다.
+# 모든 IIS 사이트를 열거하여 FTP 바인딩을 가진 사이트별로 ipSecurity를 점검한다.
+# IP 제한이 없는 FTP 사이트가 하나라도 있으면 취약.
 try {
+    $commandExecuted = "Get-Website | (ftp binding) | Get-WebConfiguration system.ftpServer/security/ipSecurity -Location <site>"
+
     Import-Module WebAdministration -ErrorAction SilentlyContinue
-    $ftpSite = Get-Website -Name 'FTP*' -ErrorAction SilentlyContinue | Select-Object -First 1
 
-    if ($ftpSite) {
-        $ipSecurity = Get-WebConfiguration -Filter '/system.ftpServer/security/ipSecurity' -PSPath 'IIS:\' -ErrorAction SilentlyContinue
-
-        if ($ipSecurity -and ($ipSecurity.AllowUnlisted -eq $false -or $ipSecurity.ChildElements.Count -gt 0)) {
-            $finalResult = "GOOD"
-            $summary = "FTP 서비스에 IP 제한 설정이 적용됨"
-            $status = "양호"
-            $ipRestrictionDetails = "AllowUnlisted: $($ipSecurity.AllowUnlisted)"
-            if ($ipSecurity.ChildElements.Count -gt 0) {
-                $ipRestrictionDetails += "; Rules configured: $($ipSecurity.ChildElements.Count)"
-            }
-            $commandOutput = $ipRestrictionDetails
-        } else {
-            $finalResult = "VULNERABLE"
-            $summary = "FTP 서비스에 IP 주소 기반 접근 제한이 설정되지 않음"
-            $status = "취약"
-            $commandOutput = if ($ipSecurity) { "No IP restrictions configured; AllowUnlisted: $($ipSecurity.AllowUnlisted)" } else { "IP Security not configured" }
-        }
+    if (-not (Get-Command Get-Website -ErrorAction SilentlyContinue)) {
+        # IIS 구성 모듈이 없으면 자동 점검 불가.
+        $finalResult = "MANUAL"
+        $summary = "WebAdministration 모듈을 사용할 수 없어 FTP 접근 제어 설정을 자동으로 확인할 수 없음 (수동 확인 필요)"
+        $status = "수동진단"
+        $commandOutput = "WebAdministration module unavailable"
     } else {
-        $finalResult = "GOOD"
-        $summary = "FTP 서비스가 설치되지 않음 또는 FTP 사이트가 구성되지 않음"
-        $status = "양호"
-        $commandOutput = "No FTP site configured"
-    }
+        $ftpSites = @()
+        foreach ($site in @(Get-Website -ErrorAction SilentlyContinue)) {
+            $hasFtpBinding = $false
+            foreach ($b in @($site.Bindings.Collection)) {
+                if ($b.protocol -eq 'ftp') { $hasFtpBinding = $true }
+            }
+            if ($hasFtpBinding) { $ftpSites += $site }
+        }
 
-    $commandExecuted = "Get-WebConfiguration -Filter '/system.ftpServer/security/ipSecurity' -PSPath 'IIS:\'"
+        if ($ftpSites.Count -eq 0) {
+            $finalResult = "GOOD"
+            $summary = "FTP 바인딩을 가진 IIS 사이트가 없음 (FTP 서비스 미사용)"
+            $status = "양호"
+            $commandOutput = "No IIS site with FTP binding"
+        } else {
+            $unrestricted = @()
+            $restricted = @()
+
+            foreach ($site in $ftpSites) {
+                $ipSecurity = Get-WebConfiguration -Filter 'system.ftpServer/security/ipSecurity' -PSPath 'IIS:\' -Location $site.Name -ErrorAction SilentlyContinue
+                # 명시적 허용 규칙이 있거나 미등록 클라이언트 접근을 거부(AllowUnlisted=false)하면 제한된 것으로 본다.
+                $ruleCount = 0
+                if ($ipSecurity -and $ipSecurity.Collection) { $ruleCount = @($ipSecurity.Collection).Count }
+                $allowUnlisted = if ($ipSecurity) { $ipSecurity.allowUnlisted } else { $true }
+
+                if ($ipSecurity -and ($allowUnlisted -eq $false -or $ruleCount -gt 0)) {
+                    $restricted += "$($site.Name) (AllowUnlisted=$allowUnlisted, Rules=$ruleCount)"
+                } else {
+                    $unrestricted += "$($site.Name) (AllowUnlisted=$allowUnlisted, Rules=$ruleCount)"
+                }
+            }
+
+            if ($unrestricted.Count -gt 0) {
+                $finalResult = "VULNERABLE"
+                $summary = "특정 IP 주소 기반 접근 제어가 설정되지 않은 FTP 사이트가 존재함"
+                $status = "취약"
+                $commandOutput = "Unrestricted FTP sites: " + ($unrestricted -join '; ')
+            } else {
+                $finalResult = "GOOD"
+                $summary = "모든 FTP 사이트에 IP 주소 기반 접근 제어가 적용됨"
+                $status = "양호"
+                $commandOutput = "Restricted FTP sites: " + ($restricted -join '; ')
+            }
+        }
+    }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-WebConfiguration -Filter '/system.ftpServer/security/ipSecurity' -PSPath 'IIS:\'"
+    $commandExecuted = "Get-Website | (ftp binding) | Get-WebConfiguration system.ftpServer/security/ipSecurity -Location <site>"
     $commandOutput = "진단 실패: $_"
 }
 

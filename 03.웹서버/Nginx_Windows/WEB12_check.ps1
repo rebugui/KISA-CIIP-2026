@@ -52,26 +52,34 @@ try {
         $roots = @((Get-NginxRootPaths -State $state) + (Get-NginxDefaultRootCandidates) | Select-Object -Unique)
         $aliases = @(Get-NginxAliasPaths -State $state)
         $linkFindings = [System.Collections.Generic.List[string]]::new()
+        $scanIncomplete = $false
 
         foreach ($root in $roots) {
             if (-not (Test-Path -LiteralPath $root -PathType Container)) {
                 continue
             }
-            foreach ($item in @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {
+            # 심볼릭 링크/바로가기 누락을 막기 위해 스캔 결과를 절단(Select-Object -First N)하지 않는다.
+            # 열거 중 오류가 발생하면 불완전 스캔으로 표시하여 양호 단정을 방지한다.
+            $scanErrors = $null
+            foreach ($item in @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable scanErrors | Where-Object {
                 ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or $_.Extension -match '(?i)^\.lnk$'
-            } | Select-Object -First 50)) {
+            })) {
                 $linkFindings.Add($item.FullName) | Out-Null
+            }
+            if ($scanErrors -and $scanErrors.Count -gt 0) {
+                $scanIncomplete = $true
             }
         }
 
-        $commandExecuted = "Inspect Nginx alias directives and reparse/link files under configured roots"
+        $commandExecuted = "Inspect Nginx alias directives and all reparse/link files under configured roots (no result cap)"
         $commandOutput = (@(
             "Config files: $($state.Config.Files -join ', ')",
             "Root paths: $($roots -join ', ')",
             "Alias directives: $($aliases.Count)",
             ($aliases | ForEach-Object { "$($_.Directive) => $($_.Path)" }),
             "Reparse/link findings: $($linkFindings.Count)",
-            $linkFindings
+            $linkFindings,
+            "Scan incomplete (enumeration errors): $scanIncomplete"
         ) | Where-Object { $_ }) -join "`n"
 
         if ($linkFindings.Count -gt 0) {
@@ -83,6 +91,12 @@ try {
             $finalResult = "MANUAL"
             $status = "수동진단"
             $summary = "Nginx alias directives were found. Confirm each alias is required and does not expose unauthorized paths."
+        }
+        elseif ($scanIncomplete) {
+            # 링크를 찾지 못했더라도 스캔이 불완전했다면 양호로 단정할 수 없음 → 수동진단
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Web root link scan was incomplete due to enumeration errors (access denied/long paths). Manually verify that no symbolic links or shortcuts expose unauthorized paths."
         }
         elseif ($roots.Count -gt 0) {
             $finalResult = "GOOD"

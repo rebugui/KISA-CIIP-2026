@@ -34,28 +34,38 @@ if (-not (Test-RunallMode)) {
 }
 
 # 1. Check if FTP service is running
+# 가이드라인: 'FTP Publishing Service(Windows 2012 이상: Microsoft FTP Service)'
+# Windows 2012+ 의 IIS FTP 서비스명은 FTPSVC(Microsoft FTP Service)이며,
+# 구버전 IIS FTP 서비스명은 MSFTPSVC(FTP Publishing Service)이므로 두 서비스를 모두 점검한다.
 try {
-    $service = Get-Service -Name 'MSFTPSVC' -ErrorAction SilentlyContinue
+    $commandExecuted = "Get-Service -Name 'MSFTPSVC','FTPSVC'"
+    $ftpServices = @(Get-Service -Name 'MSFTPSVC', 'FTPSVC' -ErrorAction SilentlyContinue)
 
-    if ($service -and $service.Status -eq 'Running') {
+    $runningServices = @($ftpServices | Where-Object { $_.Status -eq 'Running' })
+
+    if ($runningServices.Count -gt 0) {
+        # 암호화되지 않는 OS 기본 FTP 서비스가 실제 구동 중 → 취약.
+        $detail = ($runningServices | ForEach-Object { "$($_.Name): $($_.Status)" }) -join '; '
         $finalResult = "VULNERABLE"
-        $summary = "FTP 서비스가 실행 중 (평문 암호 전송으로 보안 위험)"
+        $summary = "암호화되지 않는 FTP 서비스가 실행 중 (평문 암호 전송으로 보안 위험): $detail"
         $status = "취약"
-        $commandOutput = "FTP Service Status: $($service.Status)"
+        $commandOutput = $detail
     } else {
         $finalResult = "GOOD"
         $summary = "FTP 서비스가 비활성화됨 (또는 중지됨)"
         $status = "양호"
-        $commandOutput = if ($service) { "FTP Service Status: $($service.Status)" } else { "FTP Service not installed" }
+        $commandOutput = if ($ftpServices.Count -gt 0) {
+            ($ftpServices | ForEach-Object { "$($_.Name): $($_.Status)" }) -join '; '
+        } else {
+            "FTP Service not installed (MSFTPSVC/FTPSVC)"
+        }
     }
-
-    $commandExecuted = "Get-Service -Name 'MSFTPSVC'"
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-Service -Name 'MSFTPSVC'"
+    $commandExecuted = "Get-Service -Name 'MSFTPSVC','FTPSVC'"
     $commandOutput = "진단 실패: $_"
 }
 

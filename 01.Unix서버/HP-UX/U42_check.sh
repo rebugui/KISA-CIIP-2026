@@ -11,7 +11,7 @@
 # @Platform    : HP-UX
 # @Severity    : 상
 # @Title       : 불필요한 RPC 서비스 비활성화
-# @Description : nfs-server, rpcbind 서비스 비활성화 확인
+# @Description : 취약점이 있는 불필요한 RPC 서비스(rpc.cmsd, rusersd, rexd 등) 비활성화 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,57 +57,64 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # nfs-server, rpcbind 서비스 상태 확인
+    # 가이드라인 명시 불필요 RPC 서비스의 활성화 여부 확인 (inetd.conf + 프로세스)
 
     local is_secure=true
+    local probe_available=false
     local service_status=""
     local active_services=()
 
-    # 확인할 서비스 목록
-    local services=("nfs-server" "rpcbind" "nfs-client.target")
+    # 가이드라인(U-42) 명시 불필요 RPC 서비스 목록 (15종)
+    local rpc_service_list=("rpc.cmsd" "rpc.ttdbserverd" "sadmind" "rusersd" "walld" "sprayd" "rstatd" "rpc.nisd" "rexd" "rpc.pcnfsd" "rpc.statd" "rpc.ypupdated" "rpc.rquotad" "kcms_server" "cachefsd")
+    # 데몬명(rpc.*)과 inetd 서비스명 표기를 모두 매칭 (rwalld→walld, ttdbserverd→ttdbserver 포함)
+    local rpc_pattern='cmsd|ttdbserver|sadmind|rusersd|walld|sprayd|rstatd|statd|nisd|rexd|pcnfsd|ypupdated|rquotad|kcms_server|cachefsd'
 
-    for service in "${services[@]}"; do
-        # HP-UX init.d로 서비스 상태 확인
-        if [ -f /sbin/init.d/"$service" ]; then
-            local state=$(/sbin/init.d/"$service" status 2>/dev/null | grep -q "running" 2>/dev/null && echo "active" || echo "inactive")
-
-            if [ "$state" = "active" ]; then
-                is_secure=false
-                active_services+=("${service} (active)")
-            fi
-
-            service_status="${service_status}${service}: ${state}\\n"
-        fi
-    done || true
-
-    # 포트 확인 (NFS: 2049, rpcbind: 111)
-    if command -v ss &>/dev/null; then
-        local nfs_port=$(ss -tuln | grep ":2049 " || echo "")
-        local rpcbind_port=$(ss -tuln | grep ":111 " || echo "")
-
-        if [ -n "$nfs_port" ]; then
+    # 1) /etc/inetd.conf 내 불필요 RPC 서비스 확인 (비주석 항목)
+    if [ -f /etc/inetd.conf ]; then
+        probe_available=true
+        local inetd_entries=$(grep -Ei "$rpc_pattern" /etc/inetd.conf 2>/dev/null | grep -Ev '^[[:space:]]*#' || echo "")
+        if [ -n "$inetd_entries" ]; then
             is_secure=false
-            service_status="${service_status}NFS 포트 2049 활성화\\n"
+            local inetd_names=$(echo "$inetd_entries" | awk '{print $1}' | sort -u | xargs)
+            active_services+=("inetd.conf: ${inetd_names}")
+            service_status="${service_status}inetd.conf에서 불필요 RPC 서비스 활성화됨\\n"
+        else
+            service_status="${service_status}inetd.conf: 불필요 RPC 서비스 항목 없음\\n"
         fi
-        if [ -n "$rpcbind_port" ]; then
+    else
+        service_status="${service_status}/etc/inetd.conf 파일 없음\\n"
+    fi
+
+    # 2) 불필요 RPC 프로세스 확인
+    if command -v ps >/dev/null 2>&1; then
+        probe_available=true
+        local rpc_procs=$(ps -ef 2>/dev/null | grep -Ei "$rpc_pattern" | grep -v grep || echo "")
+        if [ -n "$rpc_procs" ]; then
             is_secure=false
-            service_status="${service_status}rpcbind 포트 111 활성화\\n"
+            local proc_names=$(echo "$rpc_procs" | awk '{print $8}' | sort -u | xargs)
+            active_services+=("프로세스: ${proc_names}")
+            service_status="${service_status}불필요 RPC 프로세스 실행 중\\n"
+        else
+            service_status="${service_status}불필요 RPC 프로세스 없음\\n"
         fi
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    command_result="점검 대상: ${rpc_service_list[*]}\\n${service_status}"
+    command_executed="grep -Ei '${rpc_pattern}' /etc/inetd.conf; ps -ef | grep -Ei '${rpc_pattern}'"
+
+    if [ "$probe_available" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="inetd.conf와 ps를 확인할 수 없어 불필요한 RPC 서비스 상태를 수동으로 점검해야 합니다."
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="NFS 관련 서비스 비활성화됨"
-        command_result="${service_status}"
-        command_executed="/sbin/init.d/nfs-server status 2>/dev/null | grep -q "running" rpcbind; ss -tuln | grep -E ':2049|:111'"
+        inspection_summary="불필요한 RPC 서비스가 비활성화되어 있습니다."
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="NFS 관련 서비스 활성화됨: ${active_services[*]}"
-        command_result="${service_status}"
-        command_executed="/sbin/init.d/nfs-server status 2>/dev/null | grep -q "running" rpcbind; ss -tuln | grep -E ':2049|:111'"
+        inspection_summary="보안에 취약한 RPC 서비스가 활성화되어 있습니다: ${active_services[*]}"
     fi
 
     # echo ""

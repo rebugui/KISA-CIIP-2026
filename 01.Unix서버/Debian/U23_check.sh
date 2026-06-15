@@ -11,7 +11,7 @@
 # @Platform    : Debian
 # @Severity    : 상
 # @Title       : SUID, SGID, Sticky bit 설정 파일 점검
-# @Description : 불필요한 SUID/SGID 파일 확인
+# @Description : 불필요하거나 의심스러운 파일에 SUID, SGID 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,78 +57,81 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # 중요 시스템 설정 파일의 SUID/SGID 및 권한 점검
+    # SUID/SGID 설정 파일 탐색 후 표준 허용 목록과 비교 점검
 
-    local config_dirs="/etc /usr/bin /usr/sbin /usr/local/bin /usr/local/sbin"
-    local world_writable_files=""
-    local ww_count=0
-    local details=""
+    # 표준 시스템 SUID/SGID 바이너리 허용 목록 (basename 완전 일치 비교)
+    local suid_allowlist=(
+        ping ping6 traceroute traceroute6 tracepath
+        su sudo doas passwd gpasswd chsh chfn chage expiry newgrp
+        mount umount fusermount fusermount3
+        pkexec at crontab ssh-keysign ssh-agent unix_chkpwd Xorg
+        wall write bsd-write dotlockfile locate mlocate sperl uptime
+        chown chmod rsh rcp rlogin rshd telnet ftp ftpd nc tcpdump wbem expire
+    )
 
-    # world-writable 파일 검색 (일반 사용자 쓰기 권한) - 실제 명령어 결과 저장
     local raw_find_output=""
-    for dir in $config_dirs; do
-        if [ -d "$dir" ]; then
-            local dir_output=$(find "$dir" -perm -2 -type f 2>/dev/null | head -20 || true)
-            if [ -n "$dir_output" ]; then
-                raw_find_output="${raw_find_output}${dir_output}"$'\n'
-            fi
-            while IFS= read -r file; do
-                if [ -n "$file" ]; then
-                    ((ww_count++)) || true
-                    local perms=$(stat -c "%a" "$file" 2>/dev/null)
-                    local owner=$(stat -c "%U:%G" "$file" 2>/dev/null)
+    local find_rc=0
+    raw_find_output=$(find / -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null) || find_rc=$?
 
-                    world_writable_files="${world_writable_files}${file} (권한: ${perms}, 소유자: ${owner}), "
+    local total_count=0
+    local evidence_output=""
+    if [ -n "$raw_find_output" ]; then
+        total_count=$(printf '%s\n' "$raw_find_output" | wc -l | tr -d ' ')
+        evidence_output=$(printf '%s\n' "$raw_find_output" | head -30)
+    fi
+
+    local find_cmd="find / -xdev \\( -perm -4000 -o -perm -2000 \\) -type f 2>/dev/null"
+
+    # 허용 목록 비교 (basename 완전 일치 - 부분 일치 허용 안 함)
+    local vulnerable_count=0
+    local vulnerable_files=""
+    if [ -n "$raw_find_output" ]; then
+        while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            local fname
+            fname=$(basename "$file")
+            local allowed=false
+            local allowed_name=""
+            for allowed_name in "${suid_allowlist[@]}"; do
+                if [ "$fname" = "$allowed_name" ]; then
+                    allowed=true
+                    break
                 fi
-            done <<< "$dir_output" || true
-        fi
-    done || true
-
-    # 추가: 중요 설정 파일의 권한 확인 - 실제 명령어 결과 저장
-    local important_files="/etc/passwd /etc/shadow /etc/group /etc/gshadow /etc/hosts /etc/services /etc/inetd.conf /etc/rsyslog.conf"
-    local important_vulnerable=""
-    local important_count=0
-    local raw_important_output=""
-
-    for file in $important_files; do
-        if [ -f "$file" ]; then
-            local perms=$(stat -c "%a" "$file" 2>/dev/null)
-            local owner=$(stat -c "%U:%G" "$file" 2>/dev/null)
-            raw_important_output="${raw_important_output}${file}: ${perms} ${owner}"$'\n'
-
-            # world-writable 확인 (마지막 숫자가 7, 6, 3, 2인 경우)
-            local last_char="${perms: -1}"
-
-            if [ "$last_char" = "7" ] || [ "$last_char" = "6" ] || [ "$last_char" = "3" ] || [ "$last_char" = "2" ]; then
-                ((important_count++)) || true
-                important_vulnerable="${important_vulnerable}${file} (권한: ${perms}), "
+            done
+            if [ "$allowed" = false ]; then
+                ((vulnerable_count++)) || true
+                if [ "$vulnerable_count" -le 30 ]; then
+                    vulnerable_files="${vulnerable_files}${file}${newline}"
+                fi
             fi
-        fi
-    done || true
+        done <<< "$raw_find_output" || true
+    fi
 
     # 결과 판정
-    if [ "$ww_count" -eq 0 ] && [ "$important_count" -eq 0 ]; then
+    if [ "$find_rc" -ne 0 ] && [ -z "$raw_find_output" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="find 명령으로 SUID/SGID 파일을 탐색할 수 없습니다(종료코드: ${find_rc}). SUID/SGID 설정 파일을 수동으로 점검하시기 바랍니다."
+        command_result="[Command: ${find_cmd}]${newline}find 실행 실패 또는 결과 없음 (종료코드: ${find_rc})"
+        command_executed="${find_cmd}"
+    elif [ "$total_count" -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="world-writable 설정 파일 없음, 중요 설정 파일 보안 양호"
-        command_result="[Command: find world-writable files]${newline}${raw_find_output}${newline}${newline}[Command: Check important files]${newline}${raw_important_output}"
-        command_executed="find /etc /usr/bin /usr/sbin -perm -2 -type f 2>/dev/null; stat -c '%a:%U:%G' /etc/passwd /etc/shadow /etc/group"
-    else
+        inspection_summary="SUID/SGID 설정 파일이 발견되지 않았습니다."
+        command_result="[Command: ${find_cmd}]${newline}SUID/SGID 설정 파일 없음"
+        command_executed="${find_cmd}"
+    elif [ "$vulnerable_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        details=""
-
-        if [ "$ww_count" -gt 0 ]; then
-            details="${details}world-writable 파일 ${ww_count}개 발견: ${world_writable_files%, }. "
-        fi
-
-        if [ "$important_count" -gt 0 ]; then
-            details="${details}중요 설정 파일 취약 ${important_count}개: ${important_vulnerable%, }. "
-        fi
-
-        inspection_summary="취약: ${details}"
-        command_result="[Command: find world-writable files]${newline}${raw_find_output}${newline}${newline}[Command: Check important files]${newline}${raw_important_output}"
-        command_executed="find /etc /usr/bin /usr/sbin -perm -2 -type f 2>/dev/null; stat -c '%a:%U:%G' /etc/passwd /etc/shadow /etc/group"
+        inspection_summary="허용 목록에 없는 SUID/SGID 설정 파일이 발견되었습니다. (전체 ${total_count}개 중 ${vulnerable_count}개 의심) 불필요한 SUID/SGID 권한을 제거하시기 바랍니다."
+        command_result="[Command: ${find_cmd}]${newline}${evidence_output}${newline}${newline}[허용 목록 외 SUID/SGID 파일 (${vulnerable_count}개)]${newline}${vulnerable_files}"
+        command_executed="${find_cmd}"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="SUID/SGID 설정 파일 ${total_count}개가 발견되었으며 모두 표준 시스템 바이너리입니다. 불필요한 파일인지 수동으로 확인하시기 바랍니다."
+        command_result="[Command: ${find_cmd}]${newline}${evidence_output}"
+        command_executed="${find_cmd}"
     fi
 
     # echo ""

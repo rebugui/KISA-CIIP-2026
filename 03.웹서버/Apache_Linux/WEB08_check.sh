@@ -11,7 +11,7 @@
 # @Platform    : Apache_Linux
 # @Severity    : 하
 # @Title       : 웹 서비스 파일 업로드 및 다운로드 용량 제한
-# @Description : Apache .htaccess 파일의 오버라이드 권한 제한 여부 점검
+# @Description : LimitRequestBody 지시자를 통한 파일 업로드/다운로드 용량 제한 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 set -euo pipefail
@@ -45,7 +45,6 @@ diagnose() {
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local allowoverride_all=0
 
         # Process check
     if command -v pgrep >/dev/null; then
@@ -80,36 +79,70 @@ diagnose() {
     else
         echo "[INFO] pgrep command missing, skipping process check."
     fi
+        # LimitRequestBody 지시자로 업로드/다운로드 용량을 제한하는지 점검 (판단기준)
         local apache_conf_locations=(
             "/etc/apache2/apache2.conf"
             "/etc/httpd/conf/httpd.conf"
-        "/usr/local/apache2/conf/httpd.conf"
+            "/usr/local/apache2/conf/httpd.conf"
             "/etc/apache2/sites-enabled/*"
             "/etc/httpd/conf.d/*"
+            "/etc/apache2/conf-enabled/*"
         )
 
+        local readable_conf_found=false
+        local limit_lines=""
+        local limit_nonzero_found=false
+        local limit_zero_found=false
+
         for conf_pattern in "${apache_conf_locations[@]}"; do
-            if ls ${conf_pattern} 1> /dev/null 2>&1; then
-                local ao=$(grep -rhE "^\s*AllowOverride\s+All" ${conf_pattern} 2>/dev/null | grep -v "^\s*#" | head -5 || true)
-                if [ -n "${ao}" ]; then
-                    allowoverride_all=1
-                    command_result="${ao}"
-                    break
+            for conf_file in $conf_pattern; do
+                if [ -f "${conf_file}" ] && [ -r "${conf_file}" ]; then
+                    readable_conf_found=true
+                    local found_limit
+                    found_limit=$(grep -hE "^\s*LimitRequestBody\s+[0-9]+" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
+                    if [ -n "${found_limit}" ]; then
+                        limit_lines="${limit_lines}"$'\n'"${found_limit}"
+                        # 0 = 무제한(취약), 0보다 큰 값 = 제한(양호)
+                        while IFS= read -r limit_line; do
+                            [ -z "${limit_line}" ] && continue
+                            local limit_val
+                            limit_val=$(echo "${limit_line}" | grep -oE "[0-9]+" | head -1)
+                            if [ -n "${limit_val}" ]; then
+                                if [ "${limit_val}" -gt 0 ]; then
+                                    limit_nonzero_found=true
+                                else
+                                    limit_zero_found=true
+                                fi
+                            fi
+                        done <<< "${found_limit}"
+                    fi
                 fi
-            fi
+            done
         done
 
-        command_executed="grep -rhE '^\s*AllowOverride' /etc/apache2/apache2.conf /etc/apache2/sites-enabled/ 2>/dev/null | grep -v '^\s*#'"
+        command_executed="grep -hE '^\s*LimitRequestBody' /etc/apache2/apache2.conf /etc/httpd/conf/httpd.conf /etc/apache2/sites-enabled/* /etc/httpd/conf.d/* 2>/dev/null | grep -v '^\s*#'"
 
-        if [ ${allowoverride_all} -eq 1 ]; then
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="AllowOverride All 설정이 발견되었습니다. 사용자가 .htaccess로 보안 설정을 변경할 수 있습니다. AllowOverride None을 권장합니다."
-        else
+        if [ "${readable_conf_found}" != true ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="Apache 설정 파일을 읽을 수 없어 LimitRequestBody 설정을 확인할 수 없습니다. 설정 파일에서 업로드/다운로드 용량 제한(LimitRequestBody)을 수동으로 확인하세요."
+            command_result="Apache configuration file not readable"
+        elif [ "${limit_nonzero_found}" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="AllowOverride가 제한적으로 설정되어 있거나 All이 아닙니다. .htaccess 오버라이드가 적절히 제한됩니다."
-    fi
+            inspection_summary="LimitRequestBody 지시자로 파일 업로드/다운로드 용량이 제한되어 있습니다. (보안 권고사항 준수)"
+            command_result="${limit_lines#$'\n'}"
+        elif [ "${limit_zero_found}" = true ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="LimitRequestBody가 0(무제한)으로 설정되어 있습니다. 파일 업로드/다운로드 용량이 제한되지 않습니다. 허용 가능한 최소 범위로 제한하세요."
+            command_result="${limit_lines#$'\n'}"
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="LimitRequestBody 지시자가 설정되어 있지 않습니다. 파일 업로드/다운로드 용량이 제한되지 않습니다. LimitRequestBody로 허용 가능한 최소 범위를 설정하세요."
+            command_result="No LimitRequestBody directive found"
+        fi
     # Run-all 모드 확인
     save_dual_result \
         "${ITEM_ID}" \

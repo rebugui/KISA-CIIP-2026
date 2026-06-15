@@ -47,7 +47,6 @@ diagnose() {
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local dav_enabled=false
 
         # Process check
     if command -v pgrep >/dev/null; then
@@ -85,37 +84,67 @@ diagnose() {
         local apache_conf_locations=(
             "/etc/apache2/apache2.conf"
             "/etc/httpd/conf/httpd.conf"
-        "/usr/local/apache2/conf/httpd.conf"
+            "/usr/local/apache2/conf/httpd.conf"
             "/etc/apache2/sites-enabled/*.conf"
+            "/etc/apache2/conf-enabled/*.conf"
+            "/etc/httpd/conf.d/*.conf"
+            "/etc/apache2/mods-enabled/*.load"
         )
 
+        local dav_module_loaded=false
+        local dav_directive_on=false
+        local dav_directive_off=false
+        local readable_conf_found=false
+        local dav_lines=""
+
+        # 모든 설정/모듈 파일을 끝까지 스캔 (조기 종료 없음)
         for conf_pattern in "${apache_conf_locations[@]}"; do
             for conf_file in $conf_pattern; do
-                if [ -f "${conf_file}" ]; then
-                    local found_dav=$(grep -E "^\s*DAV\s+(On|off)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
+                if [ -f "${conf_file}" ] && [ -r "${conf_file}" ]; then
+                    readable_conf_found=true
+                    # LoadModule dav_module / dav_fs_module 로드 여부
+                    local found_module=$(grep -E "^\s*LoadModule\s+(dav_module|dav_fs_module)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
+                    if [ -n "${found_module}" ]; then
+                        dav_module_loaded=true
+                        dav_lines="${dav_lines}"$'\n'"${found_module}"
+                    fi
+                    # DAV On/Off 지시자
+                    local found_dav=$(grep -E "^\s*DAV\s+(On|on|Off|off)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
                     if [ -n "${found_dav}" ]; then
-                        if echo "${found_dav}" | grep -iq "On"; then
-                            dav_enabled=true
+                        dav_lines="${dav_lines}"$'\n'"${found_dav}"
+                        if echo "${found_dav}" | grep -iqE "^\s*DAV\s+On\b"; then
+                            dav_directive_on=true
                         fi
-                        break 2
+                        if echo "${found_dav}" | grep -iqE "^\s*DAV\s+Off\b"; then
+                            dav_directive_off=true
+                        fi
                     fi
                 fi
             done
         done
 
-        command_executed="grep -r 'DAV.*On' /etc/apache2 /etc/httpd 2>/dev/null | grep -v '^\s*#' | head -3"
+        command_executed="grep -rE '^\s*(LoadModule\s+dav_(module|fs_module)|DAV\s+(On|Off))' /etc/apache2 /etc/httpd 2>/dev/null | grep -v '^\s*#'"
+        command_result="${dav_lines#$'\n'}"
+        [ -z "${command_result}" ] && command_result="No WebDAV module or DAV directive found"
 
-    command_result="${dav_enabled:+DAV enabled}"
-
-    if [ "${dav_enabled}" = true ]; then
+    if [ "${readable_conf_found}" != true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Apache 설정 파일을 읽을 수 없어 WebDAV 설정을 확인할 수 없습니다. LoadModule dav_module 및 DAV 지시자를 수동으로 확인하세요."
+        command_result="Apache configuration file not readable"
+    elif [ "${dav_directive_on}" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="WebDAV가 활성화되어 있습니다. 불필요한 경우 비활성화 권장."
+        inspection_summary="DAV On 지시자가 설정되어 WebDAV가 활성화되어 있습니다. 불필요한 경우 DAV Off로 비활성화하세요."
+    elif [ "${dav_module_loaded}" = true ] && [ "${dav_directive_off}" != true ]; then
+        # 모듈이 로드되어 있고 명시적 DAV Off가 없으면 활성화 가능성 -> 최소 수동진단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="WebDAV 모듈(dav_module/dav_fs_module)이 로드되어 있으나 명시적 DAV On/Off 지시자를 확인하지 못했습니다. 각 디렉터리/가상호스트에서 DAV 활성화 여부를 수동으로 확인하세요."
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="WebDAV가 비활성화되어 있거나 로드되지 않았습니다. (보안 권고사항 준수)"
-        command_result="DAV disabled or not loaded"
+        inspection_summary="WebDAV가 비활성화되어 있습니다. dav_module이 로드되지 않았거나 DAV 지시자가 활성화되지 않았습니다. (보안 권고사항 준수)"
     fi
 
     # Run-all 모드 확인

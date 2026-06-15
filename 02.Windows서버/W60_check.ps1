@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # @Project: KISA-CIIP-2026 Vulnerability Assessment Scripts
 # @Copyright: Copyright (c) 2026 Yang Uhyeok (양우혁). All rights reserved.
 # @Version: 1.0.1
@@ -35,24 +35,50 @@ if (-not (Test-RunallMode)) {
 
 # 1. Check secure channel data encryption or signing
 try {
-    $lsa = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -ErrorAction SilentlyContinue
-    $requireSignOrSeal = if ($lsa) { $lsa.RequireSignOrSeal } else { 0 }
-    $requireSignOrSeal2 = if ($lsa) { $lsa.RequireSignOrSeal2 } else { 0 }
-    $sealSecureChannel = if ($lsa) { $lsa.SealSecureChannel } else { 0 }
-    $allSet = ($requireSignOrSeal -eq 1) -and ($requireSignOrSeal2 -ge 1) -and ($sealSecureChannel -ge 1)
-
-    if ($allSet) {
-        $finalResult = "GOOD"
-        $summary = "보안 채널 데이터 디지털 암호화 및 서명이 활성화됨"
-        $status = "양호"
-    } else {
-        $finalResult = "VULNERABLE"
-        $summary = "보안 채널 데이터 디지털 암호화 또는 서명이 비활성화됨"
-        $status = "취약"
+    # 본 3개 정책은 '도메인 구성원(Domain member)' 보안 정책이다:
+    #   도메인 구성원: 보안 채널 데이터를 디지털 암호화 또는 서명(항상) -> RequireSignOrSeal
+    #   도메인 구성원: 보안 채널 데이터를 디지털 암호화(가능한 경우)      -> SealSecureChannel
+    #   도메인 구성원: 보안 채널 데이터 디지털 서명(가능한 경우)          -> SignSecureChannel
+    # 도메인에 가입되지 않은(standalone) 서버는 보안 채널(Netlogon secure channel) 자체가 없어
+    # 위 레지스트리 값이 부재(all-null)하며, 이를 VULNERABLE로 판정하면 오탐이다.
+    # 따라서 도메인 가입 여부를 먼저 게이트한다: 비도메인 -> N/A(점검 대상 아님).
+    $partOfDomain = $false
+    try {
+        $partOfDomain = [bool](Get-WmiObject -Class Win32_ComputerSystem -ErrorAction Stop).PartOfDomain
+    } catch {
+        # WMI 조회 실패 시 도메인 미가입으로 단정하지 않고, 아래에서 정책 평가로 진행
+        $partOfDomain = $true
     }
 
-    $commandExecuted = "Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' (RequireSignOrSeal, RequireSignOrSeal2, SealSecureChannel)"
-    $commandOutput = "RequireSignOrSeal: $requireSignOrSeal, RequireSignOrSeal2: $requireSignOrSeal2, SealSecureChannel: $sealSecureChannel"
+    if (-not $partOfDomain) {
+        $finalResult = "N/A"
+        $summary = "도메인에 가입되지 않은(standalone) 서버로, 도메인 구성원 보안 채널 정책은 점검 대상이 아님"
+        $status = "N/A"
+        $commandExecuted = "(Get-WmiObject Win32_ComputerSystem).PartOfDomain"
+        $commandOutput = "PartOfDomain: False (비도메인 구성원 - 보안 채널 정책 미적용 대상)"
+    } else {
+        # Hive: HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters (1 = enabled).
+        $netlogonPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\Netlogon\Parameters'
+        $params = Get-ItemProperty -Path $netlogonPath -ErrorAction SilentlyContinue
+        $requireSignOrSeal = if ($params) { $params.RequireSignOrSeal } else { $null }
+        $sealSecureChannel = if ($params) { $params.SealSecureChannel } else { $null }
+        $signSecureChannel = if ($params) { $params.SignSecureChannel } else { $null }
+
+        $allSet = ($requireSignOrSeal -eq 1) -and ($sealSecureChannel -eq 1) -and ($signSecureChannel -eq 1)
+
+        if ($allSet) {
+            $finalResult = "GOOD"
+            $summary = "보안 채널 데이터 디지털 암호화 및 서명 관련 3개 정책이 모두 활성화됨"
+            $status = "양호"
+        } else {
+            $finalResult = "VULNERABLE"
+            $summary = "보안 채널 데이터 디지털 암호화 또는 서명 관련 정책 중 일부가 비활성화됨"
+            $status = "취약"
+        }
+
+        $commandExecuted = "(Get-WmiObject Win32_ComputerSystem).PartOfDomain; Get-ItemProperty '$netlogonPath' (RequireSignOrSeal, SealSecureChannel, SignSecureChannel)"
+        $commandOutput = "PartOfDomain: True | RequireSignOrSeal: $requireSignOrSeal, SealSecureChannel: $sealSecureChannel, SignSecureChannel: $signSecureChannel"
+    }
 
 } catch {
     $finalResult = "MANUAL"

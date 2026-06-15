@@ -57,93 +57,110 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # AIX: /etc/security/user에서 password_algorithm 확인
-    # AIX는 LPA (Loadable Password Algorithm) 사용
+    # AIX: /etc/security/login.cfg의 usw 스탠자 pwd_algorithm 속성 확인
+    # 가이드: chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=<SHA-2 이상>
+    # 안전: ssha512, ssha256, sha512, sha256 / 취약: crypt 또는 미설정(기본 crypt)
 
+    local login_cfg="/etc/security/login.cfg"
     local is_secure=false
+    local is_manual=false
     local details=""
     local pwd_algorithm=""
-    local pwd_attribute=""
+    local pwd_algorithm_lower=""
+    local usw_raw=""
+    local root_hash_info=""
 
-    # 1) /etc/security/user 확인 (AIX 사용자 보안 설정)
-    if [ -f /etc/security/user ]; then
-        # password_algorithm 확인 (AIX 6.1+)
-        pwd_algorithm=$(grep "^password_algorithm" /etc/security/user 2>/dev/null | grep -v "^#" | head -1 | awk '{print $3}')
-
-        # 기본값 확인 (default 스탠자에서)
-        if [ -z "$pwd_algorithm" ]; then
-            pwd_algorithm=$(awk '/^default:/,/^[^ \t]/ {if (/password_algorithm/) print $3}' /etc/security/user 2>/dev/null | head -1)
+    # 1) /etc/security/login.cfg의 usw 스탠자에서 pwd_algorithm 추출 (들여쓰기 허용)
+    if [ -f "$login_cfg" ]; then
+        if [ -r "$login_cfg" ]; then
+            pwd_algorithm=$(awk '
+                /^usw:/ { in_usw = 1; next }
+                /^[^[:space:]]/ { in_usw = 0 }
+                in_usw && $0 ~ /^[[:space:]]*pwd_algorithm[[:space:]]*=/ {
+                    sub(/^[[:space:]]*pwd_algorithm[[:space:]]*=[[:space:]]*/, "")
+                    gsub(/[[:space:]]+.*$/, "")
+                    print
+                    exit
+                }' "$login_cfg" 2>/dev/null || true)
+            usw_raw=$(awk '
+                /^[^[:space:]]/ && !/^usw:/ { in_usw = 0 }
+                /^usw:/ { in_usw = 1 }
+                in_usw { print }' "$login_cfg" 2>/dev/null | head -20 || true)
+            [ -z "$usw_raw" ] && usw_raw="usw 스탠자 없음"
+        else
+            is_manual=true
+            details="${login_cfg} 읽기 권한 없음"
         fi
+    else
+        details="${login_cfg} 파일 없음 (pwd_algorithm 미설정 - 기본 crypt 사용)"
+    fi
 
+    # 2) pwd_algorithm 값 판정 (AIX 값은 소문자이나 대소문자 무시 비교)
+    if [ "$is_manual" = false ]; then
         if [ -n "$pwd_algorithm" ]; then
-            details="/etc/security/user password_algorithm: ${pwd_algorithm}"
+            pwd_algorithm_lower=$(echo "$pwd_algorithm" | tr '[:upper:]' '[:lower:]' || true)
+            case "$pwd_algorithm_lower" in
+                ssha512|ssha256|sha512|sha256)
+                    is_secure=true
+                    details="usw 스탠자 pwd_algorithm = ${pwd_algorithm} (SHA-2 이상)"
+                    ;;
+                *)
+                    details="usw 스탠자 pwd_algorithm = ${pwd_algorithm} (취약한 알고리즘)"
+                    ;;
+            esac
+        elif [ -z "$details" ]; then
+            details="usw 스탠자에 pwd_algorithm 미설정 (기본 crypt 사용)"
         fi
     fi
 
-    # 2) AIX에서 지원하는 안전한 알고리즘 확인
-    # AIX는 ssha256, ssha512, sha256, sha512 등 지원
-    local secure_algorithms=("ssha512" "ssha256" "sha512" "sha256")
-
-    if [ -n "$pwd_algorithm" ]; then
-        # 대소문자 구분 없이 비교
-        local pwd_lower=$(echo "$pwd_algorithm" | tr '[:upper:]' '[:lower:]')
-        for algo in "${secure_algorithms[@]}"; do
-            if [ "$pwd_lower" = "$algo" ]; then
-                is_secure=true
-                break
-            fi
-        done
-    fi
-
-    # 3) /etc/security/passwd에서 실제 암호화 방식 확인 (선택적)
-    # 실제 해시 값이 어떤 알고리즘인지 확인
-    if [ -f /etc/security/passwd ]; then
-        # root 계정의 암호 해시 확인
-        local root_hash=$(awk '/^root:/,/^[^ \t]/ {if (/password =/) print $3}' /etc/security/passwd 2>/dev/null | head -1)
+    # 3) /etc/security/passwd의 root 해시 접두사 확인 (증적, 대소문자 무시)
+    if [ -f /etc/security/passwd ] && [ -r /etc/security/passwd ]; then
+        local root_hash
+        root_hash=$(awk '
+            /^[^[:space:]]/ && !/^root:/ { in_root = 0 }
+            /^root:/ { in_root = 1 }
+            in_root && $0 ~ /^[[:space:]]*password[[:space:]]*=/ { print $3; exit }' \
+            /etc/security/passwd 2>/dev/null || true)
         if [ -n "$root_hash" ]; then
-            # AIX 해시 형식: {SSHA512}..., {SSHA256}...
-            if echo "$root_hash" | grep -qE '^\{SSHA(512|256)\}'; then
-                if [ -z "$details" ]; then
-                    details="실제 비밀번호 암호화: SSHA (강력함)"
-                fi
-                is_secure=true
-            elif echo "$root_hash" | grep -qE '^\{SHA(512|256)\}'; then
-                if [ -z "$details" ]; then
-                    details="실제 비밀번호 암호화: SHA (안전함)"
-                fi
-                is_secure=true
+            if echo "$root_hash" | grep -qiE '^\{s?sha(256|512)\}'; then
+                root_hash_info="root 비밀번호 해시: SHA-2 계열 LPA 접두사 확인"
+            elif echo "$root_hash" | grep -qiE '^\{'; then
+                root_hash_info="root 비밀번호 해시: SHA-2 이외 LPA 접두사 사용"
+            else
+                root_hash_info="root 비밀번호 해시: LPA 접두사 없음 (legacy crypt 추정)"
             fi
         fi
-    fi
-
-    # 4) 기본값 확인 (설정 파일에 명시되지 않은 경우)
-    if [ -z "$pwd_algorithm" ] && [ "$is_secure" = false ]; then
-        # AIX 기본값이 버전마다 다름 (구형 AIX 5.x는 DES 사용 가능)
-        # 명시적 설정이 없으면 취약으로 처리
-        details="password_algorithm 미설정 (명시적 설정 필요)"
-        is_secure=false
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$is_manual" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="비밀번호 암호화 알고리즘 설정 확인 불가 (${details}) - 수동 점검 필요"
+        command_result="[Command: awk '/^usw:/,/^[^ \\t]/' ${login_cfg}]${newline}${details}"
+        command_executed="awk '/^usw:/,/^[^ \t]/' ${login_cfg}"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="안전한 비밀번호 암호화 알고리즘 사용됨 (${details})"
-        command_result="${details}"
-        command_executed="grep 'password_algorithm' /etc/security/user && lsuser -a registry root"
+        command_result="[Command: awk '/^usw:/,/^[^ \\t]/' ${login_cfg}]${newline}${usw_raw}"
+        if [ -n "$root_hash_info" ]; then
+            command_result="${command_result}${newline}${newline}${root_hash_info}"
+        fi
+        command_executed="awk '/^usw:/,/^[^ \t]/' /etc/security/login.cfg"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        if [ -z "$details" ]; then
-            inspection_summary="비밀번호 암호화 알고리즘 미설정 또는 약한 알고리즘 사용"
-            local grep_raw=$(grep 'password_algorithm' /etc/security/user 2>/dev/null || echo "password_algorithm not found")
-            local lsuser_raw=$(lsuser -a registry root 2>/dev/null || echo "lsuser failed")
-            command_result="[Command: grep 'password_algorithm' /etc/security/user]${newline}${grep_raw}${newline}${newline}[Command: lsuser -a registry root]${newline}${lsuser_raw}"
+        inspection_summary="취약한 비밀번호 암호화 알고리즘 사용 (${details})"
+        if [ -n "$usw_raw" ]; then
+            command_result="[Command: awk '/^usw:/,/^[^ \\t]/' ${login_cfg}]${newline}${usw_raw}"
         else
-            inspection_summary="비밀번호 암호화 알고리즘 부적절 (${details})"
-            command_result="${details}"
+            command_result="[Command: awk '/^usw:/,/^[^ \\t]/' ${login_cfg}]${newline}${details}"
         fi
-        command_executed="grep 'password_algorithm' /etc/security/user && cat /etc/security/passwd"
+        if [ -n "$root_hash_info" ]; then
+            command_result="${command_result}${newline}${newline}${root_hash_info}"
+        fi
+        command_executed="awk '/^usw:/,/^[^ \t]/' /etc/security/login.cfg"
     fi
 
     # echo ""

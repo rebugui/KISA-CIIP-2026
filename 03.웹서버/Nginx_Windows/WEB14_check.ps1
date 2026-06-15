@@ -57,11 +57,18 @@ try {
                 $assessedPaths.Add([pscustomobject]@{ Path = $dir; Role = 'ConfigDirectory' }) | Out-Null
             }
         }
-        foreach ($root in @((Get-NginxRootPaths -State $state) + (Get-NginxDefaultRootCandidates) | Select-Object -Unique)) {
+        # 설정에 root 지시어가 존재하지만 실제 경로를 확인(resolve)하지 못하는 경우를 추적한다.
+        # (예: 환경변수/UNC 경로 → Test-Path 실패) 이때 웹 루트 ACL을 점검하지 못하므로
+        # 양호로 단정하지 않고 수동진단으로 유도한다.
+        $configuredRoots = @(Get-NginxRootPaths -State $state)
+        $resolvedRootCount = 0
+        foreach ($root in @($configuredRoots + (Get-NginxDefaultRootCandidates) | Select-Object -Unique)) {
             if (Test-Path -LiteralPath $root) {
                 $assessedPaths.Add([pscustomobject]@{ Path = $root; Role = 'DocumentRoot' }) | Out-Null
+                $resolvedRootCount++
             }
         }
+        $webRootUnresolved = ($configuredRoots.Count -gt 0 -and $resolvedRootCount -eq 0)
 
         $aclEvidence = foreach ($pathInfo in $assessedPaths) {
             Get-NginxBroadAclEvidence -Path $pathInfo.Path -Role $pathInfo.Role
@@ -92,6 +99,12 @@ try {
             $finalResult = "MANUAL"
             $status = "수동진단"
             $summary = "Nginx web root has broad read access; confirm whether this is required and whether sensitive files are excluded."
+        }
+        elseif ($webRootUnresolved) {
+            # 설정에 root는 있으나 실제 경로를 확인하지 못해 웹 루트 ACL 미점검 → 양호 단정 불가
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Nginx root directive(s) exist but the web root path could not be resolved/accessed (environment variable/UNC). Manually verify ACLs on the web service path; configuration files were checked but the web root was not."
         }
         else {
             $finalResult = "GOOD"

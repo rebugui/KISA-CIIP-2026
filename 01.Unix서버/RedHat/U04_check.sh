@@ -44,11 +44,23 @@ diagnose() {
     local command_executed="awk -F: '\$2 != \"x\"' /etc/passwd"
 
     # 1. 실제 데이터 추출: x가 아닌 계정 확인 및 샘플 추출
-    local non_x_list=$(awk -F: '$2 != "x" {print $1}' /etc/passwd | xargs | sed 's/ /, /g' || echo "")
-    local passwd_sample=$(head -n 3 /etc/passwd | awk -F: '{print $1":"$2}' | xargs | sed 's/ / | /g' || echo "")
+    # awk 실행 실패(파일 접근 불가 등)와 "실행 성공 + 발견 0건"을 구분한다.
+    local awk_rc=0
+    local non_x_raw=""
+    if [ -r /etc/passwd ]; then
+        non_x_raw=$(awk -F: '$2 != "x" {print $1}' /etc/passwd 2>/dev/null) || awk_rc=$?
+    else
+        awk_rc=1
+    fi
+    local non_x_list=$(printf '%s\n' "$non_x_raw" | xargs | sed 's/ /, /g')
+    local passwd_sample=$(head -n 3 /etc/passwd 2>/dev/null | awk -F: '{print $1":"$2}' | xargs | sed 's/ / | /g' || echo "")
 
     # 2. 판정 로직
-    if [ -n "$non_x_list" ] || [ ! -f /etc/shadow ]; then
+    if [ "$awk_rc" -ne 0 ]; then
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="/etc/passwd 파일을 읽을 수 없어 쉐도우 패스워드 사용 여부를 자동 판정할 수 없습니다. 수동 점검이 필요합니다."
+    elif [ -n "$non_x_list" ] || [ ! -f /etc/shadow ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
         inspection_summary="쉐도우 패스워드를 사용하지 않는 계정이 발견되었거나 /etc/shadow 파일이 없습니다."
@@ -56,7 +68,9 @@ diagnose() {
 
     # 3. command_result에 실제 데이터 기록
     command_result="[Passwd Sample: ${passwd_sample}]"
-    if [ -n "$non_x_list" ]; then
+    if [ "$awk_rc" -ne 0 ]; then
+        command_result+=" | [점검 실패: /etc/passwd 읽기 불가 또는 awk 실행 실패(rc=${awk_rc})]"
+    elif [ -n "$non_x_list" ]; then
         command_result+=" | [Non-x Users: ${non_x_list}]"
     fi
 

@@ -67,7 +67,10 @@ diagnose() {
     local raw_files_output=""
     for dir in $sys_dirs; do
         if [ -d "$dir" ]; then
-            local dir_output=$(find "$dir" -perm -2 -type f 2>/dev/null | head -30 || true)
+            # 예외 디렉터리(/tmp 등)는 head 절단 이전에 제외해야 비예외 항목이
+            # 절단으로 누락되는 false-good을 막을 수 있음. 경계(/|$) 앵커로
+            # /tmp_evil, /mnt-backup 같은 유사 경로 오제외 방지.
+            local dir_output=$(find "$dir" -perm -2 -type f 2>/dev/null | grep -Ev '^(/tmp|/var/tmp|/var/mail|/dev/shm|/mnt|/media)(/|$)' | head -30 || true)
             if [ -n "$dir_output" ]; then
                 raw_files_output="${raw_files_output}${dir_output}"$'\n'
             fi
@@ -82,10 +85,7 @@ diagnose() {
                         filetype="dir"
                     fi
 
-                    # 특정 예외 디렉터리 (/tmp, /var/tmp, /var/mail 등)는 제외
-                    if [[ ! "$file" =~ ^/tmp ]] && [[ ! "$file" =~ ^/var/tmp ]] && [[ ! "$file" =~ ^/var/mail ]] && [[ ! "$file" =~ ^/dev/shm ]] && [[ ! "$file" =~ ^/mnt ]] && [[ ! "$file" =~ ^/media ]]; then
-                        ww_files="${ww_files}${file} (${filetype}, 권한: ${perms}, 소유자: ${owner}), "
-                    fi
+                    ww_files="${ww_files}${file} (${filetype}, 권한: ${perms}, 소유자: ${owner}), "
                 fi
             done <<< "$dir_output" || true
         fi
@@ -98,20 +98,22 @@ diagnose() {
 
     for dir in $sys_dirs; do
         if [ -d "$dir" ]; then
-            local dir_output=$(find "$dir" -perm -2 -type d 2>/dev/null | head -20 || true)
+            # sticky bit 디렉터리(! -perm -1000)와 예외 경로는 head 절단 이전에 제외
+            local dir_output=$(find "$dir" -perm -2 -type d ! -perm -1000 2>/dev/null | grep -Ev '^(/tmp|/var/tmp|/var/mail|/dev/shm)$|^(/mnt|/media)(/|$)' | head -20 || true)
             if [ -n "$dir_output" ]; then
                 raw_dirs_output="${raw_dirs_output}${dir_output}"$'\n'
             fi
             while IFS= read -r dirpath; do
                 if [ -n "$dirpath" ]; then
+                    # sticky bit가 설정된 world-writable 디렉터리는 표준 권한 패턴이므로 예외 처리
+                    if [ -k "$dirpath" ]; then
+                        continue
+                    fi
                     ((ww_dir_count++)) || true
                     local perms=$(stat -c "%a" "$dirpath" 2>/dev/null)
                     local owner=$(stat -c "%U:%G" "$dirpath" 2>/dev/null)
 
-                    # 예외 디렉터리 제외
-                    if [[ ! "$dirpath" =~ ^/tmp$ ]] && [[ ! "$dirpath" =~ ^/var/tmp$ ]] && [[ ! "$dirpath" =~ ^/var/mail$ ]] && [[ ! "$dirpath" =~ ^/dev/shm$ ]] && [[ ! "$dirpath" =~ ^/mnt ]] && [[ ! "$dirpath" =~ ^/media ]]; then
-                        ww_dirs="${ww_dirs}${dirpath} (권한: ${perms}, 소유자: ${owner}), "
-                    fi
+                    ww_dirs="${ww_dirs}${dirpath} (권한: ${perms}, 소유자: ${owner}), "
                 fi
             done <<< "$dir_output" || true
         fi

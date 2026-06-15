@@ -45,6 +45,13 @@ GUIDELINE_REMEDIATION="major, minor number를 가지지 않는 device 파일 제
 # 진단 함수
 # ============================================================================
 
+# /dev 전체 재귀 열거 (가이드 기준: find /dev -type f 재귀 점검. /dev 자체는 제외)
+# POSIX find는 옵션 없이도 재귀 동작하므로 -maxdepth 미지원 native find에서도 안전
+list_dev_entries() {
+    find /dev 2>/dev/null | grep -v '^/dev$' || true
+    return 0
+}
+
 # 진단 수행
 diagnose() {
 
@@ -62,10 +69,11 @@ diagnose() {
     local invalid_dev_files=""
     local invalid_count=0
     local valid_count=0
+    local scanned_count=0
 
-    # Capture raw find output for /dev directory
-    local dev_find_output=$(find /dev -maxdepth 1 2>/dev/null | head -100)
-    command_result="[Command: find /dev -maxdepth 1]${newline}${dev_find_output}"
+    # Capture raw listing of /dev directory (표시용, 분류는 list_dev_entries 전체 대상)
+    local dev_list_output=$(ls -lA /dev 2>/dev/null | head -100)
+    command_result="[Command: ls -lA /dev]${newline}${dev_list_output}"
 
     # /dev 디렉터리가 존재하는지 확인
     if [ ! -d "/dev" ]; then
@@ -78,6 +86,7 @@ diagnose() {
     else
         # /dev 내 파일 검색하여 장치 파일 타입 확인
         while IFS= read -r devfile; do
+            ((scanned_count++)) || true
             if [ -e "$devfile" ]; then
                 # 파일 타입 확인 (b: block device, c: character device)
                 # AIX uses ls -l to check file type
@@ -86,8 +95,11 @@ diagnose() {
 
                 if [ "$filetype" = "b" ] || [ "$filetype" = "c" ]; then
                     ((valid_count++)) || true
-                elif [ -f "$devfile" ] || [ -d "$devfile" ]; then
-                    # 일반 파일이나 디렉터리인 경우 (장치 파일 아님)
+                elif [ -L "$devfile" ] || [ -d "$devfile" ]; then
+                    # 심볼릭 링크/디렉터리는 위장 device 파일(major/minor 없는 일반 파일) 점검 대상 아님
+                    :
+                elif [ -f "$devfile" ]; then
+                    # 일반 파일인 경우 (major/minor 없는 위장 device 파일)
                     ((invalid_count++)) || true
                     local perms=$(ls -ld "$devfile" 2>/dev/null | awk '{print $1}' | cut -c2-10 | sed 's/rwx/7/g; s/rw-/6/g; s/r-x/5/g; s/r--/4/g; s/-wx/3/g; s/-w-/2/g; s/--x/1/g; s/---/0/g')
                     local owner=$(ls -ld "$devfile" 2>/dev/null | awk '{print $3":"$4}')
@@ -98,23 +110,28 @@ diagnose() {
                 ((invalid_count++)) || true
                 invalid_dev_files="${invalid_dev_files}${devfile} (존재하지 않음 또는 깨진 링크), "
             fi
-        done < <(find /dev -maxdepth 1 2>/dev/null | head -100) || true
+        done < <(list_dev_entries) || true
 
-        # 결과 판정
-        if [ "$invalid_count" -eq 0 ]; then
+        # 결과 판정 (열거 실패/빈 결과는 GOOD으로 판정하지 않음)
+        if [ "$scanned_count" -eq 0 ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="/dev 디렉터리 항목을 열거하지 못함(권한 부족 등 가능성) - 수동 점검 필요"
+            command_result="[Command: ls -lA /dev]${newline}${dev_list_output:-(출력 없음)}"
+            command_executed="ls -lA /dev"
+        elif [ "$invalid_count" -eq 0 ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="/dev 디렉터리 내 모든 파일이 정상적인 장치 파일임 (확인된 장치 파일: ${valid_count}개)"
-            local find_raw=$(find /dev -maxdepth 1 -type b -o -type c 2>/dev/null | head -20 || echo "No device files")
-            command_result="[Command: find /dev -maxdepth 1 -type b -o -type c]${newline}${find_raw}"
-            command_executed="find /dev -maxdepth 1 -type b -o -type c 2>/dev/null | wc -l"
+            local ls_raw=$(ls -lA /dev 2>/dev/null | head -20 || echo "No device files")
+            command_result="[Command: ls -lA /dev]${newline}${ls_raw}"
+            command_executed="ls -lA /dev"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="/dev 디렉터리 내 비정상 파일 ${invalid_count}개 발견: ${invalid_dev_files%, }"
-            local find_raw=$(find /dev -maxdepth 1 ! -type b ! -type c 2>/dev/null | head -20 || echo "All valid device files")
-            command_result="[Command: find /dev -maxdepth 1 ! -type b ! -type c]${newline}${find_raw}"
-            command_executed="find /dev -maxdepth 1 ! -type b ! -type c 2>/dev/null"
+            command_result="[Command: ls -lA /dev (비정상 파일 목록은 진단 요약 참조)]${newline}${dev_list_output:-(출력 없음)}"
+            command_executed="ls -lA /dev"
         fi
     fi
 

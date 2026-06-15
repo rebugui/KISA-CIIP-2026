@@ -68,7 +68,7 @@ diagnose() {
 
     for daemon in "${ftp_daemons[@]}"; do
         ftp_services_checked="${ftp_services_checked}${daemon} "
-        local daemon_status=$(lssrc -s "${daemon}" 2>/dev/null | grep "${daemon}" | awk '{print $2}' || echo "inoperative")
+        local daemon_status=$(lssrc -s "${daemon}" 2>/dev/null | grep "${daemon}" | awk '{print $NF}' || echo "inoperative")
         if [ "$daemon_status" = "active" ]; then
             ftp_running=true
             ftp_details="${ftp_details}${daemon}: ${daemon_status}\\n"
@@ -84,16 +84,27 @@ diagnose() {
         ftp_services_checked="${ftp_services_checked}inetd-ftp "
     fi
 
-    # 3) 포트 확인 (FTP: 21)
-    if command -v ss &>/dev/null; then
-        local ftp_port=$(ss -tuln 2>/dev/null | grep ":21 " || echo "")
-        if [ -n "$ftp_port" ]; then
+    # 3) 포트 확인 (FTP: 21, AIX netstat 점 표기 *.21 및 콜론 표기 모두 매칭)
+    local port_probe_cmd="netstat -an | grep -E '[.:]21[[:space:]].*LISTEN'"
+    local port_probe_out=""
+    local port_evidence=""
+    local port_cmd_note=""
+    if command -v netstat >/dev/null 2>&1; then
+        port_probe_out=$(netstat -an 2>/dev/null | grep -E '[.:]21[[:space:]].*LISTEN' || true)
+        port_cmd_note="${port_probe_cmd}"
+        if [ -n "$port_probe_out" ]; then
             ftp_running=true
             ftp_details="${ftp_details}FTP 포트 21 활성화\\n"
+            port_evidence="[Command: ${port_probe_cmd}]${newline}${port_probe_out}"
+        else
+            port_evidence="[Command: ${port_probe_cmd}]${newline}출력 없음 (포트 21 LISTEN 미검출)"
         fi
+    else
+        port_cmd_note="netstat 사용 불가 (포트 21 확인 생략)"
+        port_evidence="netstat 명령을 사용할 수 없어 포트 21 상태 확인 불가"
     fi
 
-    command_executed="lssrc -s vsftpd 2>/dev/null | grep -q "active" proftpd pure-ftpd; grep disable /etc/xinetd.d/ftp; ss -tuln | grep ':21 '"
+    command_executed="lssrc -s ftpd/vsftpd/proftpd 2>/dev/null; grep '^ftp' /etc/inetd.conf; ${port_cmd_note}"
 
     # 최종 판정
     if [ "$ftp_running" = false ]; then
@@ -101,8 +112,7 @@ diagnose() {
         status="양호"
         inspection_summary="암호화되지 않은 FTP 서비스가 비활성화되어 있습니다."
             local lssrc_out=$(lssrc -s ftpd 2>/dev/null || echo "FTP service not found")
-            local ss_out=$(ss -tuln | grep ":21 " 2>/dev/null || echo "Port 21 not listening")
-            command_result="[Command: lssrc -s ftpd]${newline}${lssrc_out}${newline}${newline}[Command: ss -tuln | grep :21]${newline}${ss_out}"
+            command_result="[Command: lssrc -s ftpd]${newline}${lssrc_out}${newline}${newline}${port_evidence}"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

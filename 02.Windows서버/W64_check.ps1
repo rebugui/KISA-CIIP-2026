@@ -55,9 +55,13 @@ try {
             $firewallProfiles = Get-NetFirewallProfile -ErrorAction SilentlyContinue
 
             if ($firewallProfiles) {
+                # NetFirewallProfile.Enabled is tri-state: True / False / NotConfigured.
+                # 'NotConfigured -eq $false' is $false, so an -eq $false test silently
+                # passes NotConfigured profiles. Treat anything that is not explicitly
+                # True (사용) as non-compliant.
                 $allEnabled = $true
                 foreach ($profile in $firewallProfiles) {
-                    if ($profile.Enabled -eq $false) {
+                    if ($profile.Enabled -ne $true) {
                         $allEnabled = $false
                         break
                     }

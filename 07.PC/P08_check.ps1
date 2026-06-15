@@ -11,7 +11,7 @@
 # @Category    : PC (Personal Computer)
 # @Platform    : Windows 10, 11
 # @Severity    : 중
-# @Title       : 멀티부팅 금지
+# @Title       : 대상 시스템이 Windows 서버를 제외한 다른 OS로 멀티 부팅이 가능하지 않도록 설정
 # @Description : 대상 시스템이 Windows 서버를 제외한 다른 OS로 멀티 부팅이 가능하지 않도록 설정
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -38,12 +38,12 @@ if (-not (Test-RunallMode)) {
 # 1. Run diagnostic using bcdedit
 # bcdedit의 OS Loader 식별자(identifier) 개수로 멀티부팅 여부 판단
 # 조회 권한 부족/실패 시 부트 항목 0개로 간주하지 않고 수동진단 처리
-$commandExecuted = 'bcdedit /enum osloader'
+$commandExecuted = 'bcdedit /enum osloader; bcdedit /enum firmware'
 $commandOutput = ""
 try {
     $bcdOutput = bcdedit /enum osloader 2>&1 | Out-String
     $bcdExitCode = $LASTEXITCODE
-    $commandOutput = $bcdOutput
+    $commandOutput = "[bcdedit /enum osloader]`r`n" + $bcdOutput
 
     if ($bcdExitCode -ne 0 -or
         $bcdOutput -match 'Access is denied' -or
@@ -58,18 +58,54 @@ try {
         }
         $actualBootEntries = @($identifierLines).Count
 
-        if ($actualBootEntries -eq 0) {
+        # bcdedit /enum osloader는 Windows BCD만 보므로, GRUB 우선 듀얼부팅 등
+        # 비-Windows 부트로더는 보이지 않는 사각지대가 있음.
+        # EFI 펌웨어 부트 항목을 추가 조회하여 비-Windows OS 로더 존재 여부를 보강 확인.
+        $firmwareHasForeignLoader = $false
+        $firmwareCheckable = $false
+        $firmwareOutput = bcdedit /enum firmware 2>&1 | Out-String
+        $fwExit = $LASTEXITCODE
+        $commandOutput += "`r`n`r`n[bcdedit /enum firmware]`r`n" + $firmwareOutput
+        if ($fwExit -eq 0 -and
+            $firmwareOutput -notmatch 'Access is denied' -and
+            $firmwareOutput -notmatch '액세스가 거부' -and
+            $firmwareOutput -notmatch 'could not be opened' -and
+            $firmwareOutput -notmatch 'only.*BIOS') {
+            $firmwareCheckable = $true
+            # 펌웨어 부트 항목 설명(description)에 비-Windows OS/부트로더 키워드가 있으면 외부 OS 로더로 간주
+            $fwDescLines = $firmwareOutput -split "`r?`n" | Where-Object {
+                $_ -match '(description|설명)\s+'
+            }
+            foreach ($descLine in $fwDescLines) {
+                if ($descLine -match '(?i)(grub|ubuntu|linux|debian|fedora|centos|rhel|mint|manjaro|arch|opensuse|shim|rEFInd|bootmgfw\.efi/linux)') {
+                    $firmwareHasForeignLoader = $true
+                    break
+                }
+            }
+        }
+
+        if ($firmwareHasForeignLoader) {
+            $finalResult = "VULNERABLE"
+            $summary = "EFI 펌웨어 부트 항목에서 비-Windows OS 로더(GRUB/Linux 등) 감지: 멀티 부팅 구성 (OS Loader $actualBootEntries개)"
+            $status = "취약"
+        } elseif ($actualBootEntries -eq 0) {
             $finalResult = "MANUAL"
             $summary = "bcdedit 조회는 성공했으나 OS Loader 항목을 확인하지 못함: 수동 확인 필요"
             $status = "수동진단"
-        } elseif ($actualBootEntries -le 1) {
-            $finalResult = "GOOD"
-            $summary = "단일 부팅 구성 (OS Loader $actualBootEntries개)"
-            $status = "양호"
-        } else {
+        } elseif ($actualBootEntries -ge 2) {
             $finalResult = "VULNERABLE"
             $summary = "멀티 부팅 구성 감지 (OS Loader $actualBootEntries개)"
             $status = "취약"
+        } elseif (-not $firmwareCheckable) {
+            # 단일 Windows BCD 항목이나, 펌웨어 부트 항목을 확인할 수 없어
+            # GRUB 우선 듀얼부팅 사각지대를 배제할 수 없음 → 양호로 단정하지 않고 수동진단
+            $finalResult = "MANUAL"
+            $summary = "Windows BCD에는 단일 OS Loader($actualBootEntries개)만 존재하나, EFI 펌웨어 부트 항목 확인 불가로 비-Windows 멀티부팅 가능성 배제 불가: 수동 확인 필요"
+            $status = "수동진단"
+        } else {
+            $finalResult = "GOOD"
+            $summary = "단일 부팅 구성 (OS Loader $actualBootEntries개, EFI 펌웨어 부트 항목에 비-Windows 로더 없음)"
+            $status = "양호"
         }
     }
 } catch {

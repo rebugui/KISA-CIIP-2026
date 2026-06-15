@@ -87,7 +87,7 @@ diagnose() {
             config_files="${config_files}/etc/ntp.conf"
 
             # NTP 서버 설정 확인 (server 또는 pool 지시자)
-            local ntp_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/ntp.conf 2>/dev/null | grep -v "^#" | head -5)
+            local ntp_servers=$(grep -E "^[[:space:]]*(server|pool)[[:space:]]" /etc/ntp.conf 2>/dev/null | head -5)
             if [ -n "$ntp_servers" ]; then
                 ntp_configured=true
                 ntp_details="NTP 서버 설정됨: $(echo "$ntp_servers" | head -3 | tr '\n' ' ')"
@@ -100,7 +100,7 @@ diagnose() {
             config_files="${config_files} /etc/chrony.conf"
 
             # Chrony 서버 설정 확인
-            local chrony_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/chrony.conf 2>/dev/null | grep -v "^#" | head -5)
+            local chrony_servers=$(grep -E "^[[:space:]]*(server|pool)[[:space:]]" /etc/chrony.conf 2>/dev/null | head -5)
             if [ -n "$chrony_servers" ]; then
                 ntp_configured=true
                 ntp_details="${ntp_details}, Chrony 서버 설정됨"
@@ -111,7 +111,7 @@ diagnose() {
         if [ -f /etc/chrony/chrony.conf ]; then
             config_files="${config_files} /etc/chrony/chrony.conf"
 
-            local chrony_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/chrony/chrony.conf 2>/dev/null | grep -v "^#" | head -5)
+            local chrony_servers=$(grep -E "^[[:space:]]*(server|pool)[[:space:]]" /etc/chrony/chrony.conf 2>/dev/null | head -5)
             if [ -n "$chrony_servers" ]; then
                 ntp_configured=true
                 ntp_details="${ntp_details}, Chrony 서버 설정됨 (Debian)"
@@ -122,7 +122,7 @@ diagnose() {
         if [ -f /etc/systemd/timesyncd.conf ]; then
             config_files="${config_files} /etc/systemd/timesyncd.conf"
 
-            local timesyncd_servers=$(grep "^[\s]*NTP=" /etc/systemd/timesyncd.conf 2>/dev/null | grep -v "^#" | grep -v "^NTP=$")
+            local timesyncd_servers=$(grep -E "^[[:space:]]*NTP=" /etc/systemd/timesyncd.conf 2>/dev/null | grep -vE "^[[:space:]]*NTP=[[:space:]]*$")
             if [ -n "$timesyncd_servers" ]; then
                 ntp_configured=true
                 ntp_details="${ntp_details}, systemd-timesyncd: ${timesyncd_servers}"
@@ -131,10 +131,28 @@ diagnose() {
 
         # 3) NTP 서비스 실행 여부 확인
         local ntp_service_running=false
+        local probe_available=false
         if command -v systemctl >/dev/null 2>&1; then
+            probe_available=true
             if systemctl is-active ntp >/dev/null 2>&1 || systemctl is-active chrony >/dev/null 2>&1 || systemctl is-active chronyd >/dev/null 2>&1 || systemctl is-active systemd-timesyncd >/dev/null 2>&1; then
                 ntp_running=true
                 ntp_service_running=true
+            fi
+        fi
+        if [ "$ntp_running" = false ] && command -v pgrep >/dev/null 2>&1; then
+            probe_available=true
+            if pgrep -x ntpd >/dev/null 2>&1 || pgrep -x chronyd >/dev/null 2>&1 || pgrep -f systemd-timesyncd >/dev/null 2>&1; then
+                ntp_running=true
+                ntp_service_running=true
+            fi
+        fi
+
+        # 3b) systemd-timesyncd 실행 중이면 NTP= 미설정이어도 컴파일 기본 풀로
+        #     동기화가 동작하므로 설정된 것으로 간주 (불필요한 취약 판정 방지)
+        if [ "$ntp_configured" = false ] && [ "$ntp_running" = true ]; then
+            if systemctl is-active systemd-timesyncd >/dev/null 2>&1 || pgrep -f systemd-timesyncd >/dev/null 2>&1; then
+                ntp_configured=true
+                ntp_details="${ntp_details:+${ntp_details}, }systemd-timesyncd 실행 중 (기본 NTP 풀 사용)"
             fi
         fi
 
@@ -163,12 +181,18 @@ diagnose() {
             inspection_summary="NTP 서비스 실행 중 및 시간 동기화 설정됨: ${ntp_details}"
             command_result="${raw_output}"
             command_executed="systemctl status ntp chrony systemd-timesyncd 2>/dev/null; cat ${config_files}"
-        elif [ "$ntp_installed" = true ] && [ "$ntp_configured" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="NTP 설정됨 (서비스 상태: ${ntp_service_running:-실행 중}): ${ntp_details}"
-            command_result="${raw_output}"
-            command_executed="systemctl is-active ntp chrony systemd-timesyncd 2>/dev/null"
+        elif [ "$ntp_configured" = true ] && [ "$probe_available" = false ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="NTP 서버 설정은 확인되었으나 데몬 동작 상태를 확인할 수 없음 (systemctl/pgrep 사용 불가): ${ntp_details}"
+            command_result="[Probe] systemctl/pgrep unavailable - daemon state unknown${newline}${raw_output}"
+            command_executed="command -v systemctl pgrep; cat ${config_files}"
+        elif [ "$ntp_configured" = true ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="NTP 서버 설정은 있으나 NTP 데몬이 중지되어 시간 동기화가 동작하지 않음: ${ntp_details}"
+            command_result="[Service] inactive${newline}${raw_output}"
+            command_executed="systemctl is-active ntp chrony chronyd systemd-timesyncd 2>/dev/null; cat ${config_files}"
         else
             diagnosis_result="VULNERABLE"
             status="취약"

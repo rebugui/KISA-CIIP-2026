@@ -57,79 +57,76 @@ diagnose() {
     local newline=$'\n'
 
     # 일반 사용자의 메일 서비스 실행 방지 확인
-    local mail_restricted=false
+    # KISA 판단기준: 일반 사용자의 q 옵션(메일 큐 강제 실행/drop) 제한 여부
+    #  - Sendmail : /etc/mail/sendmail.cf 의 PrivacyOptions 에 restrictqrun 설정 시 양호
+    #  - Postfix  : /usr/sbin/postsuper 에 일반 사용자(others) 실행 권한이 없으면 양호
+    #               (조치: chmod o-x /usr/sbin/postsuper)
+    local mail_service_present=false   # 점검 대상(SMTP) 서비스 존재 여부
+    local mail_vulnerable=false        # 하나라도 제한되지 않은 서비스가 있으면 취약
     local restriction_info=""
+    local command_executed=""
 
-    # 1) Sendmail: smrsh 확인
-    if [ -f /etc/mail/smrsh ]; then
-        restriction_info="${restriction_info}Sendmail smrsh 설치됨${newline}"
-        if command -v smrsh &>/dev/null; then
-            mail_restricted=true
-            restriction_info="${restriction_info}smrsh: 사용 가능한 명령어 제한됨${newline}"
+    # 1) Sendmail: PrivacyOptions 의 restrictqrun 확인
+    local sm_conf=""
+    [ -f /etc/mail/sendmail.cf ] && sm_conf="/etc/mail/sendmail.cf"
+    [ -z "$sm_conf" ] && [ -f /etc/sendmail.cf ] && sm_conf="/etc/sendmail.cf"
+    if [ -n "$sm_conf" ]; then
+        mail_service_present=true
+        local privacy_options
+        privacy_options=$(grep -i "PrivacyOptions" "$sm_conf" 2>/dev/null | grep -v "^#" | head -1 || true)
+        restriction_info="${restriction_info}[Sendmail] ${sm_conf} PrivacyOptions: ${privacy_options}${newline}"
+        command_executed="${command_executed}grep -i 'PrivacyOptions' ${sm_conf}; "
+        # restrictqrun 이 설정되어 있고 norestrictqrun 으로 무력화되지 않은 경우만 양호
+        if echo "$privacy_options" | grep -qiw "restrictqrun" && ! echo "$privacy_options" | grep -qiw "norestrictqrun"; then
+            restriction_info="${restriction_info}[Sendmail] restrictqrun 설정됨 -> 제한${newline}"
+        else
+            mail_vulnerable=true
+            restriction_info="${restriction_info}[Sendmail] restrictqrun 미설정 -> 일반 사용자 q 옵션 허용${newline}"
         fi
     fi
 
-    # Sendmail 설정에서 restrict-mailrun 확인
-    if [ -f /etc/mail/sendmail.cf ] || [ -f /etc/sendmail.cf ]; then
-        local conf_file="/etc/mail/sendmail.cf"
-        [ ! -f "$conf_file" ] && conf_file="/etc/sendmail.cf"
-
-        local privacy_options=$(grep -i "PrivacyOptions" "$conf_file" | grep -v "^#" | head -1)
-        restriction_info="${restriction_info}Sendmail PrivacyOptions: ${privacy_options}${newline}"
-
-        if echo "$privacy_options" | grep -q "restrict-mailrun"; then
-            mail_restricted=true
-            restriction_info="${restriction_info}restrict-mailrun 설정됨${newline}"
-        fi
+    # 2) Postfix: /usr/sbin/postsuper 의 일반 사용자 실행 권한 확인
+    local ps_bin=""
+    for cand in /usr/sbin/postsuper /usr/lib/postfix/sbin/postsuper; do
+        [ -f "$cand" ] && ps_bin="$cand" && break
+    done
+    if [ -n "$ps_bin" ]; then
+        mail_service_present=true
+        local ps_perms
+        ps_perms=$(stat -c "%a" "$ps_bin" 2>/dev/null || echo "000")
+        restriction_info="${restriction_info}[Postfix] ${ps_bin} 권한: ${ps_perms}${newline}"
+        command_executed="${command_executed}ls -l ${ps_bin}; "
+        # others(기타 사용자) 실행 비트(1) 여부 판단
+        local other_digit="${ps_perms: -1}"
+        case "$other_digit" in
+            1|3|5|7)
+                mail_vulnerable=true
+                restriction_info="${restriction_info}[Postfix] 일반 사용자 실행 권한 존재 -> 취약${newline}"
+                ;;
+            *)
+                restriction_info="${restriction_info}[Postfix] 일반 사용자 실행 권한 제거됨 -> 제한${newline}"
+                ;;
+        esac
     fi
-
-    # 2) Postfix: mail_owner 확인
-    if command -v postconf &>/dev/null; then
-        local mail_owner=$(postconf mail_owner 2>/dev/null | grep "mail_owner" | awk '{print $3}')
-        restriction_info="${restriction_info}Postfix mail_owner: ${mail_owner}${newline}"
-
-        if [ "$mail_owner" = "postfix" ] || [ "$mail_owner" = "mail" ]; then
-            mail_restricted=true
-            restriction_info="${restriction_info}mail_owner가 특정 사용자로 설정됨${newline}"
-        fi
-
-        # authorized_mail_users 확인
-        local auth_users=$(postconf authorized_mail_users 2>/dev/null | grep "authorized_mail_users" | awk '{print $3}')
-        if [ -n "$auth_users" ]; then
-            restriction_info="${restriction_info}authorized_mail_users: ${auth_users}${newline}"
-        fi
-
-        # authorized_submit_users 확인
-        local submit_users=$(postconf authorized_submit_users 2>/dev/null | grep "authorized_submit_users" | awk '{print $3}')
-        if [ -n "$submit_users" ]; then
-            restriction_info="${restriction_info}authorized_submit_users: ${submit_users}${newline}"
-            mail_restricted=true
-        fi
-    fi
-
-    # 3) 메일 큐 디렉토리 권한 확인
-    local mailq_dirs=("/var/spool/mqueue" "/var/spool/postfix" "/var/mail")
-    for dir in "${mailq_dirs[@]}"; do
-        if [ -d "$dir" ]; then
-            local perms=$(stat -c "%a" "$dir" 2>/dev/null || echo "000")
-            local owner=$(stat -c "%U" "$dir" 2>/dev/null || echo "unknown")
-            restriction_info="${restriction_info}${dir}: ${perms}, ${owner}${newline}"
-        fi
-    done || true
 
     # 최종 판정
-    if [ "$mail_restricted" = true ]; then
+    if [ "$mail_service_present" != true ]; then
+        # SMTP(메일) 서비스가 설치되어 있지 않으면 점검 대상 아님
+        diagnosis_result="N/A"
+        status="N/A"
+        inspection_summary="메일(SMTP) 서비스가 설치되어 있지 않아 점검 대상이 아님"
+        command_result="Sendmail/Postfix 메일 서비스 미설치"
+        command_executed="ls -l /usr/sbin/postsuper; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf"
+    elif [ "$mail_vulnerable" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="일반 사용자의 메일 서비스 실행 방지가 설정되어 있지 않음"
+        command_result="${restriction_info}"
+    else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="일반 사용자의 메일 서비스 실행 제한됨"
+        inspection_summary="일반 사용자의 메일 서비스 실행 방지가 설정됨"
         command_result="${restriction_info}"
-        command_executed="postconf mail_owner authorized_submit_users; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf 2>/dev/null"
-    else
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="메일 서비스 접근 제한 설정 수동 확인 필요"
-        command_result="${restriction_info}"
-        command_executed="postconf mail_owner; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf"
     fi
 
     # echo ""

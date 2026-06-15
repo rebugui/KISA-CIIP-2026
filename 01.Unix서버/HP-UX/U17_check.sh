@@ -11,7 +11,7 @@
 # @Platform    : HP-UX
 # @Severity    : 상
 # @Title       : 시스템 시작 스크립트 권한 설정
-# @Description : /sbin/rc*.d/* 권한 확인
+# @Description : /sbin/init.d, /sbin/rc[0-4].d 시작 스크립트 소유자/권한 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,92 +57,128 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # HP-UX 시스템 시작 스크립트 점검: /sbin/rc*.d/*
+    # HP-UX 시스템 시작 스크립트 점검: /sbin/init.d/*, /sbin/rc[0-4].d/*
+    # (실제 HP-UX 레이아웃: /sbin/init.d + /sbin/rc0.d ~ /sbin/rc4.d, /sbin/rc.d 디렉터리는 존재하지 않음)
+    # 가이드라인: 소유자 root, 일반 사용자(others) 쓰기 권한 제거
 
-    local init_script_dir="/sbin/rc.d"
     local vulnerable_files=""
     local vulnerable_count=0
-    local script_count=0
-
-    # HP-UX 시스템 시작 스크립트 검색
+    local vuln_listed=0
+    local total_files=0
+    local stat_fail_count=0
+    local unreadable_dirs=""
+    local found_dirs=""
     local raw_output=""
-    if [ -d "$init_script_dir" ]; then
-        # rc*.d 디렉터리 목록 가져오기 (rc0.d, rc1.d, rc2.d, rc3.d 등)
-        local rc_dirs=$(find /sbin -type d -name "rc*.d" 2>/dev/null || true)
+    local evidence_lines=0
+    local rc_dir=""
+    local entry=""
 
-        for rc_dir in $rc_dirs; do
-            if [ -d "$rc_dir" ]; then
-                # 디렉터리 내의 모든 파일/심볼릭 링크 점검
-                local dir_files=$(find "$rc_dir" -type f -o -type l 2>/dev/null | head -50 || true)
-                raw_output="${raw_output}${dir_files}"$'\n'
+    for rc_dir in /sbin/init.d /sbin/rc[0-4].d; do
+        [ -d "$rc_dir" ] || continue
+        found_dirs="${found_dirs}${rc_dir} "
 
-                while IFS= read -r file; do
-                    if [ -n "$file" ]; then
-                        ((script_count++)) || true
+        # 디렉터리 읽기 불가 시 수동 진단 대상
+        if [ ! -r "$rc_dir" ]; then
+            unreadable_dirs="${unreadable_dirs}${rc_dir}, "
+            continue
+        fi
 
-                        # HP-UX: perl 사용하여 권한 및 소유자 확인
-                        local perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$file" 2>/dev/null)
-                        local owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid)' "$file" 2>/dev/null)
+        for entry in "$rc_dir"/*; do
+            # glob 미일치(리터럴 패턴) 및 존재하지 않는 항목 제외
+            [ -e "$entry" ] || continue
+            # 일반 파일만 점검 (심볼릭 링크는 stat이 대상 파일 기준, dangling link 제외)
+            [ -f "$entry" ] || continue
+            ((total_files++)) || true
 
-                        # 심볼릭 링크인 경우 대상 파일 확인
-                        local is_link=0
-                        if [ -L "$file" ]; then
-                            is_link=1
-                            local target=$(readlink "$file" 2>/dev/null || echo "")
-                            if [ -n "$target" ]; then
-                                # 절대 경로 변환
-                                if [[ "$target" != /* ]]; then
-                                    target=$(dirname "$file")/$target
-                                fi
-                                target=$(readlink -f "$target" 2>/dev/null || echo "$target")
-                                if [ -e "$target" ]; then
-                                    perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$target" 2>/dev/null)
-                                    owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid)' "$target" 2>/dev/null)
-                                fi
-                            fi
+            # HP-UX: perl stat으로 4자리 8진수 권한 + 소유자 확인 (stat(shift)로 파일 인자 소비)
+            local stat_out=""
+            stat_out=$(perl -e '@s=stat(shift) or exit 1; $o=getpwuid($s[4]); $o=$s[4] unless defined($o) && length($o); printf "%04o %s", $s[2] & 07777, $o' "$entry" 2>/dev/null || true)
+            # stat 실패(perl 부재/파일별 오류) 시 미검사 파일로 집계 → 양호 판정 차단 (fail-closed)
+            if [ -z "$stat_out" ]; then
+                ((stat_fail_count++)) || true
+                continue
+            fi
+            local perms="${stat_out%% *}"
+            local owner="${stat_out#* }"
+
+            # 증거 출력은 20개까지만 기록 (개수는 전체 집계)
+            if [ "$evidence_lines" -lt 20 ]; then
+                raw_output="${raw_output}${perms} ${owner} ${entry}${newline}"
+                ((evidence_lines++)) || true
+            fi
+
+            if [ "$owner" != "root" ]; then
+                ((vulnerable_count++)) || true
+                if [ "$vuln_listed" -lt 20 ]; then
+                    vulnerable_files="${vulnerable_files}${entry} (소유자: ${owner}), "
+                    ((vuln_listed++)) || true
+                fi
+            else
+                # others 쓰기 권한: 4자리 8진수 문자열의 마지막 자리가 2,3,6,7
+                # (산술 % 10 사용 금지 - bash가 선행 0을 8진수로 해석하여 오판)
+                case "$perms" in
+                    *[2367])
+                        ((vulnerable_count++)) || true
+                        if [ "$vuln_listed" -lt 20 ]; then
+                            vulnerable_files="${vulnerable_files}${entry} (권한: ${perms}, others 쓰기 가능), "
+                            ((vuln_listed++)) || true
                         fi
-
-                        # 취약 판단: 소유자가 root가 아니거나, others 쓰기 권한이 있음
-                        if [ "$owner" != "root" ]; then
-                            ((vulnerable_count++)) || true
-                            vulnerable_files="${vulnerable_files}${file} (소유자: ${owner}, 권한: ${perms}), "
-                        else
-                            # others 쓰기 권한 확인 (마지막 숫자)
-                            local last_octet=$(( perms % 10 ))
-                            if [ "$last_octet" -ge 2 ] 2>/dev/null; then
-                                ((vulnerable_count++)) || true
-                                vulnerable_files="${vulnerable_files}${file} (소유자: root, 권한: ${perms}, others 쓰기 허용), "
-                            fi
-                        fi
-                    fi
-                done <<< "$dir_files" || true
+                        ;;
+                esac
             fi
         done
-    else
-        raw_output="시스템 시작 스크립트 디렉터리(${init_script_dir})가 존재하지 않음"
+    done
+
+    if [ "$total_files" -gt "$evidence_lines" ]; then
+        raw_output="${raw_output}... (총 ${total_files}개 중 ${evidence_lines}개 표시)${newline}"
+    fi
+    if [ -n "$unreadable_dirs" ]; then
+        raw_output="${raw_output}[읽기 불가 디렉터리] ${unreadable_dirs%, }${newline}"
     fi
 
+    local exec_cmd="find /sbin/init.d /sbin/rc[0-4].d -type f -o -type l 2>/dev/null; perl -e '@s=stat(shift); printf \"%04o %s\", \$s[2] & 07777, scalar getpwuid(\$s[4])' <파일>"
+
     # 결과 판정
-    if [ "$vulnerable_count" -eq 0 ]; then
-        if [ "$script_count" -eq 0 ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="시스템 시작 스크립트 파일 없음 (최신 시스템)"
-            command_result="${raw_output}"
-            command_executed="find /sbin -type d -name 'rc*.d' 2>/dev/null"
-        else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="시스템 시작 스크립트 ${script_count}개 파일 모두 root 소유, others 쓰기 권한 없음"
-            command_result="${raw_output}"
-            command_executed="find /sbin -type d -name 'rc*.d' -exec find {} -type f -o -type l \\; 2>/dev/null"
-        fi
-    else
+    if [ "$vulnerable_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="취약한 시스템 시작 스크립트 ${vulnerable_count}개 발견: ${vulnerable_files%, }"
-        command_result="${raw_output}"
-        command_executed="find /sbin -type d -name 'rc*.d' -exec find {} -type f -o -type l \\; 2>/dev/null"
+        local vuln_extra=""
+        if [ "$vulnerable_count" -gt "$vuln_listed" ]; then
+            vuln_extra=" 외 $((vulnerable_count - vuln_listed))개"
+        fi
+        inspection_summary="취약한 시작 스크립트 ${vulnerable_count}개 발견 (검사 ${total_files}개): ${vulnerable_files%, }${vuln_extra}"
+        command_result="[Command: ${exec_cmd}]${newline}${raw_output}"
+        command_executed="${exec_cmd}"
+    elif [ -n "$unreadable_dirs" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="시작 스크립트 디렉터리 접근 불가로 수동 확인 필요: ${unreadable_dirs%, }"
+        command_result="[Command: ${exec_cmd}]${newline}${raw_output}"
+        command_executed="${exec_cmd}"
+    elif [ "$stat_fail_count" -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="시작 스크립트 ${stat_fail_count}개의 권한/소유자 확인 실패(perl stat 불가) - 수동 확인 필요 (검사 대상 ${total_files}개)"
+        command_result="[Command: ${exec_cmd}]${newline}${raw_output}[STAT FAILED: ${stat_fail_count}/${total_files}]"
+        command_executed="${exec_cmd}"
+    elif [ -z "$found_dirs" ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="시스템 시작 스크립트 디렉터리(/sbin/init.d, /sbin/rc[0-4].d) 없음"
+        command_result="[Command: ${exec_cmd}]${newline}[DIR NOT FOUND: /sbin/init.d, /sbin/rc[0-4].d]"
+        command_executed="${exec_cmd}"
+    elif [ "$total_files" -eq 0 ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="시작 스크립트 디렉터리(${found_dirs% })에 점검 대상 파일 없음"
+        command_result="[Command: ${exec_cmd}]${newline}[NO FILES FOUND in ${found_dirs% }]"
+        command_executed="${exec_cmd}"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="모든 시작 스크립트 소유자 root, others 쓰기 권한 없음 (${total_files}개 검사)"
+        command_result="[Command: ${exec_cmd}]${newline}${raw_output}"
+        command_executed="${exec_cmd}"
     fi
 
     # 결과 저장

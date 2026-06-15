@@ -11,7 +11,7 @@
 # @Platform    : Tomcat_Linux
 # @Severity    : 상
 # @Title       : 웹 서비스 경로 내 파일의 접근 통제
-# @Description : 불필요한 CGI 스크립트 핸들러 매핑 제거 여부 점검
+# @Description : 웹 서비스 경로 내 주요 설정 파일의 접근 권한(일반 사용자 접근 제한) 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 
@@ -42,13 +42,11 @@ GUIDELINE_REMEDIATION="주요 설정 파일 및 디렉터리에 불필요한 접
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local cgi_count=0
-    local jsp_count=0
 
         # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -83,57 +81,62 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
-    local web_xml_locations=(
+    # 웹 서비스 경로 내 주요 설정 파일/디렉터리의 접근 권한 점검
+    # 가이드라인 기준: 주요 설정 파일 및 디렉터리에 관리자를 제외한 일반 사용자(other)의
+    # 불필요한 접근 권한(읽기/쓰기/실행)이 부여되지 않아야 함 (권고: chmod -R 750)
+    # (criteria_bad: 주요 설정 파일 및 디렉터리에 불필요한 접근 권한이 부여된 경우)
+    # 판단: 권한의 other(마지막 8진수) 자리가 0이 아니면 일반 사용자 접근 가능 → 취약
+    local config_paths=(
+        "/etc/tomcat*/server.xml"
         "/etc/tomcat*/web.xml"
+        "/etc/tomcat*/context.xml"
+        "/etc/tomcat*/tomcat-users.xml"
+        "/var/lib/tomcat*/conf/server.xml"
         "/var/lib/tomcat*/conf/web.xml"
+        "/var/lib/tomcat*/conf/context.xml"
+        "/var/lib/tomcat*/conf/tomcat-users.xml"
+        "/usr/share/tomcat*/conf/server.xml"
         "/usr/share/tomcat*/conf/web.xml"
+        "/usr/share/tomcat*/conf/context.xml"
+        "/usr/share/tomcat*/conf/tomcat-users.xml"
     )
 
-    local script_mappings=""
+    local perm_info=""
+    local files_checked=false
+    local has_insecure_perm=false
 
-    for xml_pattern in "${web_xml_locations[@]}"; do
-        for xml_file in $xml_pattern; do
-            if [ -f "${xml_file}" ]; then
-                # CGI Servlet 확인
-                local found_cgi=$(grep -i "CGIServlet|cgi" "${xml_file}" 2>/dev/null | grep -E "servlet|servlet-mapping" | grep -v "^\s*<!--" || true)
-                if [ -n "${found_cgi}" ]; then
-                    script_mappings="${script_mappings}"$'\n'"CGI: ${found_cgi}"
-                    cgi_count=$((cgi_count + 1))
+    for path_pattern in "${config_paths[@]}"; do
+        for cfg_file in $path_pattern; do
+            if [ -f "${cfg_file}" ]; then
+                files_checked=true
+                local file_perm=$(stat -c "%a" "${cfg_file}" 2>/dev/null || echo "")
+                if [ -n "${file_perm}" ]; then
+                    # other 권한 자리 추출 (마지막 1자리)
+                    local other_perm="${file_perm: -1}"
+                    perm_info="${perm_info}"$'\n'"${cfg_file}: ${file_perm}"
+                    if [ "${other_perm}" != "0" ]; then
+                        has_insecure_perm=true
+                    fi
                 fi
-
-                # JSP Servlet 확인 (Jasper)
-                local found_jsp=$(grep -i "JspServlet|jsp" "${xml_file}" 2>/dev/null | grep -E "servlet|servlet-mapping" | grep -v "^\s*<!--" || true)
-                if [ -n "${found_jsp}" ]; then
-                    script_mappings="${script_mappings}"$'\n'"JSP: ${found_jsp}"
-                    jsp_count=$((jsp_count + 1))
-                fi
-
-                break 2
             fi
         done
     done
 
-    local total_mappings=$((cgi_count + jsp_count))
+    command_executed="stat -c '%a %n' /etc/tomcat*/server.xml /etc/tomcat*/web.xml /etc/tomcat*/tomcat-users.xml /var/lib/tomcat*/conf/*.xml /usr/share/tomcat*/conf/*.xml 2>/dev/null | head -10"
+    command_result="${perm_info:-No Tomcat config files found}"
 
-    command_executed="grep -E 'CGIServlet|JspServlet' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
-    command_result="${script_mappings:-No script mappings found}"
-
-    if [ ${total_mappings} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="스크립트 매핑이 발견되지 않았습니다 (정적 리소스 전용)."
-    elif [ ${cgi_count} -eq 0 ] && [ ${jsp_count} -le 2 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="필수적인 JSP 매핑만 존재합니다. CGI Servlet은 비활성화되어 있습니다. (보안 권고사항 준수)"
-    elif [ ${cgi_count} -gt 0 ]; then
+    if [ "${files_checked}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat 주요 설정 파일을 찾을 수 없습니다. server.xml, web.xml, context.xml, tomcat-users.xml 등 주요 설정 파일에 일반 사용자(other) 접근 권한이 부여되어 있는지 수동으로 확인하세요(권고: 750 이하)."
+    elif [ "${has_insecure_perm}" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="CGI Servlet이 활성화되어 있습니다(${cgi_count}개). CGI는 취약할 수 있으므로 비활성화 권장."
+        inspection_summary="주요 설정 파일에 일반 사용자(other)의 접근 권한이 부여되어 있습니다. chmod로 other 권한을 제거하여 750 이하로 설정 권장(chmod o-rwx 또는 chmod -R 750)."
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="스크립트 매핑이 ${total_mappings}개 발견되었습니다. 불필요한 매핑 제거 권장."
+        inspection_summary="주요 설정 파일에 일반 사용자(other)의 불필요한 접근 권한이 부여되어 있지 않습니다. (보안 권고사항 준수)"
     fi
 
     # Run-all 모드 확인

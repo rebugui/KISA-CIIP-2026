@@ -32,7 +32,7 @@ $remediation = "기본 관리자 계정 명을 추측하기 어려운 계정 명
 
 try {
     $finalResult = "N/A"
-    $status = "not_applicable"
+    $status = "N/A"
     $summary = "Apache for Windows is not a target platform for WEB-01 according to docs/guideline_metadata.json."
     $commandOutput = "WEB-01 targets Tomcat and JEUS default administrator console accounts. Apache does not provide a built-in default web administrator account for this guideline item."
     $commandExecuted = "guideline_metadata.json WEB-01 target platform review"

@@ -71,74 +71,120 @@ diagnose() {
         command_result="[Command: systemctl is-active mail services]${newline}${svc_check}"
         command_executed="systemctl is-active --quiet sendmail postfix; command -v sendmail postconf"
     else
+        local relay_vulnerable=false
+        local relay_manual=false
+
+        local sendmail_conf=""
+        if [ -f /etc/mail/sendmail.cf ]; then
+            sendmail_conf="/etc/mail/sendmail.cf"
+        elif [ -f /etc/sendmail.cf ]; then
+            sendmail_conf="/etc/sendmail.cf"
+        fi
+
+        local postfix_present=false
+        if command -v postconf >/dev/null 2>&1 || [ -f /etc/postfix/main.cf ]; then
+            postfix_present=true
+        fi
+
+        local smtp_daemon=""
+        smtp_daemon=$(ps -ef 2>/dev/null | grep -E '[s]endmail|[p]ostfix/master|[e]xim|[s]mtpd' || true)
+
         # 1) Sendmail 릴레이 제한 확인
-        if [ -f /etc/mail/sendmail.cf ] || [ -f /etc/sendmail.cf ]; then
-            local conf_file="/etc/mail/sendmail.cf"
-            [ ! -f "$conf_file" ] && conf_file="/etc/sendmail.cf"
+        if [ -n "$sendmail_conf" ]; then
+            relay_info="${relay_info}[Sendmail: ${sendmail_conf}]${newline}"
 
-            # PrivacyOptions 확인
-            local privacy_options=$(grep -i "^O PrivacyOptions" "$conf_file" | grep -v "^#" || echo "")
-            relay_info="${relay_info}Sendmail PrivacyOptions:\\n${privacy_options}\\n"
+            # 릴레이 전면 허용(FEATURE promiscuous_relay) 여부 확인 - 조치방법: 해당 설정 제거
+            local promiscuous=""
+            promiscuous=$(grep -h "promiscuous_relay" "$sendmail_conf" /etc/mail/sendmail.mc 2>/dev/null | grep -v "^[[:space:]]*#" || true)
 
-            if echo "$privacy_options" | grep -qi "goaway"; then
+            # 릴레이 거부 룰 확인 - 조치방법: cat sendmail.cf | grep 'R$*' | grep 'Relaying denied'
+            local relay_denied=""
+            relay_denied=$(grep 'R\$\*' "$sendmail_conf" 2>/dev/null | grep -i 'Relaying denied' | grep -v "^[[:space:]]*#" || true)
+
+            if [ -n "$promiscuous" ]; then
+                relay_vulnerable=true
+                relay_info="${relay_info}promiscuous_relay 설정 발견(릴레이 전면 허용): ${promiscuous}${newline}"
+            elif [ -n "$relay_denied" ]; then
                 relay_restricted=true
-                relay_info="${relay_info}goaway 옵션으로 릴레이 제한됨\\n"
+                relay_info="${relay_info}릴레이 거부 룰(R\$* ... Relaying denied) 확인됨: ${relay_denied}${newline}"
+            else
+                # 릴레이 제한 여부를 설정 파일에서 판별할 수 없으면 수동진단 (양호 아님)
+                relay_manual=true
+                relay_info="${relay_info}sendmail.cf에서 릴레이 제한 설정을 자동 판별할 수 없음 - 수동 확인 필요${newline}"
             fi
 
-            # access.db 파일 확인
+            # access DB는 증적으로만 기록 (파일 존재 자체는 릴레이 제한의 근거가 아님)
             if [ -f /etc/mail/access.db ] || [ -f /etc/mail/access ]; then
-                relay_restricted=true
-                relay_info="${relay_info}Sendmail access DB 존재\\n"
+                relay_info="${relay_info}/etc/mail/access(.db) 존재 (참고 증적)${newline}"
             fi
         fi
 
         # 2) Postfix 릴레이 제한 확인
-        if command -v postconf &>/dev/null; then
-            # smtpd_relay_restrictions 확인
-            local relay_restrictions=$(postconf smtpd_relay_restrictions 2>/dev/null | grep "smtpd_relay_restrictions")
-            relay_info="${relay_info}Postfix smtpd_relay_restrictions:\\n${relay_restrictions}\\n"
+        if [ "$postfix_present" = true ]; then
+            local relay_restrictions=""
+            local recipient_restrictions=""
+            local mynetworks=""
+            local mynetworks_open=false
 
-            if echo "$relay_restrictions" | grep -q "permit_mynetworks"; then
-                relay_restricted=true
-                relay_info="${relay_info}permit_mynetworks로 제한됨\\n"
+            if command -v postconf >/dev/null 2>&1; then
+                relay_restrictions=$(postconf -h smtpd_relay_restrictions 2>/dev/null || true)
+                recipient_restrictions=$(postconf -h smtpd_recipient_restrictions 2>/dev/null || true)
+                mynetworks=$(postconf -h mynetworks 2>/dev/null || true)
+                # 유효값 기준: mynetworks가 비어 있으면 신뢰 범위를 판별할 수 없어 취약 처리
+                if [ -z "$mynetworks" ]; then
+                    mynetworks_open=true
+                fi
+            elif [ -f /etc/postfix/main.cf ]; then
+                relay_restrictions=$(grep -E '^[[:space:]]*smtpd_relay_restrictions[[:space:]]*=' /etc/postfix/main.cf 2>/dev/null | tail -1 | cut -d= -f2- || true)
+                recipient_restrictions=$(grep -E '^[[:space:]]*smtpd_recipient_restrictions[[:space:]]*=' /etc/postfix/main.cf 2>/dev/null | tail -1 | cut -d= -f2- || true)
+                mynetworks=$(grep -E '^[[:space:]]*mynetworks[[:space:]]*=' /etc/postfix/main.cf 2>/dev/null | tail -1 | cut -d= -f2- || true)
             fi
 
-            if echo "$relay_restrictions" | grep -q "reject_unauth_destination"; then
-                relay_restricted=true
-                relay_info="${relay_info}reject_unauth_destination로 제한됨\\n"
+            if echo "$mynetworks" | grep -q "0\.0\.0\.0/0"; then
+                mynetworks_open=true
             fi
 
-            # smtpd_recipient_restrictions 확인 (구버전)
-            local recipient_restrictions=$(postconf smtpd_recipient_restrictions 2>/dev/null | grep "smtpd_recipient_restrictions")
-            relay_info="${relay_info}smtpd_recipient_restrictions:\\n${recipient_restrictions}\\n"
+            relay_info="${relay_info}[Postfix]${newline}smtpd_relay_restrictions: ${relay_restrictions}${newline}smtpd_recipient_restrictions: ${recipient_restrictions}${newline}mynetworks: ${mynetworks}${newline}"
 
-            # mynetworks 설정 확인
-            local mynetworks=$(postconf mynetworks 2>/dev/null | grep "mynetworks" | awk '{print $3}')
-            relay_info="${relay_info}mynetworks: ${mynetworks}\\n"
-
-            # relay_domains 확인
-            local relay_domains=$(postconf relay_domains 2>/dev/null | grep "relay_domains" | awk '{print $3}')
-            relay_info="${relay_info}relay_domains: ${relay_domains}\\n"
+            if [ "$mynetworks_open" = true ]; then
+                # mynetworks 전체 허용(0.0.0.0/0)이면 permit_mynetworks가 open relay가 됨 - 판단기준 "취약: 릴레이 제한이 설정되어 있지 않은 경우"
+                relay_vulnerable=true
+                relay_info="${relay_info}mynetworks 무제한(0.0.0.0/0 또는 빈 값) - 전체 네트워크 릴레이 허용${newline}"
+            elif echo "${relay_restrictions} ${recipient_restrictions}" | grep -Eq "reject_unauth_destination|defer_unauth_destination"; then
+                # 판단기준 "양호: 릴레이 제한이 설정된 경우" - 유효 릴레이 정책에 비인가 목적지 거부가 존재하고 mynetworks가 제한됨
+                relay_restricted=true
+                relay_info="${relay_info}reject/defer_unauth_destination 적용 + mynetworks 제한 - 비인가 릴레이 차단됨${newline}"
+            else
+                # 판단기준 "취약: 릴레이 제한이 설정되어 있지 않은 경우" - 비인가 목적지 릴레이 거부 설정 부재
+                relay_vulnerable=true
+                relay_info="${relay_info}비인가 목적지 릴레이 거부(reject/defer_unauth_destination) 설정 없음${newline}"
+            fi
         fi
 
-        # 3) open relay 테스트 (기본 확인만)
-        if command -v nc &>/dev/null; then
-            relay_info="${relay_info}open relay 테스트는 수동으로 수행 필요\\n"
+        # 3) 설정 파일 없이 SMTP 데몬만 탐지된 경우 수동진단
+        if [ -z "$sendmail_conf" ] && [ "$postfix_present" = false ]; then
+            relay_manual=true
+            relay_info="${relay_info}[SMTP 데몬]${newline}${smtp_daemon}${newline}설정 파일을 찾지 못해 릴레이 제한 여부 수동 확인 필요${newline}"
         fi
 
-        # 최종 판정
-        if [ "$relay_restricted" = true ]; then
+        command_executed="grep promiscuous_relay /etc/mail/sendmail.cf /etc/mail/sendmail.mc; grep 'R\$*' sendmail.cf | grep 'Relaying denied'; postconf -h smtpd_relay_restrictions smtpd_recipient_restrictions mynetworks"
+
+        # 최종 판정 (판단기준 - 양호: 릴레이 제한이 설정된 경우 / 취약: 릴레이 제한이 설정되어 있지 않은 경우)
+        if [ "$relay_vulnerable" = true ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="메일 릴레이 제한이 설정되어 있지 않음 - open relay 가능성"
+            command_result="${relay_info}"
+        elif [ "$relay_manual" = true ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="메일서비스 사용 중이나 릴레이 제한 설정을 자동 판별할 수 없어 수동 진단 필요"
+            command_result="${relay_info}"
+        else
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="메일 릴레이 제한 설정됨"
             command_result="${relay_info}"
-            command_executed="postconf smtpd_relay_restrictions smtpd_recipient_restrictions mynetworks relay_domains"
-        else
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="메일 릴레이 제한 미흡 - open relay 가능성"
-            command_result="${relay_info}"
-            command_executed="postconf smtpd_relay_restrictions; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf 2>/dev/null"
         fi
     fi
 

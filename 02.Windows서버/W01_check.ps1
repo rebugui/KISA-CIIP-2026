@@ -40,13 +40,16 @@ try {
     $admin = Get-LocalUser | Where-Object { $_.SID.Value -like "*-500" }
 
     if ($admin.Name -eq "Administrator") {
+        # 기본 계정 이름이 변경되지 않음 -> 취약 (이름 미변경)
         $finalResult = "VULNERABLE"
-        $summary = "기본 Administrator 계정 이름 사용 중 (보안 위험)"
+        $summary = "기본 Administrator 계정 이름을 변경하지 않음 (보안 위험)"
         $status = "취약"
     } else {
-        $finalResult = "GOOD"
-        $summary = "Administrator 계정 이름이 변경됨"
-        $status = "양호"
+        # 이름은 변경되었으나 비밀번호 강도는 정적으로 검증 불가 (criteria_good은 이름 변경 OR 강화된 비밀번호의 OR 조건)
+        # 비밀번호 단순/복잡 여부를 스크립트가 확인할 수 없으므로 수동진단 처리 (GOOD으로 단정 금지)
+        $finalResult = "MANUAL"
+        $summary = "Administrator 기본 계정 이름이 변경됨. 단, 비밀번호 강도는 자동 점검이 불가하므로 강화된 비밀번호 적용 여부를 수동으로 확인 필요"
+        $status = "수동진단"
     }
 
     $commandExecuted = "Get-LocalUser | Where-Object { `$_.SID.Value -like '*-500' }"

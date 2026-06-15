@@ -88,8 +88,9 @@ diagnose() {
         local uid=$(echo "$user_line" | cut -d: -f3)
         local home_dir=$(echo "$user_line" | cut -d: -f6)
 
-        # 홈 디렉터리가 존재하고, UID가 1000 이상인 일반 사용자 확인
-        if [ -d "$home_dir" ] && [ "$uid" -ge 1000 ] 2>/dev/null; then
+        # 홈 디렉터리가 존재하는 모든 계정 점검 (UID 1-999 서비스 계정 홈의
+        # .rhosts도 r-command 신뢰 설정에 악용될 수 있으므로 점검 대상)
+        if [ -d "$home_dir" ] && [ "$uid" -ge 0 ] 2>/dev/null; then
             local rhosts_path="${home_dir}/.rhosts"
 
             if [ -f "$rhosts_path" ]; then
@@ -108,7 +109,7 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary=".rhosts 및 hosts.equiv 파일 없음 (r 계정 사용 제어 양호)"
-        command_result="[No .rhosts or hosts.equiv files found]"
+        # 실제 수집 증거(command_result, L73 구성)를 그대로 유지
         command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
     else
         diagnosis_result="VULNERABLE"

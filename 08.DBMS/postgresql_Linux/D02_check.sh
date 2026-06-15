@@ -76,27 +76,53 @@ diagnose() {
     fi
 
     # 빈 비밀번호 계정 확인
+    # pg_shadow는 슈퍼유저만 조회 가능하다. 비슈퍼유저로 조회 시 권한 오류가 발생하며,
+    # 이때 stderr를 버리고 빈 결과를 "빈 비밀번호 계정 없음"으로 처리하면 점검 근거를
+    # 확보하지 못했음에도 GOOD으로 오판정하게 된다. 따라서 쿼리 실행 오류(비-0 종료코드 또는
+    # stderr 출력)는 "근거 확보 불가"로 보고 MANUAL로 판정하고, 오류 없이 0행이 반환된
+    # 경우에만 GOOD으로 판정한다.
     local empty_password_query="SELECT usename FROM pg_catalog.pg_shadow WHERE passwd IS NULL AND usename <> current_user;"
     command_executed="psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_ADMIN_USER} -d postgres -t -c \"${empty_password_query}\""
-    command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -t -c "${empty_password_query}" 2>/dev/null || echo "")
+
+    local query_stderr_file
+    query_stderr_file=$(mktemp 2>/dev/null || echo "/tmp/d02_pg_$$.err")
+    local query_status=0
+    command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -At -c "${empty_password_query}" 2>"${query_stderr_file}") || query_status=$?
+    local query_stderr=""
+    if [ -f "${query_stderr_file}" ]; then
+        query_stderr=$(cat "${query_stderr_file}" 2>/dev/null || echo "")
+        rm -f "${query_stderr_file}" 2>/dev/null || true
+    fi
+
+    # 빈 줄 제거 후 실제 반환된 계정 행 수 계산
+    local empty_pwd_users
+    empty_pwd_users=$(printf '%s\n' "${command_result}" | grep -v '^[[:space:]]*$' || true)
+    local user_count=0
+    if [ -n "${empty_pwd_users}" ]; then
+        user_count=$(printf '%s\n' "${empty_pwd_users}" | wc -l)
+    fi
 
     # 결과 분석
-    if [ -n "$command_result" ]; then
-        local user_count=$(echo "$command_result" | grep -c ".*")
-
-        if [ "$user_count" -gt 0 ]; then
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="빈 비밀번호를 가진 계정 ${user_count}개 발견: $(echo "$command_result" | head -5 | tr '\n' ', ')"
+    if [ "${query_status}" -ne 0 ] || [ -n "${query_stderr}" ]; then
+        # 쿼리 실행 실패(예: pg_shadow 접근 권한 없음) - 점검 근거 확보 불가
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="pg_shadow 조회에 실패하여 빈 비밀번호 계정 존재 여부를 자동 점검할 수 없습니다(슈퍼유저 권한 필요 가능성). 슈퍼유저 계정으로 빈 비밀번호 및 불필요 계정 존재 여부를 수동으로 확인하세요."
+        if [ -n "${query_stderr}" ]; then
+            command_result="쿼리 오류: ${query_stderr}"
         else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="빈 비밀번호를 가진 계정 없음"
+            command_result="쿼리 실행 실패 (종료코드: ${query_status})"
         fi
+    elif [ "${user_count}" -gt 0 ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="빈 비밀번호를 가진 계정 ${user_count}개 발견: $(printf '%s\n' "${empty_pwd_users}" | head -5 | tr '\n' ', ')"
+        command_result="${empty_pwd_users}"
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="모든 계정에 비밀번호 설정됨"
+        inspection_summary="빈 비밀번호를 가진 계정 없음"
+        command_result="조회 성공: 빈 비밀번호 계정 0건"
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

@@ -39,23 +39,24 @@ if (-not (Test-RunallMode)) {
 $commandExecuted = 'Get-Service | Where-Object { $_.Status -eq "Running" }'
 $commandOutput = ""
 try {
-    # KISA 가이드라인 기반 불필요한 서비스 목록 (17개)
+    # KISA 가이드라인 "일반적으로 불필요한 서비스" 표 기반 목록.
+    # 주의:
+    #  - "Schedule"(Task Scheduler)는 KISA 불필요 서비스 표에 없으며 Win10/11에서 OS 필수
+    #    상시 실행 서비스이므로 목록에서 제거함 (제거 전: 거의 모든 PC에서 오탐 false-VULNERABLE 발생).
+    #  - 서비스명은 ServiceName(키) 기준 매칭. 관리자가 서비스명을 변경한 경우(드묾) 문자열 매칭이
+    #    실패하여 미탐될 수 있으나, 표준 환경에서는 ServiceName이 고정이므로 가이드 기준 그대로 사용.
     $unnecessaryServices = @(
         "TlntSvr",           # Telnet
         "MSFTPSVC",          # FTP Publishing Service
         "SMTPSVC",           # Simple Mail Transfer Protocol (SMTP)
         "RemoteRegistry",    # Remote Registry Service
         "Simptcp",           # Simple TCP/IP Services
-        "Server",            # Server Service (파일 공유)
-        "W3SVC",             # World Wide Web Publishing Service (IIS)
-        "TermService",       # Terminal Services (RDP) - 일부 환경
-        "Schedule",          # Task Scheduler
         "Browser",           # Computer Browser
-        "WZCSVC",            # Wireless Configuration
-        "upnphost",          # Universal Plug and Play Host
-        "SSDPSRV",           # Simple Service Discovery Protocol
-        "RemoteAccess",      # Routing and Remote Access
-        "Messenger",         # Windows Messenger
+        "WZCSVC",            # Wireless Zero Configuration
+        "upnphost",          # Universal Plug and Play Device Host
+        "SSDPSRV",           # SSDP Discovery (UPnP)
+        "RemoteAccess",      # Routing and Remote Access (NetMeeting Remote Desktop 계열)
+        "Messenger",         # Messenger (netsend/경고 메시지)
         "alerter",           # Alerter Service
         "Clipsrv",           # ClipBook Service
         "fax"                # Fax Service
@@ -80,7 +81,7 @@ try {
         $status = "취약"
     } else {
         $finalResult = "GOOD"
-        $summary = "불필요한 서비스 실행 중 아님 (KISA 권고 서비스 18개 점검 완료)"
+        $summary = "불필요한 서비스 실행 중 아님 (KISA 권고 서비스 $($unnecessaryServices.Count)개 점검 완료)"
         $status = "양호"
     }
 } catch {

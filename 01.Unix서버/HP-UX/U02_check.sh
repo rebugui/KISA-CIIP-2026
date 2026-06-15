@@ -45,6 +45,19 @@ GUIDELINE_REMEDIATION="root 계정을 포함한 사용자 계정의 비밀번호
 # 진단 함수
 # ============================================================================
 
+# /etc/default/security 형식(KEY=VALUE)에서 키 값 추출 (마지막 정의 우선, POSIX 파이프라인)
+u02_get_key() {
+    grep "^[[:space:]]*${1}=" "${2}" 2>/dev/null | tail -1 | cut -d= -f2- | cut -d'#' -f1 | tr -d ' \t\r' || true
+}
+
+# 양의 정수(0 포함) 여부 확인
+u02_is_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # 진단 수행
 diagnose() {
 
@@ -54,136 +67,87 @@ diagnose() {
     local command_result=""
     local command_executed=""
 
-    # 진단 로직 구현
-    # 1) HP-UX PAM 설정 확인 (/etc/pam.d/passwd)
-    # 2) /etc/default/security의 비밀번호 복잡성 설정 확인
+    # 진단 로직 구현 (KISA 가이드 HP-UX 기준: /etc/default/security)
+    #  - MIN_PASSWORD_LENGTH >= 8
+    #  - PASSWORD_MAXDAYS 1~90 (일 단위, 0/미설정은 만료 없음으로 취약)
+    #  - PASSWORD_MINDAYS >= 1
+    #  - HISTORY 값은 참고 증적으로 기록
+    # Trusted Mode(/tcb 존재) 여부는 증적에 기록
 
-    local is_secure=false
-    local config_details=""
-    local found_pam_module=false
-    local complexity_ok=false
-    local age_ok=false
-
-    # Raw command outputs
-    local pam_output=""
-    local security_output=""
+    local security_file="/etc/default/security"
     local newline=$'\n'
+    local security_output=""
+    local trusted_note=""
+    local config_details=""
 
-    # ============================================================================
-    # 1) HP-UX PAM 설정 확인
-    # ============================================================================
-    local pam_file="/etc/pam.d/passwd"
-    local active_pam_file=""
-    local pam_module=""
-
-    if [ -f "$pam_file" ]; then
-        # HP-UX는 pam_unix.so 또는 pam_hpsec.so 확인
-        if grep -q "pam_unix.so" "$pam_file"; then
-            pam_module="pam_unix.so"
-            found_pam_module=true
-            active_pam_file="$pam_file"
-        elif grep -q "pam_hpsec.so" "$pam_file"; then
-            pam_module="pam_hpsec.so"
-            found_pam_module=true
-            active_pam_file="$pam_file"
-        fi
-
-        if [ "$found_pam_module" = true ]; then
-            # PAM 설정의 raw output 저장
-            pam_output=$(grep -E "^[\s]*password.*${pam_module}" "$active_pam_file" 2>/dev/null || echo "")
-            config_details="[PAM 모듈] ${pam_module} 확인됨"
-        else
-            config_details="[PAM 모듈] pam_unix.so 또는 pam_hpsec.so 미발견"
-            # 원본 grep 출력 저장 (검사 결과 보존)
-            pam_output=$(grep -E "pam_unix.so|pam_hpsec.so" "$pam_file" 2>/dev/null || echo "검사한 모듈 미발견")
-        fi
+    # Trusted Mode 여부 확인 (/tcb 존재 시 Trusted System)
+    if [ -d /tcb ]; then
+        trusted_note="Trusted Mode(/tcb 존재): trusted DB(/tcb/files/auth) 정책이 우선 적용될 수 있음"
     else
-        config_details="[PAM 모듈] /etc/pam.d/passwd 파일 없음"
-        # 원본 ls -l 출력 저장 (파일 존재 여부 확인)
-        pam_output=$(ls -l "$pam_file" 2>/dev/null || echo "File not found: ${pam_file}")
+        trusted_note="Trusted Mode 아님 (/tcb 미존재)"
     fi
 
-    # ============================================================================
-    # 2) HP-UX 비밀번호 정책 확인 (/etc/default/security)
-    # ============================================================================
-    local security_file="/etc/default/security"
-    local min_password_length=""
-    local password_history_depth=""
-    local password_max_weeks=""
-    local password_min_weeks=""
-
-    if [ -f "$security_file" ]; then
+    if [ -f "$security_file" ] && [ -r "$security_file" ]; then
         # Raw output 저장
-        security_output=$(grep -E "^[\s]*(MIN_PASSWORD_LENGTH|PASSWORD_HISTORY_DEPTH|PASSWORD_MAX_WEEKS|PASSWORD_MIN_WEEKS)" "$security_file" 2>/dev/null || echo "")
+        security_output=$(grep -E "^[[:space:]]*(MIN_PASSWORD_LENGTH|PASSWORD_MAXDAYS|PASSWORD_MINDAYS|HISTORY)=" "$security_file" 2>/dev/null || echo "관련 정책 키 미설정")
 
-        min_password_length=$(echo "$security_output" | grep "MIN_PASSWORD_LENGTH" | awk -F= '{print $2}' | tr -d ' ')
-        password_history_depth=$(echo "$security_output" | grep "PASSWORD_HISTORY_DEPTH" | awk -F= '{print $2}' | tr -d ' ')
-        password_max_weeks=$(echo "$security_output" | grep "PASSWORD_MAX_WEEKS" | awk -F= '{print $2}' | tr -d ' ')
-        password_min_weeks=$(echo "$security_output" | grep "PASSWORD_MIN_WEEKS" | awk -F= '{print $2}' | tr -d ' ')
+        local min_password_length=""
+        local password_maxdays=""
+        local password_mindays=""
+        local history_depth=""
+        min_password_length=$(u02_get_key "MIN_PASSWORD_LENGTH" "$security_file")
+        password_maxdays=$(u02_get_key "PASSWORD_MAXDAYS" "$security_file")
+        password_mindays=$(u02_get_key "PASSWORD_MINDAYS" "$security_file")
+        history_depth=$(u02_get_key "HISTORY" "$security_file")
 
-        config_details="${config_details} | [복잡성] MIN_PASSWORD_LENGTH=${min_password_length:-미설정}, "
-        config_details="${config_details}PASSWORD_HISTORY_DEPTH=${password_history_depth:-미설정}"
-        config_details="${config_details} | [사용 기간] PASSWORD_MAX_WEEKS=${password_max_weeks:-미설정}, "
-        config_details="${config_details}PASSWORD_MIN_WEEKS=${password_min_weeks:-미설정}"
+        config_details="MIN_PASSWORD_LENGTH=${min_password_length:-미설정}, PASSWORD_MAXDAYS=${password_maxdays:-미설정}, PASSWORD_MINDAYS=${password_mindays:-미설정}, HISTORY=${history_depth:-미설정}"
 
-        # 판정: MIN_PASSWORD_LENGTH >= 8
-        # 주: HP-UX는 주(week) 단위로 사용 기간을 관리
         local minlen_ok=false
-        local max_weeks_ok=false
-        local min_weeks_ok=false
+        local maxdays_ok=false
+        local mindays_ok=false
+        local history_ok=false
 
-        if [ -n "$min_password_length" ] && [ "$min_password_length" -ge 8 ]; then
+        # MIN_PASSWORD_LENGTH >= 8
+        if u02_is_number "$min_password_length" && [ "$min_password_length" -ge 8 ]; then
             minlen_ok=true
         fi
 
-        # 90일 = 약 12.86주, 1일 = 약 0.14주
-        # HP-UX에서는 주 단위이므로 13주 이하, 1주 이상으로 판정
-        if [ -n "$password_max_weeks" ] && [ "$password_max_weeks" -le 13 ]; then
-            max_weeks_ok=true
+        # PASSWORD_MAXDAYS 1~90 (0 또는 미설정은 만료 없음 → 취약)
+        if u02_is_number "$password_maxdays" && [ "$password_maxdays" -ge 1 ] && [ "$password_maxdays" -le 90 ]; then
+            maxdays_ok=true
         fi
 
-        if [ -n "$password_min_weeks" ] && [ "$password_min_weeks" -ge 1 ]; then
-            min_weeks_ok=true
+        # PASSWORD_MINDAYS >= 1
+        if u02_is_number "$password_mindays" && [ "$password_mindays" -ge 1 ]; then
+            mindays_ok=true
         fi
 
-        # 모든 조건 충족 시 양호
-        if [ "$minlen_ok" = true ] && [ "$max_weeks_ok" = true ] && [ "$min_weeks_ok" = true ]; then
-            complexity_ok=true
-            age_ok=true
+        # HISTORY >= 1 (미설정/0은 비밀번호 재사용 제한 없음 → 취약)
+        if u02_is_number "$history_depth" && [ "$history_depth" -ge 1 ]; then
+            history_ok=true
+        fi
+
+        if [ "$minlen_ok" = true ] && [ "$maxdays_ok" = true ] && [ "$mindays_ok" = true ] && [ "$history_ok" = true ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="비밀번호 관리 정책이 적절하게 설정됨 (${config_details}) [${trusted_note}]"
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="비밀번호 관리 정책 미흡: ${config_details} (기준: MIN_PASSWORD_LENGTH>=8, PASSWORD_MAXDAYS 1~90, PASSWORD_MINDAYS>=1, HISTORY>=1) [${trusted_note}]"
         fi
     else
-        config_details="${config_details} | [보안 정책] /etc/default/security 파일 없음"
-        # 원본 ls -l 출력 저장 (파일 존재 여부 확인)
+        # 파일이 없거나 읽을 수 없는 경우 → 수동 점검
         security_output=$(ls -l "$security_file" 2>/dev/null || echo "File not found: ${security_file}")
-    fi
-
-    # ============================================================================
-    # 최종 판정
-    # ============================================================================
-    # 복잡성 설정과 사용 기간 설정 모두 확인되어야 양호
-    if [ "$complexity_ok" = true ] && [ "$age_ok" = true ]; then
-        is_secure=true
-    fi
-
-    if [ "$found_pam_module" = false ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="비밀번호 복잡성 정책 미설정 (PAM 모듈 없음)"
-    elif [ "$is_secure" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="비밀번호 관리 정책 적절하게 설정됨 (${config_details})"
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="비밀번호 관리 정책 부적절하게 설정됨 (${config_details})"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="/etc/default/security 파일이 없거나 읽을 수 없어 비밀번호 관리 정책을 확인하지 못함 - 수동 점검 필요 [${trusted_note}]"
     fi
 
     # 명령어 실행 결과 결합 (raw output)
-    command_result="[HP-UX PAM File: ${active_pam_file:-[not found]}]${newline}${pam_output}${newline}${newline}"
-    command_result="${command_result}[/etc/default/security]${newline}${security_output}"
+    command_result="[/etc/default/security 비밀번호 정책]${newline}${security_output}${newline}${newline}[Trusted Mode 확인]${newline}${trusted_note}"
 
-    command_executed="grep -E 'pam_unix.so|pam_hpsec.so' /etc/pam.d/passwd; grep -E '^MIN_PASSWORD_LENGTH|^PASSWORD_HISTORY_DEPTH|^PASSWORD_MAX_WEEKS|^PASSWORD_MIN_WEEKS' /etc/default/security"
+    command_executed="grep -E '^(MIN_PASSWORD_LENGTH|PASSWORD_MAXDAYS|PASSWORD_MINDAYS|HISTORY)=' /etc/default/security; ls -d /tcb"
 
     #echo ""
     #echo "진단 결과: ${status}"

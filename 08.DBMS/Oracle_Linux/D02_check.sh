@@ -38,11 +38,14 @@ GUIDELINE_CRITERIA_BAD="인가되지 않은 계정, 퇴직자 계정, 테스트 
 GUIDELINE_REMEDIATION="계정별 용도를 파악한 후 불필요한 계정 삭제"
 
 diagnose() {
-    # Oracle 서비스 확인
+    local command_result="" command_executed=""
+    # Oracle 서비스 확인 (서비스 미실행 시 자동 점검 불가 -> 수동진단)
     if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="서비스 미실행으로 자동 점검 불가 (수동진단 필요). 서비스 시작 후 불필요 계정(데모/테스트/퇴직자 계정)을 수동으로 확인하세요."
+        command_result="Oracle process not found"
+        command_executed="pgrep -x tnslsnr; pgrep -x oracle"
         save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
         verify_result_saved "${ITEM_ID}"
         return 0
@@ -96,39 +99,33 @@ diagnose() {
     local command_result=""
     local command_executed=""
 
-    # Oracle 서비스 확인
-    if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
-        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        verify_result_saved "${ITEM_ID}"
-        return 0
-    fi
-
-    # 빈 비밀번호 계정 확인 (Oracle은 NULL 비밀번호 허용 안함)
-    # 대신 기본 비밀번호를 사용하는 계정 확인
-    local empty_password_query="SELECT username FROM dba_users_with_defpwd;"
-    command_executed="sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" \"${empty_password_query}\""
-    command_result=$(sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" "${empty_password_query}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
+    # 불필요 계정(데모/샘플/테스트) 확인 - KISA 가이드 D-02 (dba_users)
+    # 데모/샘플 계정: SCOTT, HR, OE, PM, IX, SH, BI, ADAMS, CLARK, BLAKE, JONES, DEMO 및 TEST% 명명 계정
+    local unnecessary_query="SET HEADING OFF FEEDBACK OFF PAGESIZE 0 LINESIZE 200
+SELECT username FROM dba_users WHERE username IN ('SCOTT','HR','OE','PM','IX','SH','BI','ADAMS','CLARK','BLAKE','JONES','DEMO') OR username LIKE 'TEST%';"
+    command_executed="echo \"<unnecessary account query>\" | sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
+    command_result=$(echo "${unnecessary_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>&1 || true)
 
     # 결과 분석
-    if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "no rows selected"; then
-        local user_count=$(echo "$command_result" | grep -v "no rows selected" | grep -v "^$" | wc -l)
+    if echo "${command_result}" | grep -qiE 'ORA-[0-9]+|SP2-[0-9]+|ERROR|TNS-[0-9]+'; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Oracle 접속/쿼리 실행 실패로 자동 판단 불가 (수동진단 필요). 확인 쿼리: SELECT username FROM dba_users WHERE username IN ('SCOTT','HR',...) OR username LIKE 'TEST%';"
+    else
+        local account_list
+        account_list=$(echo "${command_result}" | sed '/^[[:space:]]*$/d' | grep -viE 'no rows selected|SQL>' | sed 's/[[:space:]]//g' | grep -v '^$' || true)
+        local user_count
+        user_count=$(echo "${account_list}" | grep -c '.' || true)
 
-        if [ "$user_count" -gt 0 ]; then
+        if [ "${user_count}" -gt 0 ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="기본 비밀번호를 사용하는 계정 ${user_count}개 발견: $(echo "$command_result" | grep -v "no rows selected" | head -5 | tr '\n' ', ')"
+            inspection_summary="불필요 계정(데모/샘플/테스트) ${user_count}개 발견: $(echo "${account_list}" | head -5 | tr '\n' ',' )"
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="빈 비밀번호를 가진 계정 없음"
+            inspection_summary="데모/샘플/테스트 등 불필요 계정이 존재하지 않음"
         fi
-    else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="모든 계정에 비밀번호 설정됨"
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

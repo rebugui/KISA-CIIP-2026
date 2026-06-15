@@ -42,80 +42,21 @@ GUIDELINE_REMEDIATION="HTTP Redirection 활성화 설정"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="N/A"
+    local status="N/A"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local has_redirect=false
 
-    # Process check (Updated for Docker)
-    if command -v pgrep >/dev/null; then
-        if ! pgrep -f "catalina|tomcat" > /dev/null; then
-            diagnosis_result="N/A"
-            status="N/A"
-            inspection_summary="Tomcat 웹 서버가 실행 중이 아닙니다."
-            command_result="Tomcat process not found"
-            command_executed="pgrep -f 'catalina|tomcat'"
-
-            save_dual_result \
-                "${ITEM_ID}" \
-                "${ITEM_NAME}" \
-                "${status}" \
-                "${diagnosis_result}" \
-                "${inspection_summary}" \
-                "${command_result}" \
-                "${command_executed}" \
-                "${GUIDELINE_PURPOSE}" \
-                "${GUIDELINE_THREAT}" \
-                "${GUIDELINE_CRITERIA_GOOD}" \
-                "${GUIDELINE_CRITERIA_BAD}" \
-                "${GUIDELINE_REMEDIATION}"
-        
-            # 결과 저장 확인
-            verify_result_saved "${ITEM_ID}"
-            return 0
-        fi
-    else
-        echo "[INFO] pgrep command missing, skipping process check."
-    fi
-
-    local web_xml_locations=(
-        "/etc/tomcat*/web.xml"
-        "/var/lib/tomcat*/conf/web.xml"
-        "/usr/share/tomcat*/conf/web.xml"
-    )
-
-    local redirect_config=""
-
-    for xml_pattern in "${web_xml_locations[@]}"; do
-        for xml_file in $xml_pattern; do
-            if [ -f "${xml_file}" ]; then
-                # security-constraint 및 transport-guarantee 확인
-                local found_redirect=$(grep -E "security-constraint|transport-guarantee|CONFIDENTIAL" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
-                if [ -n "${found_redirect}" ]; then
-                    redirect_config="${found_redirect}"
-                    if echo "${found_redirect}" | grep -q "CONFIDENTIAL"; then
-                        has_redirect=true
-                    fi
-                fi
-                break 2
-            fi
-        done
-    done
-
-    command_executed="grep -E 'security-constraint|transport-guarantee|CONFIDENTIAL' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
-    command_result="${redirect_config:-No security-constraint found}"
-
-    if [ "${has_redirect}" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="HTTP to HTTPS 리디렉션 설정이 되어 있습니다. (보안 권고사항 준수)"
-    else
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="HTTP 리디렉션 설정을 수동으로 확인하세요. web.xml에서 security-constraint와 transport-guarantee=CONFIDENTIAL 설정 권장."
-    fi
+    # 점검 대상 외 항목 (Out-of-target)
+    # WEB-21(HTTP 리디렉션)의 점검 대상은 Apache, Nginx, IIS, WebtoB이며 Tomcat은 제외됨
+    # (docs/guideline_metadata.json target: "Apache, Nginx, IIS, WebtoB")
+    # 따라서 Tomcat에서는 본 항목을 점검하지 않고 N/A로 처리함
+    diagnosis_result="N/A"
+    status="N/A"
+    inspection_summary="WEB-21(HTTP 리디렉션) 항목의 점검 대상은 Apache, Nginx, IIS, WebtoB이며 Tomcat은 점검 대상에 포함되지 않으므로 N/A로 판단합니다."
+    command_executed="N/A (Tomcat is out of scope for WEB-21)"
+    command_result="점검 대상(target): Apache, Nginx, IIS, WebtoB / 현재 플랫폼: Tomcat_Linux (점검 대상 외)"
 
     # Run-all 모드 확인
     save_dual_result \

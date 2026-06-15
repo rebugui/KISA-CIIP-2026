@@ -59,57 +59,58 @@ diagnose() {
     # 진단 로직 구현
     # /etc/(x)inetd.conf 파일 소유자 및 권한 설정 확인 (600, root:root)
 
-    local target_file=""
-    local is_secure=false
+    local is_secure=true
     local details=""
-
-    # 대체 파일 확인 (xinetd.conf 우선, 없으면 inetd.conf)
-    if [ -f "/etc/xinetd.conf" ]; then
-        target_file="/etc/xinetd.conf"
-    elif [ -f "/etc/inetd.conf" ]; then
-        target_file="/etc/inetd.conf"
-    fi
+    local found_any=false
+    local checked_files=""
 
     # Capture command outputs
     local ls_output=$(ls -l /etc/inetd.conf /etc/xinetd.conf 2>/dev/null || echo "File not found")
     local stat_output=""
 
+    # 존재하는 모든 설정 파일 점검 (inetd.conf와 xinetd.conf 공존 시 둘 다 평가)
+    local conf_file
+    for conf_file in /etc/inetd.conf /etc/xinetd.conf; do
+        [ -f "$conf_file" ] || continue
+        found_any=true
+        checked_files="${checked_files:+${checked_files} }${conf_file}"
+        local file_stat=$(perl -e '@s=stat(shift); printf "%04o %s:%s\n", $s[2] & 07777, getpwuid($s[4]), getgrgid($s[5])' "$conf_file" 2>/dev/null)
+        stat_output="${stat_output:+${stat_output}${newline}}${conf_file}: ${file_stat}"
+        # 파일 권한 확인 (HP-UX compatible)
+        # HP-UX: stat -c format not supported, use perl
+        local perms_octal=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$conf_file" 2>/dev/null)
+        local file_owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid).":".getgrgid($gid)' "$conf_file" 2>/dev/null)
+
+        # 소유자 및 권한 확인 (소유자 root - 그룹은 가이드 기준 아님: HP-UX 기본 root:sys 허용)
+        # 600 초과 비트 없음: 600보다 강한 400 등은 양호, 추가 비트는 취약
+        if [ -n "$perms_octal" ] && [ "${file_owner%%:*}" = "root" ] && [[ "$perms_octal" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms_octal & ~8#600 & 07777 ))" -eq 0 ]; then
+            details="${details:+${details}, }파일: $conf_file, 권한: $perms_octal, 소유자: $file_owner"
+        else
+            is_secure=false
+            details="${details:+${details}, }파일: $conf_file, 권한: $perms_octal, 소유자: $file_owner (부적절)"
+        fi
+    done
+
     # 파일 존재 확인
-    if [ -z "$target_file" ] || [ ! -f "$target_file" ]; then
+    if [ "$found_any" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="inetd/xinetd 설정 파일 없음 (서비스 미사용)"
         command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}"
         command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf 2>&1"
     else
-        stat_output=$(perl -e '@s=stat(shift); printf "%04o %s:%s\n", $s[2] & 07777, getpwuid($s[4]), getgrgid($s[5])' "$target_file" 2>/dev/null)
-        # 파일 권한 확인 (HP-UX compatible)
-        # HP-UX: stat -c format not supported, use perl
-        local perms_octal=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$target_file" 2>/dev/null)
-        local file_owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid).":".getgrgid($gid)' "$target_file" 2>/dev/null)
-
-        # 소유자 및 권한 확인
-        if [ "$file_owner" = "root:root" ] && [ "$perms_octal" = "0600" ]; then
-            is_secure=true
-            details="파일: $target_file, 권한: $perms_octal, 소유자: $file_owner"
-        else
-            details="파일: $target_file, 권한: $perms_octal, 소유자: $file_owner"
-        fi
-
-        # 최종 판정
+        # 최종 판정: 존재하는 모든 파일이 양호해야 양호
         if [ "$is_secure" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="inetd.conf 보안 설정 적절 ($details)"
-            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: perl -e 'printf \"%04o %s:%s\", (stat)[2]&07777, getpwuid((stat)[4]), getgrgid((stat)[5])' $target_file]${newline}${stat_output}"
-            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; perl -e 'printf \"%04o %s:%s\\n\", (stat(shift))[2]&07777, getpwuid((stat(shift))[4]), getgrgid((stat(shift))[5])' $target_file"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="inetd.conf 보안 설정 부적절 ($details)"
-            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: perl -e 'printf \"%04o %s:%s\", (stat)[2]&07777, getpwuid((stat)[4]), getgrgid((stat)[5])' $target_file]${newline}${stat_output}"
-            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; perl -e 'printf \"%04o %s:%s\\n\", (stat(shift))[2]&07777, getpwuid((stat(shift))[4]), getgrgid((stat(shift))[5])' $target_file"
         fi
+        command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: perl -e '@s=stat(shift); printf \"%04o %s:%s\", \$s[2]&07777, getpwuid(\$s[4]), getgrgid(\$s[5])' ${checked_files}]${newline}${stat_output}"
+        command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; perl -e '@s=stat(shift); printf \"%04o %s:%s\\n\", \$s[2]&07777, getpwuid(\$s[4]), getgrgid(\$s[5])' ${checked_files}"
     fi
 
     # echo ""

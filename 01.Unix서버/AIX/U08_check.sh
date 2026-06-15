@@ -65,14 +65,22 @@ diagnose() {
     
     local root_group_check=$(grep "^root:" /etc/group 2>/dev/null || echo "")
     local system_group_check=$(grep "^system:" /etc/group 2>/dev/null || echo "")
-    
+    # 이름이 변경된 관리자 그룹도 GID 0 번호 기준으로 수집
+    local gid0_group_check=$(awk -F: '$3 == 0' /etc/group 2>/dev/null || echo "")
+
     local is_vulnerable=false
     local vuln_details=""
-    
-    # Check 'root' group
-    if [ -n "$root_group_check" ]; then
-        local members=$(echo "$root_group_check" | awk -F: '{print $4}')
-        local unauthorized=""
+
+    # Check admin groups by name (root/system) AND by GID 0 number
+    local admin_group_lines=""
+    admin_group_lines=$(printf '%s\n%s\n%s\n' "$root_group_check" "$system_group_check" "$gid0_group_check" | awk 'NF' | sort -u || true)
+
+    local group_name group_line members unauthorized user
+    while IFS= read -r group_line; do
+        [ -z "$group_line" ] && continue
+        group_name=$(echo "$group_line" | awk -F: '{print $1}')
+        members=$(echo "$group_line" | awk -F: '{print $4}')
+        unauthorized=""
         if [ -n "$members" ]; then
              IFS=',' read -ra ADDR <<< "$members"
              for user in "${ADDR[@]}"; do
@@ -84,22 +92,33 @@ diagnose() {
              done
         fi
         if [ -n "$unauthorized" ]; then
-             vuln_details="${vuln_details}[root group] 불필요 계정: ${unauthorized%, }; "
+             vuln_details="${vuln_details}[${group_name} group] 불필요 계정: ${unauthorized%, }; "
         fi
+    done <<< "$admin_group_lines"
+
+    # /etc/passwd 기본 그룹 점검: primary group이 GID 0인 root 외 계정
+    local passwd_gid0=""
+    passwd_gid0=$(awk -F: '$4 == 0 && $1 != "root" {print $1}' /etc/passwd 2>/dev/null | tr '\n' ',' | sed 's/,$//' || echo "")
+    if [ -n "$passwd_gid0" ]; then
+        is_vulnerable=true
+        vuln_details="${vuln_details}[passwd primary GID 0] 불필요 계정: ${passwd_gid0}; "
     fi
 
-    # AIX might rely on 'system' group too. Let's include it for informational completeness but flag 'root' primarily per guide.
-    command_result="[Check: root group]${newline}${root_group_check}${newline}${newline}[Check: system group (Info)]${newline}${system_group_check}"
-    command_executed="grep '^root:' /etc/group; grep '^system:' /etc/group"
+    command_result="[Check: root group]${newline}${root_group_check}${newline}${newline}[Check: system group]${newline}${system_group_check}${newline}${newline}[Check: GID 0 groups]${newline}${gid0_group_check}${newline}${newline}[Check: passwd primary GID 0 (root 제외)]${newline}${passwd_gid0:-없음}"
+    command_executed="grep '^root:' /etc/group; grep '^system:' /etc/group; awk -F: '\$3==0' /etc/group; awk -F: '\$4==0 && \$1!=\"root\"' /etc/passwd"
 
-    if [ "$is_vulnerable" = true ]; then
+    if [ -z "$root_group_check" ] && [ -z "$system_group_check" ] && [ -z "$gid0_group_check" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="/etc/group에서 root/system 그룹 정보를 확인할 수 없어 수동 점검 필요"
+    elif [ "$is_vulnerable" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="${vuln_details} 확인됨"
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="관리자 그룹(root)에 불필요한 계정이 존재하지 않음"
+        inspection_summary="관리자 그룹(root/system)에 불필요한 계정이 존재하지 않음"
     fi
 
     # 결과 저장

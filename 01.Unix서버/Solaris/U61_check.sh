@@ -57,102 +57,129 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # SNMP 접근 제어 설정 확인
+    # SNMP 접근 제어 설정 확인 (community 라인의 소스 IP 제한 기반 판정)
+    # Solaris: net-snmp(/etc/net-snmp/snmp/snmpd.conf), SMA(/etc/sma/snmp/snmpd.conf) 경로 포함
 
     local snmpd_installed=false
-    local has_acl=false
-    local acl_details=""
-    local snmp_conf="/etc/snmp/snmpd.conf"
+    local snmp_running=false
+    local conf_candidates="/etc/net-snmp/snmp/snmpd.conf /etc/sma/snmp/snmpd.conf /etc/snmp/snmpd.conf"
+    local readable_confs=""
+    local unreadable_confs=""
+    local unrestricted_entries=""
+    local restricted_entries=""
+    local v3_entries=""
+    local raw_output=""
+    local active_lines=""
+    local conf=""
+    local line=""
+    local keyword=""
+    local src=""
 
-    # 1) SNMP 설치 여부 확인
-    if [ -f "$snmp_conf" ] || command -v snmpd >/dev/null 2>&1; then
+    # 1) SNMP 설치/구동 여부 확인
+    if command -v snmpd >/dev/null 2>&1; then
         snmpd_installed=true
     fi
+    if ps -ef 2>/dev/null | grep -i "snmpd" | grep -v "grep" >/dev/null 2>&1; then
+        snmp_running=true
+        snmpd_installed=true
+    fi
+    for conf in ${conf_candidates}; do
+        if [ -f "$conf" ]; then
+            snmpd_installed=true
+            if [ -r "$conf" ]; then
+                readable_confs="${readable_confs}${conf} "
+            else
+                unreadable_confs="${unreadable_confs}${conf} "
+            fi
+        fi
+    done
 
     if [ "$snmpd_installed" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="SNMP 서비스가 설치되지 않음"
-        local snmp_check=$(ls "${snmp_conf}" 2>/dev/null || echo "SNMP not installed")
-        command_result="[Command: ls ${snmp_conf}]\${newline}${snmp_check}"
-        command_executed="ls ${snmp_conf} 2>/dev/null"
-    elif [ ! -f "$snmp_conf" ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="SNMP 설정 파일이 존재하지 않음"
-        local snmp_check=$(ls /etc/snmp/*.conf 2>/dev/null || echo "No SNMP config found")
-        command_result="[Command: ls /etc/snmp/*.conf]\${newline}${snmp_check}"
-        command_executed="ls /etc/snmp/*.conf 2>/dev/null"
-    else
-        # 2) SNMP 접근 제어 설정 확인
-
-        # 2-1) VACM (View-based Access Control Model) 설정 확인
-        if grep -qiE "view|access.*ronContext|access.*rwuserContext" "$snmp_conf" 2>/dev/null; then
-            has_acl=true
-            acl_details="${acl_details}VACM 설정 있음, "
-        fi
-
-        # 2-2) Community String별 접근 제어 확인
-        if grep -qiE "com2sec.*[^0-9.]+|rocommunity|rwcommunity" "$snmp_conf" 2>/dev/null | grep -qE "source"; then
-            has_acl=true
-            acl_details="${acl_details}Community별 IP 제한 있음, "
-        fi
-
-        # 2-3) SNMP 접근 허용 IP/네트워크 확인
-        # snmpd.conf에서 소스 IP 제한이 있는지 확인
-        local com2sec_lines=$(grep -i "^com2sec" "$snmp_conf" 2>/dev/null | grep -v "^#")
-        if [ -n "$com2sec_lines" ]; then
-            # "default" (모든 IP)인지 특정 IP/네트워크인지 확인
-            if echo "$com2sec_lines" | grep -q "default"; then
-                acl_details="${acl_details}com2sec에 'default' 사용 (모든 IP 허용), "
-            else
-                has_acl=true
-                acl_details="${acl_details}com2sec에 IP 제한 설정됨, "
-            fi
-        fi
-
-        # 2-4) whiltelist/blacklist 설정 확인
-        if [ -f /etc/snmp/snmpd.d/custom.conf ]; then
-            if grep -qiE "whitelist|blacklist|allow|deny" /etc/snmp/snmpd.d/custom.conf 2>/dev/null; then
-                has_acl=true
-                acl_details="${acl_details}IP 필터링 설정 있음, "
-            fi
-        fi
-
-        # 3) Listen 주소 확인
-        local listen_lines=$(grep -iE "^agentAddress|listen" "$snmp_conf" 2>/dev/null | grep -v "^#")
-        if [ -n "$listen_lines" ]; then
-            if echo "$listen_lines" | grep -qE "127.0.0.1|localhost"; then
-                has_acl=true
-                acl_details="${acl_details}localhost만 listen, "
-            elif echo "$listen_lines" | grep -q "0.0.0.0"; then
-                acl_details="${acl_details}모든 인터페이스 listen (0.0.0.0), "
-            fi
-        fi
-
-        # 4) SNMP v3 사용자별 접근 제어 확인
-        if grep -qiE "rouser|rwuser" "$snmp_conf" 2>/dev/null; then
-            # v3 사용자에 대한 접근 권한 설정 확인
-            local rouser_lines=$(grep -iE "^rouser|^rwuser" "$snmp_conf" 2>/dev/null | grep -v "^#")
-            if [ -n "$rouser_lines" ]; then
-                has_acl=true
-                acl_details="${acl_details}v3 사용자 접근 제어 설정됨, "
-            fi
-        fi
-
-        # 최종 판정
-        if [ "$has_acl" = true ]; then
+        command_result="SNMP: [not installed]"
+        command_executed="command -v snmpd; ls ${conf_candidates} 2>/dev/null"
+    elif [ -z "$readable_confs" ]; then
+        if [ "$snmp_running" = true ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="snmpd 프로세스가 구동 중이나 SNMP 설정 파일을 읽을 수 없어 접근 통제 설정의 수동 확인이 필요함"
+            raw_output=$(ps -ef 2>/dev/null | grep -i "snmpd" | grep -v "grep" | head -5 || echo "snmpd process detected")
+            command_result="[Unreadable conf: ${unreadable_confs:-not found}]${newline}${raw_output}"
+            command_executed="ps -ef | grep snmpd; ls -l ${conf_candidates}"
+        else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="SNMP 접근 제어가 적절하게 설정됨: ${acl_details%, }"
-            command_result="${acl_details%, }"
-            command_executed="grep -E 'com2sec|rouser|rwuser|agentAddress' ${snmp_conf}"
-        else
+            inspection_summary="snmpd가 구동 중이지 않고 읽을 수 있는 SNMP 설정 파일이 없음 (SNMP 서비스 미사용)"
+            command_result="SNMP conf: [not found or unreadable], snmpd process: [not running]"
+            command_executed="ps -ef | grep snmpd; ls ${conf_candidates} 2>/dev/null"
+        fi
+    else
+        # 2) community/com2sec 라인의 소스 IP 제한 여부 확인 (net-snmp)
+        #    - rocommunity/rwcommunity: 3번째 필드(소스)가 없거나 default/0.0.0.0 → 무제한
+        #    - com2sec: 3번째 필드(소스)가 default/0.0.0.0 → 무제한
+        for conf in ${readable_confs}; do
+            active_lines=$(grep -vE '^[[:space:]]*#' "$conf" 2>/dev/null | grep -vE '^[[:space:]]*$' || true)
+            [ -z "$active_lines" ] && continue
+            raw_output="${raw_output}[${conf}]${newline}$(echo "$active_lines" | head -20)${newline}"
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                keyword=$(echo "$line" | awk '{print tolower($1)}')
+                src=$(echo "$line" | awk '{print $3}')
+                case "$keyword" in
+                    rocommunity|rwcommunity|rocommunity6|rwcommunity6)
+                        case "$src" in
+                            ""|default|0.0.0.0|0.0.0.0/0|::|::/0|-V|-s)
+                                unrestricted_entries="${unrestricted_entries}${conf}: ${line}${newline}"
+                                ;;
+                            *)
+                                restricted_entries="${restricted_entries}${conf}: ${line}${newline}"
+                                ;;
+                        esac
+                        ;;
+                    com2sec|com2sec6)
+                        case "$src" in
+                            ""|default|0.0.0.0|0.0.0.0/0|::|::/0)
+                                unrestricted_entries="${unrestricted_entries}${conf}: ${line}${newline}"
+                                ;;
+                            *)
+                                restricted_entries="${restricted_entries}${conf}: ${line}${newline}"
+                                ;;
+                        esac
+                        ;;
+                    rouser|rwuser)
+                        v3_entries="${v3_entries}${conf}: ${line}${newline}"
+                        ;;
+                esac
+            done <<< "$active_lines"
+        done
+
+        # 최종 판정: 소스 제한 없는 community = 무제한 접근 → 취약
+        if [ -n "$unrestricted_entries" ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="SNMP 접근 제어가 설정되지 않음 (모든 접근 허용 가능): ${acl_details:-접근 제어 없음}"
-            command_result="${acl_details:-[no access control]}"
-            command_executed="grep -v '^#' ${snmp_conf} | grep -E 'com2sec|rouuser|rwuser|agentAddress'"
+            inspection_summary="소스 IP 제한 없이 모든 호스트의 접근을 허용하는 SNMP community 설정이 존재함"
+            command_result="[무제한 허용 설정]${newline}${unrestricted_entries%${newline}}"
+            command_executed="grep -vE '^[[:space:]]*#' ${conf_candidates} | grep -Ei 'rocommunity|rwcommunity|com2sec'"
+        elif [ -n "$restricted_entries" ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="SNMP community가 특정 호스트/네트워크에서만 접근하도록 소스 IP 제한이 설정됨"
+            command_result="[소스 제한 설정]${newline}${restricted_entries%${newline}}"
+            command_executed="grep -vE '^[[:space:]]*#' ${conf_candidates} | grep -Ei 'rocommunity|rwcommunity|com2sec'"
+        elif [ -n "$v3_entries" ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="SNMPv1/v2c community 미설정, SNMPv3 사용자 기반 접근 제어 사용"
+            command_result="[SNMPv3 사용자 설정]${newline}${v3_entries%${newline}}"
+            command_executed="grep -vE '^[[:space:]]*#' ${conf_candidates} | grep -Ei 'rouser|rwuser'"
+        else
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="SNMP community 설정이 없어 SNMPv1/v2c 무제한 접근이 허용되지 않음"
+            command_result="${raw_output:-[no active SNMP configuration]}"
+            command_executed="grep -vE '^[[:space:]]*#' ${conf_candidates}"
         fi
     fi
 

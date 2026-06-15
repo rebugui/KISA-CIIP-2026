@@ -70,7 +70,7 @@ diagnose() {
 
     # Capture command outputs
     local ls_hosts=$(ls -l "$target_file" 2>/dev/null)
-    local stat_hosts=$(perl -e 'printf "%04o %s:%s\n", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' "$target_file" 2>/dev/null)
+    local stat_hosts=$(perl -e '@s=stat(shift); printf "%04o %s:%s\n", $s[2] & 07777, getpwuid($s[4]), getgrgid($s[5])' "$target_file" 2>/dev/null)
 
     # /etc/hosts 파일 확인
     if [ ! -f "$target_file" ]; then
@@ -82,7 +82,7 @@ diagnose() {
     else
         # 파일 권한 확인 (AIX: ls -l 사용)
         local file_info=$(ls -l "$target_file" 2>/dev/null)
-        local file_perms=$(perl -e 'printf "%04o", (stat)[2] & 07777' "$target_file" 2>/dev/null || echo "0000")
+        local file_perms=$(perl -e '@s=stat(shift); printf "%04o", $s[2] & 07777' "$target_file" 2>/dev/null || echo "0000")
         local file_owner=$(echo "$file_info" | awk '{print $3}')
 
         # 소유자 및 권한 확인
@@ -100,15 +100,17 @@ diagnose() {
     local stat_equiv=""
     if [ -f "$equiv_file" ]; then
         ls_equiv=$(ls -l "$equiv_file" 2>/dev/null)
-        stat_equiv=$(perl -e 'printf "%04o %s:%s\n", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' "$equiv_file" 2>/dev/null)
+        stat_equiv=$(perl -e '@s=stat(shift); printf "%04o %s:%s\n", $s[2] & 07777, getpwuid($s[4]), getgrgid($s[5])' "$equiv_file" 2>/dev/null)
         local equiv_info=$(ls -l "$equiv_file" 2>/dev/null)
-        local equiv_perms=$(perl -e 'printf "%04o", (stat)[2] & 07777' "$equiv_file" 2>/dev/null || echo "0000")
+        local equiv_perms=$(perl -e '@s=stat(shift); printf "%04o", $s[2] & 07777' "$equiv_file" 2>/dev/null || echo "0000")
         local equiv_owner=$(echo "$equiv_info" | awk '{print $3}')
 
         # hosts.equiv는 root 소유자이어야 하며 group/other 쓰기 권한 없어야 함
-        local equiv_group_write=$(( (perms % 100) / 10 ))
-        local equiv_other_write=$(( perms % 10 ))
-        if [ "$equiv_owner" != "root" ] || [ "$equiv_group_write" -ge 2 ] || [ "$equiv_other_write" -ge 2 ]; then
+        # (perl 출력은 "0644" 형태 → 10진수로 강제 변환 후 쓰기 비트(2) 검사)
+        local equiv_perm_num=$(( 10#${equiv_perms:-0} ))
+        local equiv_group_write=$(( (equiv_perm_num / 10) % 10 & 2 ))
+        local equiv_other_write=$(( equiv_perm_num % 10 & 2 ))
+        if [ "$equiv_owner" != "root" ] || [ "$equiv_group_write" -ne 0 ] || [ "$equiv_other_write" -ne 0 ]; then
             equiv_secure=false
             equiv_details=", /etc/hosts.equiv - 권한: $equiv_perms, 소유자: $equiv_owner"
         else

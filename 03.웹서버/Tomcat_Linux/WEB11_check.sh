@@ -11,7 +11,7 @@
 # @Platform    : Tomcat_Linux
 # @Severity    : 중
 # @Title       : 웹 서비스 경로 설정
-# @Description : 웹 서비스에서의 심볼릭 링크 사용 금지 여부 점검
+# @Description : 웹 서비스 경로(appBase/docBase) 분리 설정 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 
@@ -42,12 +42,11 @@ GUIDELINE_REMEDIATION="웹 서버의 경로를 별도의 경로로 변경 및 �
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local has_linking_enabled=false
 
         # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -82,22 +81,37 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
-    local context_xml_locations=(
-        "/etc/tomcat*/context.xml"
-        "/var/lib/tomcat*/conf/context.xml"
-        "/usr/share/tomcat*/conf/context.xml"
+    # 웹 서비스 경로(appBase/docBase) 분리 점검
+    # 가이드라인 기준: server.xml Host의 appBase 및 Context의 docBase가 기타 업무와
+    # 영역이 분리된 별도 경로로 설정되었는지 점검
+    # (criteria_bad: 웹 서버 경로를 기타 업무와 영역이 분리되지 않은 경로로 설정)
+    # 기본값(appBase="webapps", docBase 미지정/기본)은 정책적 분리 여부를 자동 판단할 수
+    # 없으므로 MANUAL 처리. 절대 경로로 분리된 경우에만 GOOD으로 판단.
+    local server_xml_locations=(
+        "/etc/tomcat*/server.xml"
+        "/var/lib/tomcat*/conf/server.xml"
+        "/usr/share/tomcat*/conf/server.xml"
     )
 
-    local linking_config=""
+    local path_config=""
+    local config_found=false
+    local has_default_path=false
+    local has_separated_path=false
 
-    for xml_pattern in "${context_xml_locations[@]}"; do
+    for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                local found_linking=$(grep -i "allowLinking" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
-                if [ -n "${found_linking}" ]; then
-                    linking_config="${found_linking}"
-                    if echo "${found_linking}" | grep -qi "true"; then
-                        has_linking_enabled=true
+                config_found=true
+                local found_paths=$(grep -iE "appBase\s*=|docBase\s*=" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                if [ -n "${found_paths}" ]; then
+                    path_config="${found_paths}"
+                    # 기본 경로(webapps 상대 경로) 사용 여부
+                    if echo "${found_paths}" | grep -qiE 'appBase\s*=\s*"webapps"'; then
+                        has_default_path=true
+                    fi
+                    # 절대 경로(/로 시작)로 분리된 docBase/appBase 존재 여부
+                    if echo "${found_paths}" | grep -qiE '(appBase|docBase)\s*=\s*"/'; then
+                        has_separated_path=true
                     fi
                 fi
                 break 2
@@ -105,17 +119,21 @@ diagnose() {
         done
     done
 
-    command_executed="grep -i 'allowLinking' /etc/tomcat*/context.xml 2>/dev/null | grep -v '^\\s*<!--' | head -3"
-    command_result="${linking_config:-No allowLinking found (default: false)}"
+    command_executed="grep -iE 'appBase\\s*=|docBase\\s*=' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
+    command_result="${path_config:-No appBase/docBase configuration found}"
 
-    if [ "${has_linking_enabled}" = true ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="allowLinking이 true로 설정되어 있습니다. 심볼릭 링크 사용 제한 권장."
-    else
+    if [ "${config_found}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat server.xml을 찾을 수 없습니다. Host appBase 및 Context docBase가 기타 업무 영역과 분리된 별도 경로로 설정되었는지 수동으로 확인하세요."
+    elif [ "${has_separated_path}" = true ] && [ "${has_default_path}" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="allowLinking이 false로 설정되어 있거나 설정되지 않았습니다 (기본값: false). (보안 권고사항 준수)"
+        inspection_summary="appBase/docBase가 별도의 절대 경로로 분리되어 설정되어 있습니다. (보안 권고사항 준수)"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="appBase/docBase가 기본 경로(webapps)를 사용하거나 분리 여부를 자동 판단할 수 없습니다. 웹 서버 경로가 기타 업무 영역과 분리된 별도 경로로 설정되었는지 수동으로 확인하세요."
     fi
 
     # Run-all 모드 확인

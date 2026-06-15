@@ -40,17 +40,85 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="로그인 경고 메시지가 적절하게 설정되어 있습니다."
     local command_result=""
-    local command_executed="ls -l /etc/motd /etc/issue.net"
+    local command_executed="cat /etc/motd /etc/issue /etc/issue.net; grep ftpd_banner /etc/vsftpd/vsftpd.conf; grep smtpd_banner /etc/postfix/main.cf; grep version /etc/named.conf"
 
+    local warn_regex="warning|unauthorized|access|prohibited|경고|무단|접속금지"
     local motd_content=$(cat /etc/motd 2>/dev/null | xargs || echo "")
     local issue_content=$(cat /etc/issue.net 2>/dev/null | xargs || echo "")
+    local issue_local_content=$(cat /etc/issue 2>/dev/null | xargs || echo "")
 
-    if [ -z "$motd_content" ] && [ -z "$issue_content" ]; then
+    local missing=""
+
+    # 1. 서버(로컬 로그인) 배너: /etc/motd 또는 /etc/issue 에 경고 문구 필요
+    local server_warning=false
+    if [ -n "$motd_content" ] && echo "$motd_content" | grep -qiE "$warn_regex"; then
+        server_warning=true
+    fi
+    if [ -n "$issue_local_content" ] && echo "$issue_local_content" | grep -qiE "$warn_regex"; then
+        server_warning=true
+    fi
+    [ "$server_warning" = false ] && missing="${missing}[서버: /etc/motd,/etc/issue 경고 문구 없음] "
+
+    # 2. Telnet 사용 시: /etc/issue.net 자체에 경고 문구 필요 (motd로 대체 불가,
+    #    기본 issue.net은 \S, \r, \m 등 OS 정보를 노출)
+    local telnet_active=false
+    if systemctl is-active --quiet telnet.socket 2>/dev/null || systemctl is-active --quiet telnetd 2>/dev/null; then
+        telnet_active=true
+    elif ps aux 2>/dev/null | grep -E "in\.telnetd|[t]elnetd" | grep -v grep >/dev/null 2>&1; then
+        telnet_active=true
+    elif [ -f /etc/xinetd.d/telnet ] && ! grep -qiE '^[[:space:]]*disable[[:space:]]*=[[:space:]]*yes' /etc/xinetd.d/telnet 2>/dev/null; then
+        telnet_active=true
+    fi
+    if [ "$telnet_active" = true ]; then
+        if [ -z "$issue_content" ] || ! echo "$issue_content" | grep -qiE "$warn_regex"; then
+            missing="${missing}[Telnet: /etc/issue.net 경고 문구 없음] "
+        fi
+    fi
+
+    # 3. FTP(vsftpd) 사용 시: ftpd_banner 또는 banner_file 설정 필요
+    if pgrep -x vsftpd >/dev/null 2>&1; then
+        local vsftpd_conf=""
+        local vc
+        for vc in /etc/vsftpd/vsftpd.conf /etc/vsftpd.conf; do
+            if [ -f "$vc" ]; then
+                vsftpd_conf="$vc"
+                break
+            fi
+        done
+        if [ -z "$vsftpd_conf" ] || ! grep -qE '^[[:space:]]*(ftpd_banner|banner_file)=' "$vsftpd_conf" 2>/dev/null; then
+            missing="${missing}[FTP: vsftpd ftpd_banner/banner_file 미설정] "
+        fi
+    fi
+
+    # 4. SMTP 사용 시: postfix smtpd_banner / sendmail SmtpGreetingMessage 설정 필요
+    if pgrep -x master >/dev/null 2>&1 && [ -f /etc/postfix/main.cf ]; then
+        if ! grep -qE '^[[:space:]]*smtpd_banner[[:space:]]*=' /etc/postfix/main.cf 2>/dev/null; then
+            missing="${missing}[SMTP: postfix smtpd_banner 미설정] "
+        fi
+    fi
+    if pgrep -x sendmail >/dev/null 2>&1 && [ -f /etc/mail/sendmail.cf ]; then
+        if ! grep -qE '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null; then
+            missing="${missing}[SMTP: sendmail SmtpGreetingMessage 미설정] "
+        fi
+    fi
+
+    # 5. DNS(named) 사용 시: version 문자열 숨김 설정 필요
+    if pgrep -x named >/dev/null 2>&1; then
+        if ! grep -v '^[[:space:]]*//' /etc/named.conf 2>/dev/null | grep -qE '^[^#]*version[[:space:]]+"' ; then
+            missing="${missing}[DNS: named.conf version 숨김 미설정] "
+        fi
+    fi
+
+    if [ -n "$missing" ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
-        inspection_summary="서버 접속 시 출력되는 경고 메시지(배너)가 비어 있거나 설정되지 않았습니다."
+        if [ -z "$motd_content" ] && [ -z "$issue_content" ] && [ -z "$issue_local_content" ]; then
+            inspection_summary="서버 접속 시 출력되는 경고 메시지(배너)가 설정되지 않았습니다. 미흡 항목: ${missing}"
+        else
+            inspection_summary="서버 또는 사용 중인 서비스(Telnet/FTP/SMTP/DNS)에 경고 메시지가 설정되어 있지 않습니다. 미흡 항목: ${missing}"
+        fi
     fi
-    command_result=$(echo "motd: [ ${motd_content:-empty} ], issue.net: [ ${issue_content:-empty} ]" | tr -d '\n\r')
+    command_result=$(echo "motd: [ ${motd_content:-empty} ], issue: [ ${issue_local_content:-empty} ], issue.net: [ ${issue_content:-empty} ], 미흡: [ ${missing:-없음} ]" | tr -d '\n\r')
 
     save_dual_result \
         "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \

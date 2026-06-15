@@ -58,11 +58,13 @@ diagnose() {
         init_oracle_vars
     fi
 
-    # Oracle 서비스 확인
+    # Oracle 서비스 확인 (서비스 미실행 시 자동 점검 불가 -> 수동진단)
     if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="서비스 미실행으로 자동 점검 불가 (수동진단 필요). 서비스 시작 후 관리자 권한 부여 계정을 수동으로 확인하세요."
+        command_result="Oracle process not found"
+        command_executed="pgrep -x tnslsnr; pgrep -x oracle"
         if declare -f save_dual_result >/dev/null 2>&1; then
             save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
         fi
@@ -136,42 +138,65 @@ diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
     local vulnerabilities_found=0
+    local query_error=0
 
-    # SYSDBA 권한을 가진 계정 확인
-    local sysdba_query="SELECT grantee FROM dba_sys_privs WHERE privilege='SYSDBA' OR admin_option='YES';"
-    command_executed="sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" \"${sysdba_query}\""
-    command_result=$(sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" "${sysdba_query}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
+    # Step 1) SYSDBA 권한 점검 - KISA 가이드: v$pwfile_users (dba_sys_privs 에는 SYSDBA 가 없음)
+    #   DBA Role 미보유 + SYSDBA='TRUE' + INTERNAL 제외 계정이 나오면 취약
+    local sysdba_query="SET HEADING OFF FEEDBACK OFF PAGESIZE 0 LINESIZE 200
+SELECT username FROM v\$pwfile_users WHERE username NOT IN (SELECT grantee FROM dba_role_privs WHERE granted_role='DBA') AND username != 'INTERNAL' AND SYSDBA = 'TRUE';"
+    local sysdba_result
+    sysdba_result=$(echo "${sysdba_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>&1 || true)
 
-    if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "no rows selected"; then
-        local sysdba_count=$(echo "$command_result" | grep -v "no rows selected" | grep -v "^$" | wc -l)
-
-        if [ "$sysdba_count" -gt 1 ]; then
-            ((vulnerabilities_found++)) || true
-            inspection_summary="취약: SYSDBA 권한을 가진 계정 ${sysdba_count}개 발견"
-        fi
-    fi
-
-    # sqlnet.ora의 노드 검증 설정 확인
-    local sqlnet_file="$ORACLE_HOME/network/admin/sqlnet.ora"
-    if [ -f "$sqlnet_file" ]; then
-        if ! grep -q "TCP.VALIDNODE_CHECKING=YES" "$sqlnet_file" 2>/dev/null; then
-            ((vulnerabilities_found++)) || true
-            inspection_summary+=" 취약: sqlnet.ora에 노드 검증 미설정"
-        else
-            inspection_summary+="  sqlnet.ora에 노드 검증 설정됨"
-        fi
+    if echo "${sysdba_result}" | grep -qiE 'ORA-[0-9]+|SP2-[0-9]+|ERROR|TNS-[0-9]+'; then
+        query_error=1
     else
-        inspection_summary+=" 정보: sqlnet.ora 파일 없음"
+        local sysdba_list
+        sysdba_list=$(echo "${sysdba_result}" | sed '/^[[:space:]]*$/d' | grep -viE 'no rows selected|SQL>' | sed 's/[[:space:]]//g' | grep -v '^$' || true)
+        local sysdba_count
+        sysdba_count=$(echo "${sysdba_list}" | grep -c '.' || true)
+        if [ "${sysdba_count}" -gt 0 ]; then
+            ((vulnerabilities_found++)) || true
+            inspection_summary+="취약: 비인가 SYSDBA 권한 계정 ${sysdba_count}개 발견($(echo "${sysdba_list}" | head -5 | tr '\n' ',' )); "
+        else
+            inspection_summary+="SYSDBA 권한 인가 계정만 보유; "
+        fi
     fi
 
-    if [ $vulnerabilities_found -gt 0 ]; then
+    # Step 2) Admin 부적합 계정(admin_option='YES') 점검 - dba_sys_privs (비SYSDBA 시스템 권한)
+    local admin_query="SET HEADING OFF FEEDBACK OFF PAGESIZE 0 LINESIZE 200
+SELECT grantee FROM dba_sys_privs WHERE grantee NOT IN ('SYS','SYSTEM','AQ_ADMINISTRATOR_ROLE','DBA','DSYS','BACSYS','SCHEDULER_ADMIN','MSYS') AND admin_option='YES' AND grantee NOT IN (SELECT grantee FROM dba_role_privs WHERE granted_role='DBA');"
+    local admin_result
+    admin_result=$(echo "${admin_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>&1 || true)
+    command_executed="echo \"<v\$pwfile_users SYSDBA query; dba_sys_privs admin_option query>\" | sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
+    command_result="${sysdba_result}"$'\n'"${admin_result}"
+
+    if echo "${admin_result}" | grep -qiE 'ORA-[0-9]+|SP2-[0-9]+|ERROR|TNS-[0-9]+'; then
+        query_error=1
+    else
+        local admin_list
+        admin_list=$(echo "${admin_result}" | sed '/^[[:space:]]*$/d' | grep -viE 'no rows selected|SQL>' | sed 's/[[:space:]]//g' | grep -v '^$' || true)
+        local admin_count
+        admin_count=$(echo "${admin_list}" | grep -c '.' || true)
+        if [ "${admin_count}" -gt 0 ]; then
+            ((vulnerabilities_found++)) || true
+            inspection_summary+="취약: 불필요 계정에 ADMIN_OPTION 시스템 권한 부여 ${admin_count}개($(echo "${admin_list}" | head -5 | tr '\n' ',' )); "
+        else
+            inspection_summary+="비인가 ADMIN_OPTION 시스템 권한 없음; "
+        fi
+    fi
+
+    if [ "${query_error}" -eq 1 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Oracle 접속/쿼리 실행 실패로 자동 판단 불가 (수동진단 필요). 확인: v\$pwfile_users(SYSDBA), dba_sys_privs(admin_option='YES')."
+    elif [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
     else
         diagnosis_result="GOOD"
         status="양호"
         if [ -z "$inspection_summary" ]; then
-            inspection_summary="관리자 권한 원격 접속 제한됨"
+            inspection_summary="관리자 권한이 인가된 계정 및 그룹에만 부여됨"
         fi
     fi
 

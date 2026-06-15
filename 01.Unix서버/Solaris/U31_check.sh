@@ -70,7 +70,8 @@ diagnose() {
         ((total_users++)) || true
 
         # 시스템 계정 제외 (UID >= 100인 일반 사용자만 확인, Solaris)
-        if [ "$uid" -lt "$system_gid_threshold" ]; then
+        # 단, root(UID 0)의 홈 디렉토리는 기준 대상이므로 제외하지 않음
+        if [ "$uid" -ne 0 ] && [ "$uid" -lt "$system_gid_threshold" ]; then
             continue
         fi
 
@@ -95,7 +96,7 @@ diagnose() {
 
         # 타사용자 쓰기 권한 확인 (others의 write 권한)
         local has_others_write=false
-        if [[ "$perms" =~ [0-9][0-9][1357]$ ]]; then
+        if [[ "$perms" =~ [0-9][0-9][2367]$ ]]; then
             has_others_write=true
         fi
 

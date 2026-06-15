@@ -66,9 +66,11 @@ diagnose() {
     local tmout_value=""
     local tmout_source=""
 
-    # 1) /etc/profile에서 TMOUT 확인
+    local env_only=false
+
+    # 1) /etc/profile에서 TMOUT 확인 (export TMOUT=형식 포함)
     if [ -f /etc/profile ]; then
-        local profile_tmout=$(grep "^TMOUT=" /etc/profile 2>/dev/null | sed 's/TMOUT=//;s/[[:space:]]*//g')
+        local profile_tmout=$(grep -E "^[[:space:]]*(export[[:space:]]+)?TMOUT=" /etc/profile 2>/dev/null | tail -1 | sed -e 's/.*TMOUT=//' -e 's/[;#].*//' -e 's/[[:space:]]//g' -e "s/[\"']//g")
         if [ -n "$profile_tmout" ]; then
             tmout_value="$profile_tmout"
             tmout_source="/etc/profile"
@@ -77,28 +79,38 @@ diagnose() {
 
     # 2) /etc/bash.bashrc에서 TMOUT 확인 (HP-UX에서는 존재하지 않을 수 있음)
     if [ -z "$tmout_value" ] && [ -f /etc/bash.bashrc ]; then
-        local bashrc_tmout=$(grep "^TMOUT=" /etc/bash.bashrc 2>/dev/null | sed 's/TMOUT=//;s/[[:space:]]*//g')
+        local bashrc_tmout=$(grep -E "^[[:space:]]*(export[[:space:]]+)?TMOUT=" /etc/bash.bashrc 2>/dev/null | tail -1 | sed -e 's/.*TMOUT=//' -e 's/[;#].*//' -e 's/[[:space:]]//g' -e "s/[\"']//g")
         if [ -n "$bashrc_tmout" ]; then
             tmout_value="$bashrc_tmout"
             tmout_source="/etc/bash.bashrc"
         fi
     fi
 
-    # 3) 현재 세션의 TMOUT 환경변수 확인
+    # 2-1) csh 계열: /etc/csh.login의 autologout(분 단위) 확인
+    if [ -z "$tmout_value" ] && [ -f /etc/csh.login ]; then
+        local csh_autologout=$(grep -E "^[[:space:]]*set[[:space:]]+autologout[[:space:]]*=" /etc/csh.login 2>/dev/null | tail -1 | sed -e 's/.*=//' -e 's/[;#].*//' -e 's/[[:space:]]//g' -e "s/[\"']//g")
+        if [ -n "$csh_autologout" ] && [[ "$csh_autologout" =~ ^[0-9]+$ ]]; then
+            tmout_value=$(( csh_autologout * 60 ))
+            tmout_source="/etc/csh.login autologout=${csh_autologout}분(초 환산)"
+        fi
+    fi
+
+    # 3) 현재 세션의 TMOUT 환경변수 확인 (시작 설정 파일 근거 아님 → 수동진단 처리)
     if [ -z "$tmout_value" ] && [ -n "${TMOUT:-}" ]; then
         tmout_value="$TMOUT"
         tmout_source="현재 세션 환경변수"
+        env_only=true
     fi
 
     # TMOUT 값 판정 (600초 = 10분 이하 양호)
     if [ -n "$tmout_value" ]; then
         # TMOUT 값이 숫자인지 확인
         if [[ "$tmout_value" =~ ^[0-9]+$ ]]; then
-            if [ "$tmout_value" -le 600 ]; then
+            if [ "$tmout_value" -ge 1 ] && [ "$tmout_value" -le 600 ]; then
                 is_secure=true
-                config_details="TMOUT=${tmout_value}초 (${tmout_source}) - 600초(10분) 이하 [양호]"
+                config_details="TMOUT=${tmout_value}초 (${tmout_source}) - 1~600초(10분) [양호]"
             else
-                config_details="TMOUT=${tmout_value}초 (${tmout_source}) - 600초(10분) 초과 [취약]"
+                config_details="TMOUT=${tmout_value}초 (${tmout_source}) - 1~600초(10분) 범위 벗어남 [취약] (0은 자동 종료 비활성화)"
             fi
         else
             config_details="TMOUT=${tmout_value} (${tmout_source}) - 유효하지 않은 값"
@@ -108,18 +120,25 @@ diagnose() {
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$is_secure" = true ] && [ "$env_only" = true ]; then
+        # 환경변수에만 존재 → 시작 설정 파일 근거 없음, GOOD 부여 불가
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="TMOUT이 현재 세션 환경변수에만 설정됨 - 시작 설정 파일(/etc/profile 등) 반영 여부 수동 확인 필요 (${config_details})"
+        command_result="${config_details}"
+        command_executed="grep -E '^(export )?TMOUT=' /etc/profile /etc/bash.bashrc 2>/dev/null; grep autologout /etc/csh.login 2>/dev/null; echo \$TMOUT"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="세션 타임아웃 적절히 설정됨 (${config_details})"
         command_result="${config_details}"
-        command_executed="grep '^TMOUT=' /etc/profile /etc/bash.bashrc 2>/dev/null; echo \$TMOUT"
+        command_executed="grep -E '^(export )?TMOUT=' /etc/profile /etc/bash.bashrc 2>/dev/null; grep autologout /etc/csh.login 2>/dev/null; echo \$TMOUT"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="세션 타임아웃 설정 미흡 (${config_details})"
         command_result="${config_details}"
-        command_executed="grep '^TMOUT=' /etc/profile /etc/bash.bashrc 2>/dev/null; echo \$TMOUT"
+        command_executed="grep -E '^(export )?TMOUT=' /etc/profile /etc/bash.bashrc 2>/dev/null; grep autologout /etc/csh.login 2>/dev/null; echo \$TMOUT"
     fi
 
     # echo ""

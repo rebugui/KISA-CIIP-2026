@@ -62,17 +62,27 @@ diagnose() {
     local vulnerable_files=""
     local vulnerable_count=0
     local checked_count=0
+    local unparsed_files=""
+    local unparsed_count=0
     local env_files=".bashrc .profile .bash_profile .bash_logout .zshrc .zprofile .zshenv .zlogin .zlogout .cshrc .login .logout .tcshrc .kshrc .profile .env .exrc .netrc"
 
-    # /etc/passwd에서 일반 사용자(UID >= 200)의 홈 디렉터리 확인 (AIX system UID: < 200) - 실제 명령어 결과 저장
+    # /etc/passwd의 모든 계정 점검: 실제 홈 디렉터리를 보유한 계정은 UID 대역과 무관하게 점검
+    # (AIX guest UID 100 등 UID 1-199 시스템 계정도 실홈 보유 시 포함; 홈 없는 순수 시스템 계정은 제외)
     local raw_output=""
+    local seen_homes=""
     while IFS= read -r user_line; do
         local username=$(echo "$user_line" | cut -d: -f1)
         local uid=$(echo "$user_line" | cut -d: -f3)
         local home_dir=$(echo "$user_line" | cut -d: -f6)
 
-        # 홈 디렉터리가 존재하고, UID가 200 이상인 일반 사용자 확인
-        if [ -d "$home_dir" ] && [ "$uid" -ge 200 ] 2>/dev/null; then
+        # UID가 숫자가 아니면 건너뜀
+        case "$uid" in ''|*[!0-9]*) continue ;; esac
+        # 동일 홈 디렉터리 중복 점검 방지
+        case " $seen_homes " in *" $home_dir "*) continue ;; esac
+
+        # 홈 디렉터리가 실제 존재하는 계정만 점검
+        if [ -d "$home_dir" ]; then
+            seen_homes="$seen_homes $home_dir"
             # 환경변수 파일 권한 확인
             for env_file in $env_files; do
                 local file_path="${home_dir}/${env_file}"
@@ -84,12 +94,20 @@ diagnose() {
                     local ls_output=$(ls -ld "$file_path" 2>/dev/null)
                     raw_output="${raw_output}${ls_output}"$'\n'
 
-                    # 취약한 권한 확인: others에 읽기 또는 쓰기 권한이 있는 경우
-                    local last_char="${perms: -1}"
+                    # 권한/소유자 확인 불가 시 양호로 간주하지 않고 확인불가로 집계
+                    if [ -z "$perms" ] || [ -z "$owner" ]; then
+                        ((unparsed_count++)) || true
+                        unparsed_files="${unparsed_files}${file_path}, "
+                    else
+                        # 그룹 또는 others 쓰기 권한(2,3,6,7) 확인
+                        local group_char="${perms: -2:1}"
+                        local other_char="${perms: -1}"
+                        local write_violation=0
+                        case "$group_char" in 2|3|6|7) write_violation=1 ;; esac
+                        case "$other_char" in 2|3|6|7) write_violation=1 ;; esac
 
-                    if [ -n "$perms" ]; then
-                        # others에 쓰기 권한이 있거나(2,3,6,7), 소유자가 해당 사용자가 아닌 경우
-                        if [ "$owner" != "$username" ] || [ "$last_char" = "2" ] || [ "$last_char" = "3" ] || [ "$last_char" = "6" ] || [ "$last_char" = "7" ]; then
+                        # 소유자가 root 또는 해당 계정이 아니거나, 그룹/others 쓰기 권한이 있는 경우 취약
+                        if { [ "$owner" != "$username" ] && [ "$owner" != "root" ]; } || [ "$write_violation" -eq 1 ]; then
                             ((vulnerable_count++)) || true
                             vulnerable_files="${vulnerable_files}${file_path} (권한: ${perms}, 소유자: ${owner}), "
                         fi
@@ -100,26 +118,30 @@ diagnose() {
     done < /etc/passwd || true
 
     # 결과 판정
-    if [ "$vulnerable_count" -eq 0 ]; then
-        if [ "$checked_count" -eq 0 ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="사용자 환경변수 파일 없음 또는 모두 안전한 권한으로 설정됨"
-            command_result="[Command: find env files]${newline}No environment files found or all checked files are secure"
-            command_executed="awk -F: '\$3 >= 200 {print \$1, \$6}' /etc/passwd | while read user home; do find \"\$home\" -maxdepth 1 -name '.*' -type f 2>/dev/null; done | xargs perl -e 'for (@ARGV) {@s=lstat; printf \"%04o %s %s\\n\", \$s[2]&07777, getpwuid(\$s[4]), $_}' 2>/dev/null"
-        else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="사용자 환경변수 파일 ${checked_count}개 모두 안전한 권한으로 설정됨"
-            command_result="[Command: find env files]${newline}${raw_output}"
-            command_executed="awk -F: '\$3 >= 200 {print \$1, \$6}' /etc/passwd | while read user home; do find \"\$home\" -maxdepth 1 -name '.*' -type f 2>/dev/null; done | xargs perl -e 'for (@ARGV) {@s=lstat; printf \"%04o %s %s\\n\", \$s[2]&07777, getpwuid(\$s[4]), $_}' 2>/dev/null"
-        fi
-    else
+    if [ "$vulnerable_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="취약한 환경변수 파일 ${vulnerable_count}개 발견: ${vulnerable_files%, }"
         command_result="[Command: find env files]${newline}${raw_output}"
-        command_executed="awk -F: '\$3 >= 200 {print \$1, \$6}' /etc/passwd | while read user home; do find \"\$home\" -maxdepth 1 -name '.*' -type f 2>/dev/null; done | xargs perl -e 'for (@ARGV) {@s=lstat; printf \"%04o %s %s\\n\", \$s[2]&07777, getpwuid(\$s[4]), $_}' 2>/dev/null"
+        command_executed="awk -F: '\$3 == 0 || \$3 >= 200 {print \$1, \$6}' /etc/passwd | while read user home; do find \"\$home\" -maxdepth 1 -name '.*' -type f 2>/dev/null; done | xargs perl -e 'for (@ARGV) {@s=lstat; printf \"%04o %s %s\\n\", \$s[2]&07777, getpwuid(\$s[4]), $_}' 2>/dev/null"
+    elif [ "$unparsed_count" -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="권한/소유자 확인 불가 환경변수 파일 ${unparsed_count}개 존재(수동 확인 필요): ${unparsed_files%, }"
+        command_result="[Command: find env files]${newline}${raw_output}"
+        command_executed="awk -F: '\$3 == 0 || \$3 >= 200 {print \$1, \$6}' /etc/passwd | while read user home; do find \"\$home\" -maxdepth 1 -name '.*' -type f 2>/dev/null; done | xargs perl -e 'for (@ARGV) {@s=lstat; printf \"%04o %s %s\\n\", \$s[2]&07777, getpwuid(\$s[4]), $_}' 2>/dev/null"
+    elif [ "$checked_count" -eq 0 ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="사용자 환경변수 파일 없음 또는 모두 안전한 권한으로 설정됨"
+        command_result="[Command: find env files]${newline}No environment files found or all checked files are secure"
+        command_executed="awk -F: '\$3 == 0 || \$3 >= 200 {print \$1, \$6}' /etc/passwd | while read user home; do find \"\$home\" -maxdepth 1 -name '.*' -type f 2>/dev/null; done | xargs perl -e 'for (@ARGV) {@s=lstat; printf \"%04o %s %s\\n\", \$s[2]&07777, getpwuid(\$s[4]), $_}' 2>/dev/null"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="사용자 환경변수 파일 ${checked_count}개 모두 안전한 권한으로 설정됨"
+        command_result="[Command: find env files]${newline}${raw_output}"
+        command_executed="awk -F: '\$3 == 0 || \$3 >= 200 {print \$1, \$6}' /etc/passwd | while read user home; do find \"\$home\" -maxdepth 1 -name '.*' -type f 2>/dev/null; done | xargs perl -e 'for (@ARGV) {@s=lstat; printf \"%04o %s %s\\n\", \$s[2]&07777, getpwuid(\$s[4]), $_}' 2>/dev/null"
     fi
 
     # echo ""

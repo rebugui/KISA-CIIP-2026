@@ -37,22 +37,38 @@ if (-not (Test-RunallMode)) {
 try {
     $ntpConfigOutput = w32tm /query /configuration 2>&1
     $exitCode = $LASTEXITCODE
+    # w32tm output is a string[]; join to a scalar for reliable line parsing.
+    $ntpConfigText = ($ntpConfigOutput | Out-String)
 
-    if ($exitCode -eq 0 -and $ntpConfigOutput -match 'NtpServer') {
-        $finalResult = "GOOD"
-        $summary = "NTP 및 시각 동기화가 설정됨"
-        $status = "양호"
-        $commandOutput = $ntpConfigOutput
-    } elseif ($exitCode -eq 0) {
-        $finalResult = "VULNERABLE"
-        $summary = "NTP 및 시각 동기화가 설정되지 않음"
-        $status = "취약"
-        $commandOutput = $ntpConfigOutput
+    if ($exitCode -eq 0) {
+        # The configuration output always emits an 'NtpServer:' line even when
+        # synchronization is disabled (Type: NoSync). NtpServer presence is NOT a
+        # proxy for active sync; the 'Type:' value is authoritative.
+        # Type values: NTP / NT5DS / AllSync = synchronizing; NoSync = disabled.
+        $ntpType = $null
+        if ($ntpConfigText -match '(?im)^\s*Type\s*:\s*([A-Za-z0-9]+)') {
+            $ntpType = $matches[1]
+        }
+
+        if ($null -eq $ntpType) {
+            $finalResult = "MANUAL"
+            $summary = "NTP Type 값을 확인할 수 없음: 수동으로 시각 동기화 설정 확인 필요"
+            $status = "수동진단"
+        } elseif ($ntpType -ieq 'NoSync') {
+            $finalResult = "VULNERABLE"
+            $summary = "NTP 및 시각 동기화가 설정되지 않음 (Type: $ntpType)"
+            $status = "취약"
+        } else {
+            $finalResult = "GOOD"
+            $summary = "NTP 및 시각 동기화가 설정됨 (Type: $ntpType)"
+            $status = "양호"
+        }
+        $commandOutput = $ntpConfigText
     } else {
         $finalResult = "MANUAL"
         $summary = "진단 실패: 수동으로 NTP 설정 확인 필요"
         $status = "수동진단"
-        $commandOutput = "진단 실패: $($ntpConfigOutput)"
+        $commandOutput = "진단 실패: $($ntpConfigText)"
     }
 
     $commandExecuted = "w32tm /query /configuration"

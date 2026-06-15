@@ -34,32 +34,28 @@ if (-not (Test-RunallMode)) {
 }
 
 # 1. Run diagnostic
+# 패치 최신성(최신 누적 업데이트 설치 여부)은 Microsoft Update Catalog와의 비교가 필요하며
+# 로컬에서 정적으로 판단할 수 없다. 부팅 경과일은 패치 적용 여부의 대리 지표가 될 수 없으므로
+# 자동 GOOD/VULNERABLE 판정을 하지 않고, 빌드/핫픽스 증적과 함께 MANUAL을 emit한다.
 try {
-    $build = [System.Environment]::OSVersion.Version.Build
+    $osVersion = [System.Environment]::OSVersion.Version
+    $build = $osVersion.Build
     $osInfo = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
-    $lastBoot = $osInfo.LastBootUpTime
-    $daysSinceBoot = (New-TimeSpan -Start $lastBoot).Days
+    $caption = if ($osInfo) { $osInfo.Caption } else { "Unknown" }
+    $lastBoot = if ($osInfo) { $osInfo.LastBootUpTime } else { "Unknown" }
 
-    $commandOutput = "OS Build: $build`r`nLast Boot: $lastBoot`r`nDays Since Boot: $daysSinceBoot"
-
-    # 최신 빌드 버전 확인 (Windows Server 2022: 20348+, Server 2019: 17763+)
-    # 시스템 재시작 후 60일 이내 업데이트 확인
-    # 가장 최신 빌드 버전(20348)을 기준으로 확인
-    if ($build -ge 20348) {
-        if ($daysSinceBoot -gt 60) {
-            $finalResult = "VULNERABLE"
-            $summary = "최신 OS 빌드이지만 마지막 재시작 후 60일 초과로 최신 보안 업데이트 미적용 가능성"
-            $status = "취약"
-        } else {
-            $finalResult = "GOOD"
-            $summary = "Windows OS가 최신 빌드 버전이며 최근 업데이트됨"
-            $status = "양호"
-        }
+    # 설치된 핫픽스(QFE) 증적 수집 - 최근 항목 위주.
+    $hotfixes = @(Get-HotFix -ErrorAction SilentlyContinue | Sort-Object -Property InstalledOn -Descending)
+    $latestHotfix = if ($hotfixes.Count -gt 0) {
+        ($hotfixes | Select-Object -First 5 | ForEach-Object { "$($_.HotFixID)($($_.InstalledOn))" }) -join ', '
     } else {
-        $finalResult = "VULNERABLE"
-        $summary = "Windows OS 빌드 버전이 오래되었거나 최신 보안 업데이트 미적용"
-        $status = "취약"
+        "No hotfix records available"
     }
+
+    $finalResult = "MANUAL"
+    $status = "수동진단"
+    $summary = "최신 Build 적용 여부는 Microsoft Update Catalog와의 비교가 필요하여 자동 판단 불가. 아래 빌드/핫픽스 증적으로 수동 확인 필요"
+    $commandOutput = "OS: $caption`r`nOS Version: $($osVersion.ToString())`r`nOS Build: $build`r`nLast Boot: $lastBoot`r`nRecent Hotfixes: $latestHotfix"
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
@@ -67,7 +63,7 @@ try {
     $commandOutput = $_.Exception.Message
 }
 
-$commandExecuted = "[System.Environment]::OSVersion.Version; Get-CimInstance Win32_OperatingSystem"
+$commandExecuted = "[System.Environment]::OSVersion.Version; Get-CimInstance Win32_OperatingSystem; Get-HotFix"
 
 # 2. lib를 통한 결과 저장
 $purpose = "시스템을 최신 버전으로 유지하여 새로운 위협 및 진행 중인 위협으로부터 중요 정보와 시스템을 보호하기 위함"

@@ -34,50 +34,70 @@ if (-not (Test-RunallMode)) {
 }
 
 # 1. Check DNS Zone Transfer settings
+# Get-DnsServerZoneTransferPolicy는 RPZ(DNS 방화벽) 정책용 cmdlet으로 영역 전송 제어와 무관하다.
+# 올바른 API는 Get-DnsServerZone의 SecureSecondaries / SecondaryServers 속성이다.
+#   SecureSecondaries: NoTransfer / TransferToZoneNameServer / TransferToSecureServers / TransferAnyServer
+# 양호 기준: DNS 서비스 미사용, 또는 영역 전송 미허용, 또는 특정 서버로만 제한된 경우.
+# DNS 서비스는 구동 중이나 DnsServer 모듈을 사용할 수 없으면 GOOD으로 단정하지 않고 MANUAL.
 try {
-    Import-Module DnsServer -ErrorAction SilentlyContinue
+    $commandExecuted = "Get-Service DNS; Get-DnsServerZone | Select ZoneName,SecureSecondaries,SecondaryServers"
 
-    if (Get-Command Get-DnsServerZone -ErrorAction SilentlyContinue) {
-        $zones = Get-DnsServerZone -ErrorAction SilentlyContinue | Where-Object { $_.ZoneType -eq 'Primary' -and $_.IsDsIntegrated -eq $false }
+    $dnsService = Get-Service -Name 'DNS' -ErrorAction SilentlyContinue
+    $dnsRunning = ($dnsService -and $dnsService.Status -eq 'Running')
+
+    Import-Module DnsServer -ErrorAction SilentlyContinue
+    $hasCmdlet = [bool](Get-Command Get-DnsServerZone -ErrorAction SilentlyContinue)
+
+    if (-not $hasCmdlet) {
+        if ($dnsRunning) {
+            # DNS 서버가 구동 중인데 점검 cmdlet이 없으면 영역 전송 설정을 단정할 수 없음 → 수동 진단.
+            $finalResult = "MANUAL"
+            $summary = "DNS 서비스가 구동 중이나 DnsServer 모듈을 사용할 수 없어 Zone Transfer 설정을 자동으로 확인할 수 없음 (수동 확인 필요)"
+            $status = "수동진단"
+            $commandOutput = "DNS service running but Get-DnsServerZone unavailable"
+        } else {
+            $finalResult = "GOOD"
+            $summary = "DNS 서비스가 비활성화됨 (DNS Server 역할 미설치 또는 미구동)"
+            $status = "양호"
+            $commandOutput = "DNS Server role not installed / service not running"
+        }
+    } else {
+        $zones = @(Get-DnsServerZone -ErrorAction SilentlyContinue | Where-Object {
+            $_.ZoneType -eq 'Primary' -and $_.IsAutoCreated -eq $false -and $_.ZoneName -ne 'TrustAnchors'
+        })
         $hasInsecureTransfer = $false
         $zoneDetails = @()
 
         foreach ($zone in $zones) {
-            $secZone = Get-DnsServerZoneTransferPolicy -ZoneName $zone.ZoneName -ErrorAction SilentlyContinue
-
-            if (-not $secZone -or $secZone.TransferType -eq 'Any') {
+            $secSec = [string]$zone.SecureSecondaries
+            # NoTransfer(미허용) 또는 TransferToZoneNameServer/TransferToSecureServers(특정 서버 제한) = 양호.
+            # TransferAnyServer(모든 서버로 전송) 또는 알 수 없는 값 = 취약.
+            $isSecure = ($secSec -eq 'NoTransfer' -or $secSec -eq 'TransferToZoneNameServer' -or $secSec -eq 'TransferToSecureServers')
+            if (-not $isSecure) {
                 $hasInsecureTransfer = $true
-                $transferType = if ($secZone) { $secZone.TransferType } else { "Not configured (defaults to Any)" }
-                $zoneDetails += "$($zone.ZoneName): $transferType"
+                $secList = if ($zone.SecondaryServers) { ($zone.SecondaryServers -join ',') } else { '(none)' }
+                $zoneDetails += "$($zone.ZoneName): SecureSecondaries=$secSec, SecondaryServers=$secList"
             }
         }
 
         if ($hasInsecureTransfer) {
             $finalResult = "VULNERABLE"
-            $summary = "하나 이상의 DNS Zone에서 모든 호스트로 Zone Transfer 허용"
+            $summary = "하나 이상의 DNS Zone에서 제한 없이 Zone Transfer 허용 (TransferAnyServer)"
             $status = "취약"
             $commandOutput = $zoneDetails -join '; '
         } else {
             $finalResult = "GOOD"
-            $summary = "DNS Zone Transfer가 제한됨 (특정 서버로만 허용)"
+            $summary = "DNS Zone Transfer가 제한됨 (미허용 또는 특정 서버로만 허용)"
             $status = "양호"
-            $primaryZoneCount = ($zones | Measure-Object).Count
-            $commandOutput = if ($primaryZoneCount -gt 0) { "All $primaryZoneCount primary non-AD zones have secure transfer policies" } else { "No primary non-AD integrated zones found" }
+            $commandOutput = if ($zones.Count -gt 0) { "All $($zones.Count) primary zones restrict zone transfer" } else { "No primary zones configured" }
         }
-    } else {
-        $finalResult = "GOOD"
-        $summary = "DNS Server 역할이 설치되지 않음"
-        $status = "양호"
-        $commandOutput = "DNS Server role not installed or module not available"
     }
-
-    $commandExecuted = "Get-DnsServerZone | Get-DnsServerZoneTransferPolicy"
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-DnsServerZone | Get-DnsServerZoneTransferPolicy"
+    $commandExecuted = "Get-Service DNS; Get-DnsServerZone | Select ZoneName,SecureSecondaries,SecondaryServers"
     $commandOutput = "진단 실패: $_"
 }
 

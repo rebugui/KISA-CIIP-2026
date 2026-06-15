@@ -32,7 +32,7 @@ $remediation = "DB 연결 파일에 대한 접근 권한 제한 또는 불필요
 
 try {
     $finalResult = "N/A"
-    $status = "not_applicable"
+    $status = "N/A"
     $summary = "Nginx for Windows is not a target platform for WEB-13 according to docs/04_웹서비스.md and docs/guideline_metadata.json."
     $commandOutput = "WEB-13 targets Tomcat, IIS, and JEUS. Nginx DB connection/config exposure checks are not defined for this item."
     $commandExecuted = "docs/04_웹서비스.md and guideline_metadata.json WEB-13 target platform review"

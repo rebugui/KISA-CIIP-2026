@@ -57,98 +57,110 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # SHA512 또는更强 알고리즘 확인
+    # Solaris: /etc/security/policy.conf의 CRYPT_DEFAULT 값 확인
+    # 가이드: CRYPT_DEFAULT = 5(SHA-256) 또는 6(SHA-512) → 안전
+    # 1(BSD MD5), 2a/2x/2y(Blowfish), md5, __unix__ 또는 미설정(기본 __unix__) → 취약
+    # CRYPT_ALGORITHMS_ALLOW는 증적으로 함께 수집
 
+    local policy_file="/etc/security/policy.conf"
     local is_secure=false
+    local is_manual=false
     local details=""
-    local encrypt_method=""
-    local pam_algorithm=""
+    local crypt_raw=""
+    local crypt_default=""
+    local crypt_allow=""
 
-    # 1) /etc/default/passwd 확인 (Solaris uses CRYPT_ALGORITHM and CRYPT_DEFAULT)
-    if [ -f /etc/default/passwd ]; then
-        encrypt_method=$(grep "^CRYPT_ALGORITHM\|CRYPT_DEFAULT" /etc/default/passwd 2>/dev/null | grep -v "^#" | head -1 | awk '{print $2}')
-        if [ -n "$encrypt_method" ]; then
-            details="/etc/default/passwd: ${encrypt_method}"
+    # 1) /etc/security/policy.conf에서 CRYPT_DEFAULT / CRYPT_ALGORITHMS_ALLOW 추출
+    #    (들여쓰기 허용, 주석 제외)
+    if [ -f "$policy_file" ]; then
+        if [ -r "$policy_file" ]; then
+            crypt_raw=$(grep -E '^[[:space:]]*CRYPT_(DEFAULT|ALGORITHMS_ALLOW)[[:space:]]*=' "$policy_file" 2>/dev/null | grep -v '^[[:space:]]*#' || true)
+            crypt_default=$(grep -E '^[[:space:]]*CRYPT_DEFAULT[[:space:]]*=' "$policy_file" 2>/dev/null | grep -v '^[[:space:]]*#' | tail -1 | cut -d= -f2- | tr -d '[:space:]' || true)
+            crypt_allow=$(grep -E '^[[:space:]]*CRYPT_ALGORITHMS_ALLOW[[:space:]]*=' "$policy_file" 2>/dev/null | grep -v '^[[:space:]]*#' | tail -1 | cut -d= -f2- | tr -d '[:space:]' || true)
+        else
+            is_manual=true
+            details="${policy_file} 읽기 권한 없음"
+        fi
+    else
+        details="${policy_file} 파일 없음 (CRYPT_DEFAULT 미설정 - 기본 __unix__ crypt 사용)"
+    fi
+
+    # 2) CRYPT_DEFAULT 값 판정 (SHA-2 계열인 5/6만 안전, Blowfish/MD5/__unix__는 취약)
+    if [ "$is_manual" = false ]; then
+        case "$crypt_default" in
+            6)
+                is_secure=true
+                details="CRYPT_DEFAULT=6 (SHA-512)"
+                ;;
+            5)
+                is_secure=true
+                details="CRYPT_DEFAULT=5 (SHA-256)"
+                ;;
+            "")
+                if [ -z "$details" ]; then
+                    details="CRYPT_DEFAULT 미설정 (기본 __unix__ crypt 사용)"
+                fi
+                ;;
+            *)
+                details="CRYPT_DEFAULT=${crypt_default} (취약한 알고리즘)"
+                ;;
+        esac
+        if [ -n "$crypt_allow" ]; then
+            details="${details}, CRYPT_ALGORITHMS_ALLOW=${crypt_allow}"
         fi
     fi
 
-    # 2) PAM 설정 확인 (Solaris uses /etc/pam.conf or /etc/pam.d/*)
-    local pam_files=(
-        "/etc/pam.conf"
-        "/etc/pam.d/common-auth"
-        "/etc/pam.d/system-auth"
-        "/etc/pam.d/passwd"
-    )
+    # 3) /etc/shadow 저장 해시 점검 (CRYPT_DEFAULT가 안전해도 기존 약한 해시가 남아있으면 취약)
+    #    $5$/$6$(SHA-2) 외의 실사용 해시($1$ MD5, $2x$ Blowfish, 13자 전통 crypt 등)는 취약
+    local shadow_file="/etc/shadow"
+    local shadow_checked=false
+    local weak_hash_accounts=""
+    if [ "$is_manual" = false ] && [ -r "$shadow_file" ]; then
+        shadow_checked=true
+        weak_hash_accounts=$(awk -F: '
+            $2 == "" { next }
+            $2 ~ /^[*!]/ || $2 == "NP" || $2 == "UP" || $2 == "x" { next }
+            $2 ~ /^\$[56]\$/ { next }
+            $2 ~ /^\$2[abxy]?\$/ { print $1 "(Blowfish)"; next }
+            $2 ~ /^\$1\$/ { print $1 "(MD5)"; next }
+            $2 ~ /^\$md5/ { print $1 "(Sun-MD5)"; next }
+            { print $1 "(legacy-crypt)" }' "$shadow_file" 2>/dev/null | head -10 || true)
+    fi
 
-    for pam_file in "${pam_files[@]}"; do
-        if [ -f "$pam_file" ]; then
-            # Solaris: Check for unix_cred.so.1 or crypt_unix.so.1 with algorithm
-            # SHA512 확인 (우선)
-            if grep -q "sha512" "$pam_file" 2>/dev/null; then
-                pam_algorithm="sha512"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM: ${pam_algorithm}"
-                else
-                    details="PAM 알고리즘: ${pam_algorithm}"
-                fi
-                break
-            # SHA256 확인 (최소 허용)
-            elif grep -q "sha256" "$pam_file" 2>/dev/null; then
-                pam_algorithm="sha256"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM: ${pam_algorithm}"
-                else
-                    details="PAM 알고리즘: ${pam_algorithm}"
-                fi
-                break
-            # yescrypt 확인 (더 강력함)
-            elif grep -q "yescrypt" "$pam_file" 2>/dev/null; then
-                pam_algorithm="yescrypt"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM: ${pam_algorithm}"
-                else
-                    details="PAM 알고리즘: ${pam_algorithm}"
-                fi
-                break
-            fi
+    if [ "$is_manual" = false ]; then
+        if [ -n "$weak_hash_accounts" ]; then
+            is_secure=false
+            details="${details}, /etc/shadow 약한 해시 계정: $(echo "$weak_hash_accounts" | tr '\n' ' ')"
+        elif [ "$is_secure" = true ] && [ "$shadow_checked" = false ]; then
+            # 정책은 안전하나 실제 저장 해시를 확인할 수 없는 경우 → 수동 확인
+            is_manual=true
+            details="${details}, /etc/shadow 읽기 불가로 저장된 해시 알고리즘 확인 필요"
         fi
-    done || true
-
-    # 3) PAM에 sha512/sha256/yescrypt가 없더라도 /etc/default/passwd에 안전한 알고리즘이 설정된 경우 양호
-    if [ "$is_secure" = false ]; then
-        # /etc/default/passwd의 CRYPT_ALGORITHM/CRYPT_DEFAULT 확인
-        case "$encrypt_method" in
-            5|6|2a|2y|2b|sha512|sha256|yescrypt)
-                is_secure=true
-                ;;
-        esac
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$is_manual" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="비밀번호 암호화 알고리즘 설정 확인 불가 (${details}) - 수동 점검 필요"
+        command_result="[Command: grep -E '^[[:space:]]*CRYPT_(DEFAULT|ALGORITHMS_ALLOW)' ${policy_file}]${newline}${details}"
+        command_executed="grep -E '^[[:space:]]*CRYPT_(DEFAULT|ALGORITHMS_ALLOW)' ${policy_file}"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="안전한 비밀번호 암호화 알고리즘 사용됨 (${details})"
-        local encrypt_output=$(grep '^CRYPT_ALGORITHM\|^CRYPT_DEFAULT' /etc/default/passwd 2>/dev/null || echo "No CRYPT settings found")
-        local pam_output=$(grep -E 'sha512|sha256' /etc/pam.conf /etc/pam.d/* 2>/dev/null || echo "No PAM algorithm found")
-        command_result="[Command: grep '^CRYPT_ALGORITHM\\|^CRYPT_DEFAULT' /etc/default/passwd]${newline}${encrypt_output}${newline}${newline}[Command: grep -E 'sha512|sha256' /etc/pam.conf /etc/pam.d/*]${newline}${pam_output}"
-        command_executed="grep '^CRYPT_ALGORITHM\\|^CRYPT_DEFAULT' /etc/default/passwd && grep -E 'sha512|sha256' /etc/pam.conf /etc/pam.d/* 2>/dev/null"
+        inspection_summary="안전한 비밀번호 암호화 알고리즘 사용됨 (${details}, /etc/shadow 약한 해시 없음)"
+        command_result="[Command: grep -E '^[[:space:]]*CRYPT_(DEFAULT|ALGORITHMS_ALLOW)' ${policy_file}]${newline}${crypt_raw}"
+        command_executed="grep -E '^[[:space:]]*CRYPT_(DEFAULT|ALGORITHMS_ALLOW)' /etc/security/policy.conf; awk -F: /etc/shadow (해시 알고리즘 확인)"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        local encrypt_output=$(grep '^CRYPT_ALGORITHM\|^CRYPT_DEFAULT' /etc/default/passwd 2>/dev/null || echo "No CRYPT settings found")
-        local pam_output=$(grep -E 'sha512|sha256' /etc/pam.conf /etc/pam.d/* 2>/dev/null || echo "No PAM algorithm found")
-        if [ -z "$details" ]; then
-            inspection_summary="비밀번호 암호화 알고리즘 미설정 또는 약한 알고리즘 사용 (MD5, DES 등)"
-            command_result="[Command: grep '^CRYPT_ALGORITHM\\|^CRYPT_DEFAULT' /etc/default/passwd]${newline}${encrypt_output}${newline}${newline}[Command: grep -E 'sha512|sha256' /etc/pam.conf /etc/pam.d/*]${newline}${pam_output}"
+        inspection_summary="취약한 비밀번호 암호화 알고리즘 사용 (${details})"
+        if [ -n "$crypt_raw" ]; then
+            command_result="[Command: grep -E '^[[:space:]]*CRYPT_(DEFAULT|ALGORITHMS_ALLOW)' ${policy_file}]${newline}${crypt_raw}"
         else
-            inspection_summary="비밀번호 암호화 알고리즘 부적절 (${details})"
-            command_result="[Command: grep '^CRYPT_ALGORITHM\\|^CRYPT_DEFAULT' /etc/default/passwd]${newline}${encrypt_output}${newline}${newline}[Command: grep -E 'sha512|sha256' /etc/pam.conf /etc/pam.d/*]${newline}${pam_output}"
+            command_result="[Command: grep -E '^[[:space:]]*CRYPT_(DEFAULT|ALGORITHMS_ALLOW)' ${policy_file}]${newline}${details}"
         fi
-        command_executed="grep '^CRYPT_ALGORITHM\\|^CRYPT_DEFAULT' /etc/default/passwd && grep -E 'sha512|sha256' /etc/pam.conf /etc/pam.d/* 2>/dev/null"
+        command_executed="grep -E '^[[:space:]]*CRYPT_(DEFAULT|ALGORITHMS_ALLOW)' /etc/security/policy.conf; awk -F: /etc/shadow (해시 알고리즘 확인)"
     fi
 
     # echo ""

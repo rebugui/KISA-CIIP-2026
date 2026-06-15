@@ -111,6 +111,12 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="기본 경로(/usr/share/nginx/html 또는 /var/www/html)를 사용합니다. 별도의 웹서비스 전용 디렉터리 사용 권장."
+    elif [ -z "${doc_roots}" ]; then
+        # root 지시자를 찾지 못함: 상위 컨텍스트에서 상속되거나 기본 경로(/usr/share/nginx/html)가
+        # 적용될 수 있으므로 경로 분리 여부를 정적으로 단정할 수 없어 수동진단으로 분류한다.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="점검 대상 설정 파일에서 root 지시자를 찾지 못했습니다. root가 상위 컨텍스트에서 상속되거나 기본 경로(/usr/share/nginx/html)가 적용될 수 있으므로, 실제 DocumentRoot 경로의 분리 여부를 수동으로 확인하세요."
     else
         diagnosis_result="GOOD"
         status="양호"

@@ -82,12 +82,13 @@ diagnose() {
             fi
         fi
 
-        # /etc/xinetd.d/finger 확인
+        # /etc/xinetd.d/finger 확인 (disable 항목이 없거나 yes가 아니면 활성화 - xinetd 기본값: 활성)
         if [ -f /etc/xinetd.d/finger ]; then
-            local xinetd_finger=$(grep -v "^#" /etc/xinetd.d/finger 2>/dev/null | grep -i "disable.*=.*no" || echo "")
-            if [ -n "$xinetd_finger" ]; then
+            local xinetd_disabled=$(grep -E '^[[:space:]]*disable' /etc/xinetd.d/finger 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
+            xinetd_disabled=$(echo "$xinetd_disabled" | tr '[:upper:]' '[:lower:]')
+            if [ "$xinetd_disabled" != "yes" ]; then
                 finger_active=true
-                raw_output="${raw_output}[/etc/xinetd.d/finger] 활성화됨"
+                raw_output="${raw_output}[/etc/xinetd.d/finger] 활성화됨 (disable=${xinetd_disabled:-없음})"
             fi
         fi
     fi

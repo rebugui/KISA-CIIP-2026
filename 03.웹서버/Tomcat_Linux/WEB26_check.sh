@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="로그 디렉터리 및 파일에 일반 사용자 접근
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -92,26 +92,34 @@ diagnose() {
         for log_dir in $log_pattern; do
             if [ -d "${log_dir}" ]; then
                 # 로그 파일 권한 확인
-                local found_logs=$(find "${log_dir}" -type f -name "*.log*" -perm /002 2>/dev/null || true)
+                # 가이드라인 기준: 로그 디렉터리 및 파일에 일반 사용자(other)의 접근 권한이
+                # 있는 경우 취약 (조치: chmod o-rwx). 읽기(004)만 있어도 정보 유출 위험.
+                # 따라서 world-write(002)만이 아닌 read/write/exec 전체(-perm /007)를 점검.
+                local found_logs=$(find "${log_dir}" -type f -name "*.log*" -perm /007 2>/dev/null || true)
                 if [ -n "${found_logs}" ]; then
                     log_info="${log_info}"$'\n'"${found_logs}"
-                    insecure_logs=$((insecure_logs + 1))
+                    local file_hits=$(echo "${found_logs}" | grep -c . || true)
+                    insecure_logs=$((insecure_logs + file_hits))
                 fi
 
-                # 디렉토리 권한 확인
+                # 디렉토리 권한 확인 (other 자리가 0이 아니면 일반 사용자 접근 가능 → 취약)
                 local dir_perm=$(stat -c "%a" "${log_dir}" 2>/dev/null || echo "000")
                 log_info="${log_info}"$'\n'"${log_dir}: ${dir_perm}"
+                local dir_other="${dir_perm: -1}"
+                if [ "${dir_other}" != "0" ]; then
+                    insecure_logs=$((insecure_logs + 1))
+                fi
             fi
         done
     done
 
-    command_executed="find /var/log/tomcat* /usr/share/tomcat*/logs -type f -name '*.log*' -perm /002 2>/dev/null | head -5"
+    command_executed="find /var/log/tomcat* /usr/share/tomcat*/logs -type f -name '*.log*' -perm /007 2>/dev/null | head -5; stat -c '%a %n' /var/log/tomcat* /usr/share/tomcat*/logs 2>/dev/null"
     command_result="${log_info:-No log directories found}"
 
     if [ ${insecure_logs} -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="${insecure_logs}개의 로그 파일에 other 쓰기 권한이 있습니다. 권한을 640 이하로 변경 권장."
+        inspection_summary="${insecure_logs}개의 로그 파일/디렉터리에 일반 사용자(other)의 접근 권한(읽기/쓰기/실행)이 있습니다. chmod o-rwx로 일반 사용자 접근 권한 제거 권장(파일 640, 디렉터리 750 이하)."
     elif [ -n "${log_info}" ]; then
         diagnosis_result="GOOD"
         status="양호"

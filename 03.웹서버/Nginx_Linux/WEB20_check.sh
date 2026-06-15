@@ -49,6 +49,9 @@ diagnose() {
     local command_executed=""
     local has_ssl=false
     local has_https=false
+    local has_ssl_protocols=false
+    local has_weak_protocols=false
+    local protocol_settings=""
 
         # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -105,25 +108,49 @@ diagnose() {
                 if [ -n "${found_https}" ]; then
                     has_https=true
                 fi
+
+                # ssl_protocols 지시자 확인 (약한 프로토콜 포함 여부 점검)
+                local found_protocols=$(grep -E "^\s*ssl_protocols" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
+                if [ -n "${found_protocols}" ]; then
+                    has_ssl_protocols=true
+                    protocol_settings="${protocol_settings}"$'\n'"${found_protocols}"
+                    # SSLv2/SSLv3/TLSv1/TLSv1.1 은 약한 프로토콜
+                    if echo "${found_protocols}" | grep -qiE "SSLv2|SSLv3|TLSv1([^.]|$)|TLSv1\.1"; then
+                        has_weak_protocols=true
+                    fi
+                fi
             fi
         done
     done
 
-    command_executed="grep -E '(ssl_certificate|listen.*443|listen.*ssl)' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null | grep -v '^\\s*#' | head -3"
-    command_result="${ssl_settings:-No SSL found}"
+    command_executed="grep -E '(ssl_certificate|listen.*443|listen.*ssl|ssl_protocols)' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null | grep -v '^\\s*#' | head -5"
+    command_result="${ssl_settings:-No SSL found}${protocol_settings}"
 
-    if [ "${has_ssl}" = true ] && [ "${has_https}" = true ]; then
+    if [ "${has_ssl}" != true ] || [ "${has_https}" != true ]; then
+        # SSL 인증서 또는 443/ssl 리스너가 없으면 SSL/TLS 미활성화 → 취약
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        if [ "${has_ssl}" = true ]; then
+            inspection_summary="SSL 인증서가 설정되었으나 HTTPS(443) 리스너가 발견되지 않았습니다. SSL/TLS 설정을 완료하세요."
+        else
+            inspection_summary="HTTPS가 활성화되어 있지 않습니다. SSL/TLS 설정 권장."
+        fi
+    elif [ "${has_weak_protocols}" = true ]; then
+        # ssl_protocols에 약한 프로토콜(SSLv2/SSLv3/TLSv1/TLSv1.1)이 포함됨 → 취약
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="SSL/TLS는 활성화되어 있으나 ssl_protocols에 취약한 프로토콜(SSLv2/SSLv3/TLSv1/TLSv1.1)이 포함되어 있습니다. TLSv1.2 TLSv1.3 만 허용하도록 설정하세요. 설정값:${protocol_settings}"
+    elif [ "${has_ssl_protocols}" != true ]; then
+        # SSL은 활성화되었으나 ssl_protocols 미지정. Nginx 기본값(1.18 이전)은 TLSv1/TLSv1.1을 포함하므로
+        # 약한 프로토콜 차단 여부를 정적으로 단정할 수 없어 수동진단으로 분류한다.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="SSL/TLS는 활성화되어 있으나 ssl_protocols 지시자가 명시되어 있지 않습니다. Nginx 기본 프로토콜에는 TLSv1/TLSv1.1이 포함될 수 있으므로(버전에 따라 상이), 사용 중인 Nginx 버전의 기본 프로토콜과 실제 허용 프로토콜을 수동으로 확인하고 ssl_protocols TLSv1.2 TLSv1.3; 명시를 권장합니다."
+    else
+        # ssl_protocols가 명시되어 있고 약한 프로토콜이 없음(현대 프로토콜 전용) → 양호
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="HTTPS(SSL/TLS)가 활성화되어 있습니다. (보안 권고사항 준수)"
-    elif [ "${has_ssl}" = true ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="SSL 인증서가 설정되었으나 HTTPS(443) 리스너가 발견되지 않았습니다."
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="HTTPS가 활성화되어 있지 않습니다. SSL/TLS 설정 권장."
+        inspection_summary="HTTPS(SSL/TLS)가 활성화되어 있으며 ssl_protocols에 취약한 프로토콜 없이 현대 프로토콜만 설정되어 있습니다. (보안 권고사항 준수) 설정값:${protocol_settings}"
     fi
 
     # Run-all 모드 확인

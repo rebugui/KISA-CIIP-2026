@@ -40,32 +40,41 @@ try {
     # Export security policy to temp file
     $null = secedit /export /cfg $tempFile 2>&1
 
-    $content = Get-Content $tempFile -ErrorAction Stop
-    $crashOnAuditFail = 0
+    # NOTE: Get-Content returns a string[] array. Using the -match operator on an
+    # array FILTERS the array and does NOT populate $matches, so a scalar must be
+    # used to capture the numeric value. Join to a single string before matching.
+    $contentText = (Get-Content $tempFile -ErrorAction Stop) -join "`n"
+    $crashOnAuditFail = $null
 
-    # Parse CrashOnAuditFail
-    if ($content -match 'CrashOnAuditFail\s*=\s*(\d+)') {
+    # Parse CrashOnAuditFail (scalar -match populates $matches)
+    if ($contentText -match 'CrashOnAuditFail\s*=\s*(\d+)') {
         $crashOnAuditFail = [int]$matches[1]
     }
-
-    $output = "CrashOnAuditFail: $crashOnAuditFail"
 
     # Clean up temp file
     Remove-Item $tempFile -ErrorAction SilentlyContinue
 
-    # 0 = Disabled (GOOD), 1 = Enabled (VULNERABLE), 2 = Enabled (VULNERABLE)
-    if ($crashOnAuditFail -eq 0) {
+    if ($null -eq $crashOnAuditFail) {
+        # Value not present in policy export -> cannot determine -> MANUAL
+        $finalResult = "MANUAL"
+        $summary = "CrashOnAuditFail 값을 확인할 수 없음: 수동으로 '보안 감사를 로그 할 수 없는 경우 즉시 시스템 종료' 정책 확인 필요"
+        $status = "수동진단"
+        $commandOutput = "CrashOnAuditFail: (정책 항목 없음)"
+    } elseif ($crashOnAuditFail -eq 0) {
+        # 0 = Disabled (GOOD)
         $finalResult = "GOOD"
         $summary = "'보안감사를로그할수없는경우즉시시스템종료' 정책이 '사용안함'으로 설정됨"
         $status = "양호"
+        $commandOutput = "CrashOnAuditFail: $crashOnAuditFail"
     } else {
+        # 1 or 2 = Enabled (VULNERABLE)
         $finalResult = "VULNERABLE"
-        $summary = "'보안감사를로그할수없는경우즉시시스템종료' 정책이 '사용'으로 설정됨"
+        $summary = "'보안감사를로그할수없는경우즉시시스템종료' 정책이 '사용'으로 설정됨 (CrashOnAuditFail=$crashOnAuditFail)"
         $status = "취약"
+        $commandOutput = "CrashOnAuditFail: $crashOnAuditFail"
     }
 
     $commandExecuted = "secedit /export 및 CrashOnAuditFail 값 확인"
-    $commandOutput = $output
 
 } catch {
     $finalResult = "MANUAL"

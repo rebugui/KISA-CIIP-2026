@@ -170,6 +170,7 @@ diagnose() {
         # 서비스 실행 중인 경우 상세 진단
         # ==========================================================================
         local ssh_secure=false
+        local ssh_manual=false
         local telnet_secure=false
         local config_details=""
         local ssh_config_output=""
@@ -183,16 +184,14 @@ diagnose() {
 
         # SSH 설정 파일 존재 확인
         if [ ! -f "$sshd_config_file" ]; then
-            diagnosis_result="MANUAL"
-            status="수동진단"
-            inspection_summary="SSH 설정 파일 없음 (${sshd_config_file})"
-
+            ssh_manual=true
+            config_details="[SSH] 설정 파일 없음 (${sshd_config_file})"
             ssh_config_output="파일 없음"
             ssh_secure=false
         else
             # PermitRootLogin 설정 확인 (주석 포함)
-            local ssh_config_commented=$(grep -E "^[\s]*#*[\s]*PermitRootLogin" "$sshd_config_file" 2>/dev/null | head -1 || true)
-            ssh_config_output=$(grep -E "^[\s]*PermitRootLogin" "$sshd_config_file" 2>/dev/null | grep -v "^#" | head -1 || true)
+            local ssh_config_commented=$(grep -E "^[[:space:]]*#*[[:space:]]*PermitRootLogin" "$sshd_config_file" 2>/dev/null | head -1 || true)
+            ssh_config_output=$(grep -E "^[[:space:]]*PermitRootLogin" "$sshd_config_file" 2>/dev/null | grep -v "^[[:space:]]*#" | head -1 || true)
             local permit_root_setting=$(echo "$ssh_config_output" | awk '{print $2}')
 
             if [ -z "$permit_root_setting" ]; then
@@ -207,10 +206,10 @@ diagnose() {
             else
                 config_details="[SSH] PermitRootLogin ${permit_root_setting}"
                 case "$permit_root_setting" in
-                    no|prohibit-password|without-password)
+                    no)
                         ssh_secure=true
                         ;;
-                    yes)
+                    yes|prohibit-password|without-password)
                         ssh_secure=false
                         ;;
                     *)
@@ -238,7 +237,7 @@ diagnose() {
         # Check /etc/securetty
         local securetty_file="/etc/securetty"
         if [ -f "$securetty_file" ]; then
-            securetty_output=$(grep -E "^[\s]*pts" "$securetty_file" 2>/dev/null || echo "")
+            securetty_output=$(grep -E "^[[:space:]]*pts" "$securetty_file" 2>/dev/null || echo "")
             if [ -n "$securetty_output" ]; then
                 telnet_secure=false
                 telnet_details="[Telnet] /etc/securetty에 pts 설정 존재 (취약)"
@@ -258,7 +257,7 @@ diagnose() {
         # Check /etc/pam.d/login for pam_securetty.so
         local pam_login_file="/etc/pam.d/login"
         if [ -f "$pam_login_file" ]; then
-            pam_login_output=$(grep -E "^[\s]*auth.*required.*pam_securetty.so" "$pam_login_file" 2>/dev/null || echo "")
+            pam_login_output=$(grep -E "^[[:space:]]*auth.*required.*pam_securetty.so" "$pam_login_file" 2>/dev/null || echo "")
             if [ -n "$pam_login_output" ]; then
                 # pam_securetty.so가 설정되어 있으면 /etc/securetty가 있어야 함
                 telnet_details="${telnet_details}, [PAM] pam_securetty.so 설정됨"
@@ -299,7 +298,7 @@ diagnose() {
         command_result="${ssh_service_output}[/etc/ssh/sshd_config]${newline}${ssh_config_output}${newline}${newline}"
         command_executed="service ssh status; grep -E '^[\\s]*PermitRootLogin' /etc/ssh/sshd_config"
     else
-        command_result="[SSH Service Status]${newline}$(systemctl status ssh 2>&1 | head -3 || service ssh status 2>&1 | head -3)${newline}${newline}"
+        command_result="[SSH Service Status]${newline}$(systemctl status ssh 2>&1 | head -3 || service ssh status 2>&1 | head -3 || echo 'SSH service not found')${newline}${newline}"
         command_executed="service ssh status"
     fi
 
@@ -319,6 +318,10 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="root 계정 원격 접속 제한 적절 (${config_details})"
+    elif [ "$ssh_manual" = true ] && [ "$telnet_secure" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="SSH 설정 파일을 확인할 수 없어 수동 진단 필요 (${config_details})"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

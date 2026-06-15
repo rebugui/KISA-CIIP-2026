@@ -362,7 +362,10 @@ function Invoke-TomcatWindowsCheck {
             $sensitive = @([regex]::Matches($webText, '(?i)(jdbc|datasource|password|url|username|ResourceLink|JNDI)') | ForEach-Object { $_.Value } | Select-Object -Unique)
             $constraints = @([regex]::Matches($webText, '(?i)<security-constraint|<auth-constraint') | ForEach-Object { $_.Value })
             if ($sensitive.Count -gt 0 -and $constraints.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Potential DB/config exposure evidence exists without obvious web.xml security constraints. Verify sensitive files are not web-accessible.' ($sensitive -join "`n") 'Parse web.xml for sensitive config and access constraints' }
-            if ($constraints.Count -gt 0) { return New-TomcatResult 'GOOD' 'Tomcat web.xml contains access constraint evidence for protected resources.' "Constraints: $($constraints.Count)" 'Parse web.xml for access constraints' }
+            # The mere presence of a <security-constraint>/<auth-constraint> does NOT prove it
+            # covers the DB-connection files (its <url-pattern> may target unrelated resources),
+            # so a bare constraint cannot be statically confirmed as GOOD.
+            if ($constraints.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Tomcat web.xml contains a security-constraint, but it cannot be statically confirmed that the constraint url-pattern actually covers the DB-connection/sensitive files. Verify the constraint protects the sensitive resources.' "Constraints: $($constraints.Count)" 'Parse web.xml for access constraints' }
             return New-TomcatResult 'MANUAL' 'No explicit access constraint evidence was found. Confirm DB/config files are outside web roots or protected.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml for sensitive config and access constraints'
         }
         'WEB-14' {
@@ -376,6 +379,8 @@ function Invoke-TomcatWindowsCheck {
         'WEB-15' {
             $mapping = @([regex]::Matches($webText, '(?is)<servlet-name>\s*(cgi|invoker|ssi)\s*</servlet-name>|CGIServlet|SSIServlet|InvokerServlet') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
             if ($mapping.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Unnecessary Tomcat servlet/script mapping evidence was found.' ($mapping -join "`n") 'Parse web.xml script servlet mappings' }
+            # web.xml이 존재/판독되지 않으면(빈 WebXml) 정상 설정과 부재/판독불가를 구분할 수 없으므로 MANUAL 처리
+            if ($state.WebXml.Count -eq 0 -or [string]::IsNullOrWhiteSpace($webText)) { return New-TomcatResult 'MANUAL' 'No readable Tomcat web.xml was found; cannot confirm absence of unnecessary script mappings. Verify web.xml manually.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml script servlet mappings' }
             return New-TomcatResult 'GOOD' 'No CGI, SSI, or invoker servlet mapping evidence was found.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml script servlet mappings'
         }
         'WEB-16' {
@@ -397,9 +402,13 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'GOOD' 'No Tomcat WebDAV servlet evidence was found.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml WebDAV servlet settings'
         }
         'WEB-19' {
-            $ssi = @([regex]::Matches($webText, '(?is)<servlet-name>\s*ssi\s*</servlet-name>|SSIServlet') | ForEach-Object { $_.Value.Trim() })
-            if ($ssi.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat SSI servlet evidence was found.' ($ssi -join "`n") 'Parse web.xml SSI servlet settings' }
-            return New-TomcatResult 'GOOD' 'No Tomcat SSI servlet evidence was found.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml SSI servlet settings'
+            # 가이드라인 Step 1: SSIServlet(<servlet-name>SSIServlet</servlet-name>)뿐 아니라
+            # SSIFilter(<filter-name>SSIFilter</filter-name>)도 동등한 SSI 활성화 메커니즘이므로 함께 점검
+            $ssi = @([regex]::Matches($webText, '(?is)<servlet-name>\s*ssi\s*</servlet-name>|SSIServlet|<filter-name>\s*SSIFilter\s*</filter-name>|SSIFilter') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+            if ($ssi.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat SSI servlet/filter evidence was found.' ($ssi -join "`n") 'Parse web.xml SSI servlet/filter settings' }
+            # web.xml이 존재/판독되지 않으면(빈 WebXml) 정상 설정과 부재/판독불가를 구분할 수 없으므로 MANUAL 처리
+            if ($state.WebXml.Count -eq 0 -or [string]::IsNullOrWhiteSpace($webText)) { return New-TomcatResult 'MANUAL' 'No readable Tomcat web.xml was found; cannot confirm absence of SSI servlet/filter. Verify web.xml manually.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml SSI servlet/filter settings' }
+            return New-TomcatResult 'GOOD' 'No Tomcat SSI servlet or filter evidence was found.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml SSI servlet/filter settings'
         }
         'WEB-20' {
             $ssl = @([regex]::Matches($serverText, '(?is)<Connector\b[^>]*(SSLEnabled\s*=\s*"true"|scheme\s*=\s*"https"|secure\s*=\s*"true")[^>]*>') | ForEach-Object { $_.Value.Trim() })
@@ -409,9 +418,14 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'GOOD' 'Tomcat SSL/TLS Connector evidence was found without obvious weak protocol evidence.' ($ssl -join "`n") 'Parse server.xml SSL/TLS Connector settings'
         }
         'WEB-21' {
-            $redirect = @([regex]::Matches($serverText + "`n" + $webText, '(?i)redirectPort\s*=\s*"\d+"|<transport-guarantee>\s*CONFIDENTIAL\s*</transport-guarantee>') | ForEach-Object { $_.Value.Trim() })
-            if ($redirect.Count -gt 0) { return New-TomcatResult 'GOOD' 'Tomcat HTTP-to-HTTPS redirect or CONFIDENTIAL transport guarantee evidence was found.' ($redirect -join "`n") 'Parse server.xml redirectPort and web.xml transport-guarantee' }
-            return New-TomcatResult 'MANUAL' 'No Tomcat HTTP-to-HTTPS redirect evidence was found. Confirm redirect is handled by Tomcat, a reverse proxy, or network control.' "server.xml/web.xml files inspected" 'Parse server.xml redirectPort and web.xml transport-guarantee'
+            # redirectPort alone is NOT redirection evidence: every plain HTTP Connector
+            # ships redirectPort="8443" by default with no SSL/redirect actually enforced.
+            # Real HTTPS enforcement = a CONFIDENTIAL transport-guarantee (security-constraint)
+            # OR an actual SSL Connector (SSLEnabled="true" / scheme="https" / secure="true").
+            $confidential = @([regex]::Matches($webText, '(?i)<transport-guarantee>\s*CONFIDENTIAL\s*</transport-guarantee>') | ForEach-Object { $_.Value.Trim() })
+            $sslConnector = @([regex]::Matches($serverText, '(?is)<Connector\b[^>]*(SSLEnabled\s*=\s*"true"|scheme\s*=\s*"https"|secure\s*=\s*"true")[^>]*>') | ForEach-Object { $_.Value.Trim() })
+            if ($confidential.Count -gt 0 -or $sslConnector.Count -gt 0) { return New-TomcatResult 'GOOD' 'Tomcat HTTPS enforcement evidence was found (CONFIDENTIAL transport-guarantee or an SSL/HTTPS Connector).' (($confidential + $sslConnector) -join "`n") 'Parse web.xml transport-guarantee and server.xml SSL Connector' }
+            return New-TomcatResult 'MANUAL' 'No Tomcat HTTPS enforcement evidence was found (redirectPort alone is a default attribute and is not sufficient). Confirm HTTPS redirection is enforced by a security-constraint, an SSL Connector, a reverse proxy, or network control.' "server.xml/web.xml files inspected" 'Parse web.xml transport-guarantee and server.xml SSL Connector'
         }
         'WEB-22' {
             $errors = @([regex]::Matches($webText, '(?is)<error-page>.*?</error-page>') | ForEach-Object { $_.Value.Trim() })

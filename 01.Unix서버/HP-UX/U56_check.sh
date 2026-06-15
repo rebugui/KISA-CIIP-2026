@@ -71,9 +71,9 @@ diagnose() {
         [ ! -f "$vsftpd_conf" ] && vsftpd_conf="/etc/vsftpd/vsftpd.conf"
 
         # vsftpd 접근 제어 확인
-        # 1) /etc/ftpusers 또는 /etc/vsftpd.ftpusers 확인
+        # 1) /etc/ftpusers 또는 /etc/vsftpd.ftpusers 확인 (주석/공백 라인 제외)
         if [ -f /etc/ftpusers ]; then
-            local blocked_users=$(wc -l < /etc/ftpusers 2>/dev/null)
+            local blocked_users=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/ftpusers 2>/dev/null | wc -l)
             if [ "$blocked_users" -gt 0 ]; then
                 access_configured=true
                 access_details="/etc/ftpusers에 ${blocked_users}개 차단된 사용자"
@@ -103,8 +103,8 @@ diagnose() {
         config_files="${config_files}/etc/proftpd/proftpd.conf "
     fi
 
-    # /etc/ftpusers 또는 /etc/ftpdusers 확인 (일반적인 FTP 차단 파일)
-    for users_file in /etc/ftpusers /etc/ftpdusers; do
+    # /etc/ftpusers, /etc/ftpd/ftpusers 또는 /etc/ftpdusers 확인 (일반적인 FTP 차단 파일)
+    for users_file in /etc/ftpusers /etc/ftpd/ftpusers /etc/ftpdusers; do
         if [ -f "$users_file" ]; then
             ftp_installed=true
             local user_count=$(grep -v "^#" "$users_file" 2>/dev/null | grep -v "^$" | wc -l)
@@ -115,6 +115,17 @@ diagnose() {
             fi
         fi
     done || true
+
+    # 실행 중인 FTP 데몬 확인 (설정 파일이 없어도 inetd로 동작할 수 있음)
+    local ftp_running=false
+    local running_detail=""
+    if grep -qE '^ftp[[:space:]]' /etc/inetd.conf 2>/dev/null; then
+        ftp_running=true
+        running_detail="/etc/inetd.conf에 ftp 서비스 활성"
+    fi
+    if [ "$ftp_running" = true ]; then
+        ftp_installed=true
+    fi
 
     if [ "$ftp_installed" = false ]; then
         diagnosis_result="GOOD"
@@ -133,8 +144,11 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="FTP 접근 제어가 설정되지 않음 (root 등 관리자 계정 접근 가능)"
-        local access_check=$(cat /etc/vsftpd.conf /etc/proftpd/proftpd.conf /etc/ftpusers 2>/dev/null | head -10 || echo "No access control configured")
+        local access_check=$(cat /etc/vsftpd.conf /etc/proftpd/proftpd.conf /etc/ftpusers /etc/ftpd/ftpusers 2>/dev/null | head -10 || echo "No access control configured")
         command_result="${access_check}"
+        if [ -n "$running_detail" ]; then
+            command_result="${command_result}${newline}[FTP daemon: ${running_detail}]"
+        fi
         command_executed="cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} 2>/dev/null"
     fi
 

@@ -54,13 +54,14 @@ try {
         foreach ($av in $thirdParty) {
             $avName = $av.displayName
             # productState 비트 플래그 확인
-            # 0x10 (16) = 실시간 보호 활성화, 0x1000 (4096) = 업데이트 됨
+            # SecurityCenter2 productState에서 실시간 보호(ON) 상태는 비트 12-15 (마스크 0x1000)로 표현됨
+            # (0x10은 잘못된 마스크였음 — 실제 실시간 보호 활성화 nibble과 무관)
             $stateVal = $av.productState
             if ($null -ne $stateVal) {
-                $realTimeBit = ($stateVal -band 0x10) -ne 0
+                $realTimeBit = ($stateVal -band 0x1000) -ne 0
                 if ($realTimeBit) {
                     $thirdPartyRealTime = $true
-                    $thirdPartyDetails = "$avName 실시간 감시 활성화"
+                    $thirdPartyDetails = "$avName 실시간 감시 활성화 (productState=0x{0:X})" -f [int]$stateVal
                 }
             }
         }

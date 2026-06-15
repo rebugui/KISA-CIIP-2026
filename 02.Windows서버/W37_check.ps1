@@ -9,7 +9,7 @@
 # @Category    : Windows Server
 # @Platform    : Windows Server
 # @Severity    : 중
-# @Title       : (중) 예약된 작업에 의심스러운 명령이 등록되어 있는지 점검 개요
+# @Title       : 예약된 작업에 의심스러운 명령 등록 여부 점검
 # @Description : 예약된 작업에 의심스러운 명령 등록 여부 확인으로 백도어 설치 방지
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 # Parameters
 $ITEM_ID = "W-37"
-$ITEM_NAME = "(중) 예약된 작업에 의심스러운 명령이 등록되어 있는지 점검 개요"
+$ITEM_NAME = "예약된 작업에 의심스러운 명령 등록 여부 점검"
 $SEVERITY = "중"
 $CATEGORY = "2.서비스관리"
 
@@ -35,42 +35,29 @@ if (-not (Test-RunallMode)) {
 Write-Host ""
 
 # 1. Run diagnostic
+# NOTE: The criterion is a periodic human-review PROCESS ("주기적으로 점검하고 제거한
+# 경우"). Whether scheduled tasks are *regularly reviewed* cannot be auto-verified, and
+# a pattern scan misses malicious tasks (mshta/rundll32/regsvr32) while flagging benign
+# cmd/powershell tasks. This always emits MANUAL with a task inventory as evidence.
 try {
     $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue
     $out = ""
 
     if ($tasks) {
-        $suspiciousTasks = @()
-        $suspiciousCount = 0
-
+        $taskInventory = @()
         foreach ($task in $tasks) {
-            $action = $task.Actions.Execute
-            if ($action) {
-                # Check for suspicious command patterns
-                if ($action -match 'cmd' -or $action -match 'powershell' -or $action -match 'wscript' -or $action -match 'cscript') {
-                    $suspiciousCount++
-                    $suspiciousTasks += "Task: $($task.TaskName), Action: $action"
-                }
-            }
+            $action = $task.Actions.Execute -join '; '
+            $taskInventory += "Task: $($task.TaskPath)$($task.TaskName) [$($task.State)], Action: $action"
         }
-
-        if ($suspiciousCount -gt 0) {
-            $out = $suspiciousTasks -join "`n"
-            $finalResult = "MANUAL"
-            $summary = "의심스러운 명령어를 포함한 예약 작업이 $suspiciousCount개 발견됨: 수동 확인 필요"
-            $status = "수동진단"
-        } else {
-            $out = "총 $($tasks.Count)개의 예약 작업 확인됨, 의심스러운 작업 없음"
-            $finalResult = "GOOD"
-            $summary = "의심스러운 예약 작업이 발견되지 않음 (주기적 확인 필요)"
-            $status = "양호"
-        }
+        $out = "총 $($tasks.Count)개의 예약 작업:`n" + ($taskInventory -join "`n")
+        $summary = "예약 작업 $($tasks.Count)개 확인됨. 불필요/의심스러운 작업의 주기적 점검 여부는 수동 확인 필요"
     } else {
-        $out = "예약 작업 없음 또는 확인 실패"
-        $finalResult = "GOOD"
-        $summary = "의심스러운 예약 작업이 발견되지 않음 (주기적 확인 필요)"
-        $status = "양호"
+        $out = "예약 작업이 없거나 목록을 확인할 수 없음"
+        $summary = "예약 작업 목록을 확인할 수 없음: 주기적 점검 여부 수동 확인 필요"
     }
+
+    $finalResult = "MANUAL"
+    $status = "수동진단"
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"

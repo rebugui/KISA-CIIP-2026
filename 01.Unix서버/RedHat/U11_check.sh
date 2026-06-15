@@ -49,20 +49,30 @@ diagnose() {
     local evidence=""
 
     for acc in "${target_accounts[@]}"; do
-        local shell_val=$(grep "^${acc}:" /etc/passwd | cut -d: -f7)
-        if [ -n "$shell_val" ]; then
-            evidence+="${acc}(${shell_val}) "
-            if [[ ! "$shell_val" =~ (nologin|false)$ ]]; then
-                vulnerable_found+="${acc} "
-            fi
+        local passwd_entry=""
+        passwd_entry=$(grep "^${acc}:" /etc/passwd 2>/dev/null) || passwd_entry=""
+        # /etc/passwd에 존재하지 않는 계정은 점검 대상에서 제외
+        if [ -z "$passwd_entry" ]; then
+            continue
         fi
+        local shell_val=$(printf '%s\n' "$passwd_entry" | head -n 1 | cut -d: -f7)
+        evidence+="${acc}(${shell_val:-EMPTY}) "
+        # 쉘 필드가 비어 있으면 로그인 기본 쉘(/bin/sh)이 적용되므로 취약,
+        # 허용 쉘은 정확히 일치하는 경우만 양호 (접미사 매칭 금지: /tmp/false 등 차단)
+        case "$shell_val" in
+            /sbin/nologin|/usr/sbin/nologin|/bin/false|/usr/bin/false)
+                ;;
+            *)
+                vulnerable_found+="${acc} "
+                ;;
+        esac
     done
 
     # 2. 판정 로직
     if [ -n "$vulnerable_found" ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
-        inspection_summary="일부 시스템 계정에 유효한 쉘이 부여되어 있습니다."
+        inspection_summary="일부 시스템 계정에 로그인 가능한 쉘(빈 쉘 필드 포함)이 부여되어 있습니다: ${vulnerable_found}"
     fi
 
     # 3. command_result에 실제 계정별 쉘 상태 기록

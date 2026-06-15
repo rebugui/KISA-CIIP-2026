@@ -57,10 +57,13 @@ try {
         $serverTokensMatches = @([regex]::Matches($activeText, '(?im)^\s*ServerTokens\s+(\S+)') | ForEach-Object { $_.Groups[1].Value })
         $serverSignatureMatches = @([regex]::Matches($activeText, '(?im)^\s*ServerSignature\s+(\S+)') | ForEach-Object { $_.Groups[1].Value })
         $serverTokens = if ($serverTokensMatches.Count -gt 0) { $serverTokensMatches[-1] } else { "Full" }
-        $serverSignature = if ($serverSignatureMatches.Count -gt 0) { $serverSignatureMatches[-1] } else { "On" }
+        # ServerSignature 지시어 부재 시 컴파일된 기본값(2.4.48+ 는 Off)을 단정할 수 없으므로
+        # "On" 으로 가정하지 않는다.
+        $signaturePresent = $serverSignatureMatches.Count -gt 0
+        $serverSignature = if ($signaturePresent) { $serverSignatureMatches[-1] } else { "(absent)" }
 
         $tokensSecure = $serverTokens -match '^(?i)Prod$'
-        $signatureSecure = $serverSignature -match '^(?i)Off$'
+        $signatureSecure = $signaturePresent -and ($serverSignature -match '^(?i)Off$')
         $evidence = @(
             "Config files: $($config.Files -join ', ')",
             "ServerTokens: $serverTokens",
@@ -72,15 +75,17 @@ try {
             $status = "양호"
             $summary = "Apache response header exposure is minimized with ServerTokens Prod and ServerSignature Off."
         }
-        elseif ($tokensSecure) {
-            $finalResult = "GOOD"
-            $status = "양호"
-            $summary = "Apache ServerTokens is set to Prod. ServerSignature Off is additionally recommended."
+        elseif ($tokensSecure -and (-not $signaturePresent)) {
+            # ServerTokens Prod 이지만 ServerSignature 가 명시되지 않음.
+            # 컴파일된 기본값을 확인할 수 없어 자동 판정 불가 -> 수동진단.
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "ServerTokens is Prod but ServerSignature is not explicitly set; the compiled default cannot be confirmed automatically. Manual review required (ServerTokens: $serverTokens, ServerSignature: $serverSignature)."
         }
         else {
             $finalResult = "VULNERABLE"
             $status = "취약"
-            $summary = "Apache may expose server header information. Set ServerTokens Prod and ServerSignature Off."
+            $summary = "Apache may expose server header information. Both ServerTokens Prod and ServerSignature Off are required (ServerTokens: $serverTokens, ServerSignature: $serverSignature)."
         }
 
         $commandOutput = $evidence -join "`n"

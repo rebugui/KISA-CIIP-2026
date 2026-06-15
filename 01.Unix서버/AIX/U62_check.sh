@@ -104,7 +104,7 @@ diagnose() {
     # 3) SSH Banner 설정 확인 (SSH를 통한 로그인 시)
     local ssh_banner=""
     if [ -f /etc/ssh/sshd_config ]; then
-        ssh_banner=$(grep -E "^[\s]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^#" | awk '{print $2}')
+        ssh_banner=$(grep -E "^[[:space:]]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^[[:space:]]*#" | awk '{print $2}' || true)
         if [ -n "$ssh_banner" ]; then
             if [ -f "$ssh_banner" ]; then
                 has_warning=true
@@ -117,18 +117,71 @@ diagnose() {
         fi
     fi
 
-    # Capture raw command output
-    raw_output=$(echo "=== /etc/issue ===" && cat /etc/issue 2>/dev/null && echo -e "\n=== /etc/issue.net ===" && cat /etc/issue.net 2>/dev/null && echo -e "\n=== SSH Banner ===" && grep -E "^[\s]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^#" || echo "No banner configured")
+    # 4) 사용 중인 서비스(Telnet/FTP/SMTP/DNS) 경고 배너 확인 (가이드: 사용 서비스 전체 AND 기준)
+    local unverified_services=""
+    local service_banner_details=""
+    local ps_out=$(ps -ef 2>/dev/null || true)
+    local warn_re="warning|unauthorized|access|prohibited|경고|무단|접속금지"
 
-    # 최종 판정
-    if [ "$has_warning" = true ]; then
+    # Telnet: AIX herald (/etc/security/login.cfg)
+    if lssrc -s telnet 2>/dev/null | grep -q "active" || grep -qE '^[[:space:]]*telnet[[:space:]]' /etc/inetd.conf 2>/dev/null; then
+        local herald_line=$(grep -E '^[[:space:]]*herald' /etc/security/login.cfg 2>/dev/null || true)
+        if echo "$herald_line" | grep -qiE "$warn_re"; then
+            service_banner_details="${service_banner_details}Telnet herald: 경고문 설정됨, "
+        else
+            unverified_services="${unverified_services}Telnet(login.cfg herald), "
+        fi
+    fi
+
+    # FTP: vsftpd/proftpd 배너 지시자 또는 native ftpd
+    if lssrc -s ftpd 2>/dev/null | grep -q "active" || grep -qE '^[[:space:]]*ftp[[:space:]]' /etc/inetd.conf 2>/dev/null || grep -qE '[v]sftpd|[p]roftpd' <<< "$ps_out"; then
+        if grep -qE '^[[:space:]]*(ftpd_banner|banner_file|DisplayConnect)' /etc/vsftpd.conf /etc/vsftpd/vsftpd.conf /etc/proftpd/proftpd.conf 2>/dev/null; then
+            service_banner_details="${service_banner_details}FTP: 배너 지시자 설정됨, "
+        else
+            unverified_services="${unverified_services}FTP(배너), "
+        fi
+    fi
+
+    # SMTP: sendmail SmtpGreetingMessage 경고문
+    if lssrc -s sendmail 2>/dev/null | grep -q "active" || grep -qE '[s]endmail|[p]ostfix/master' <<< "$ps_out"; then
+        local smtp_greeting=$(grep -E '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null || true)
+        if echo "$smtp_greeting" | grep -qiE "$warn_re"; then
+            service_banner_details="${service_banner_details}SMTP greeting: 경고문 설정됨, "
+        else
+            unverified_services="${unverified_services}SMTP(SmtpGreetingMessage), "
+        fi
+    fi
+
+    # DNS: named version 문자열 숨김 여부
+    if lssrc -s named 2>/dev/null | grep -q "active" || grep -q '[n]amed' <<< "$ps_out"; then
+        if grep -qE '^[[:space:]]*version' /etc/named.conf /etc/bind/named.conf /etc/bind/named.conf.options 2>/dev/null; then
+            service_banner_details="${service_banner_details}DNS: version 문자열 설정됨, "
+        else
+            unverified_services="${unverified_services}DNS(version), "
+        fi
+    fi
+
+    # Capture raw command output
+    raw_output=$(echo "=== /etc/issue ===" && cat /etc/issue 2>/dev/null && echo -e "\n=== /etc/issue.net ===" && cat /etc/issue.net 2>/dev/null && echo -e "\n=== SSH Banner ===" && grep -E "^[[:space:]]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^[[:space:]]*#" || echo "No banner configured")
+
+    # 최종 판정 (사용 중 서비스 배너가 미확인이면 GOOD으로 단정하지 않음)
+    if [ "$has_warning" = true ] && [ -z "$unverified_services" ]; then
         diagnosis_result="GOOD"
         status="양호"
         warning_details="/etc/issue: ${issue_file}, /etc/issue.net: ${issue_net_file}"
         [ -n "$ssh_banner" ] && warning_details="${warning_details}, SSH Banner: ${ssh_banner}"
+        [ -n "$service_banner_details" ] && warning_details="${warning_details}, ${service_banner_details%, }"
         inspection_summary="로그인 경고 메시지가 설정됨: ${warning_details}"
         command_result="${raw_output}"
-        command_executed="cat /etc/issue /etc/issue.net 2>/dev/null; grep '^Banner' /etc/ssh/sshd_config 2>/dev/null"
+        command_executed="cat /etc/issue /etc/issue.net 2>/dev/null; grep '^Banner' /etc/ssh/sshd_config 2>/dev/null; grep herald /etc/security/login.cfg; grep SmtpGreetingMessage /etc/mail/sendmail.cf"
+    elif [ "$has_warning" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        warning_details="/etc/issue: ${issue_file}, /etc/issue.net: ${issue_net_file}"
+        [ -n "$ssh_banner" ] && warning_details="${warning_details}, SSH Banner: ${ssh_banner}"
+        inspection_summary="로컬/SSH 로그인 경고 메시지는 설정되었으나, 사용 중인 서비스(${unverified_services%, })의 경고 배너 설정을 확인할 수 없어 수동 점검 필요 (${warning_details})"
+        command_result="${raw_output}"
+        command_executed="cat /etc/issue /etc/issue.net 2>/dev/null; grep '^Banner' /etc/ssh/sshd_config 2>/dev/null; grep herald /etc/security/login.cfg; grep SmtpGreetingMessage /etc/mail/sendmail.cf"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

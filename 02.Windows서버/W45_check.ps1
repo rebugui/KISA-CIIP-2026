@@ -35,45 +35,69 @@ if (-not (Test-RunallMode)) {
 
 # 1. Check antivirus software installation
 try {
+    # root/SecurityCenter2 is a client-OS-only namespace and is empty on Server OS.
+    # Presence alone (a stopped/disabled service, or any service whose name merely
+    # contains 'anti'/'virus') is NOT proof of an active AV; require a RUNNING AV.
     $avProducts = Get-WmiObject -Namespace 'root/SecurityCenter2' -Class 'AntiVirusProduct' -ErrorAction SilentlyContinue
     $detectionDetails = @()
+    $avRunning = $false
 
     if ($avProducts) {
         foreach ($av in $avProducts) {
             $detectionDetails += "WMI AntiVirusProduct: $($av.displayName)"
         }
-
-        $finalResult = "GOOD"
-        $summary = "바이러스 백신 프로그램이 설치됨"
-        $status = "양호"
-        $commandOutput = $detectionDetails -join "`n"
+        $avRunning = $true
     } else {
-        # Check for antivirus-related services
-        $avServices = Get-Service | Where-Object {
-            $_.Name -like '*anti*' -or
-            $_.Name -like '*virus*' -or
-            $_.DisplayName -like '*anti*' -or
-            $_.DisplayName -like '*virus*'
-        } -ErrorAction SilentlyContinue
+        # Server OS path: check Microsoft Defender real-time status, then fall back
+        # to a RUNNING antivirus-named service.
+        $mp = $null
+        try {
+            $mp = Get-MpComputerStatus -ErrorAction Stop
+        } catch {
+            $mp = $null
+        }
 
-        if ($avServices) {
-            foreach ($svc in $avServices) {
-                $detectionDetails += "Service: $($svc.Name) - $($svc.DisplayName)"
+        if ($mp -and ($mp.AntivirusEnabled -eq $true)) {
+            $detectionDetails += "Microsoft Defender: AntivirusEnabled=$($mp.AntivirusEnabled), RealTimeProtection=$($mp.RealTimeProtectionEnabled)"
+            $avRunning = $true
+        } else {
+            $avServices = Get-Service -ErrorAction SilentlyContinue | Where-Object {
+                $_.Name -like '*anti*' -or
+                $_.Name -like '*virus*' -or
+                $_.DisplayName -like '*anti*' -or
+                $_.DisplayName -like '*virus*'
             }
 
-            $finalResult = "GOOD"
-            $summary = "바이러스 백신 프로그램이 설치됨 (서비스 감지)"
-            $status = "양호"
-            $commandOutput = $detectionDetails -join "`n"
-        } else {
-            $finalResult = "VULNERABLE"
-            $summary = "바이러스 백신 프로그램이 설치되어 있지 않음"
-            $status = "취약"
-            $commandOutput = "백신 프로그램을 찾을 수 없음 (WMI 및 서비스 검색)"
+            if ($avServices) {
+                foreach ($svc in $avServices) {
+                    $detectionDetails += "Service: $($svc.Name) - $($svc.DisplayName) [$($svc.Status)]"
+                    if ($svc.Status -eq 'Running') {
+                        $avRunning = $true
+                    }
+                }
+            }
         }
     }
 
-    $commandExecuted = "Get-WmiObject -Namespace 'root/SecurityCenter2' -Class 'AntiVirusProduct'; Get-Service | Where-Object { `$_.Name -like '*anti*' -or `$_.Name -like '*virus*' }"
+    if ($avRunning) {
+        $finalResult = "GOOD"
+        $summary = "바이러스 백신 프로그램이 설치되어 실행 중임"
+        $status = "양호"
+        $commandOutput = $detectionDetails -join "`n"
+    } elseif ($detectionDetails.Count -gt 0) {
+        # AV-named service present but not running -> not effectively protected
+        $finalResult = "VULNERABLE"
+        $summary = "백신 관련 항목이 감지되었으나 실행 중인 백신이 없음"
+        $status = "취약"
+        $commandOutput = $detectionDetails -join "`n"
+    } else {
+        $finalResult = "VULNERABLE"
+        $summary = "바이러스 백신 프로그램이 설치되어 있지 않음"
+        $status = "취약"
+        $commandOutput = "백신 프로그램을 찾을 수 없음 (SecurityCenter2/Defender/서비스 검색)"
+    }
+
+    $commandExecuted = "Get-WmiObject -Namespace 'root/SecurityCenter2' -Class 'AntiVirusProduct'; Get-MpComputerStatus; Get-Service (실행 상태 확인)"
 
 } catch {
     $finalResult = "MANUAL"

@@ -10,6 +10,22 @@ RESULT_DIR_BASE="results"
 DATE_SUFFIX=$(date +%Y%m%d)
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
+# POSIX-safe JSON string-field extractor (line-based, same coverage as the
+# previous grep -P pattern: matches "key": "value" on a single line).
+# Usage: json_extract_field "$json_text" "key" [head|tail]
+json_extract_field() {
+    local _json="$1"
+    local _key="$2"
+    local _mode="${3:-head}"
+    local _matches
+    _matches=$(printf '%s\n' "${_json}" | sed -n "s/.*\"${_key}\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p")
+    if [ "${_mode}" = "tail" ]; then
+        printf '%s' "${_matches}" | tail -1
+    else
+        printf '%s' "${_matches}" | head -1
+    fi
+}
+
 # Run-all 모드 확인 (다중 환경 변수 지원 - PowerShell 표준화)
 # 향후 표준: UNIX_RUNALL_MODE 사용 권장
 # 하위 호환성: 기존 환경 변수들도 지원 (WS/PC/DBMS_RUNALL_MODE)
@@ -420,27 +436,24 @@ append_runall_text_result() {
     local txt_file="$2"
 
     # JSON 필드 추출
-    local item_id=$(echo "$json_obj" 2>/dev/null | grep -oP '"item_id":\s*"\K[^"]+' | head -1) || echo ""
-    local item_name=$(echo "$json_obj" 2>/dev/null | grep -oP '"item_name":\s*"\K[^"]+' | head -1) || echo ""
+    local item_id=$(json_extract_field "$json_obj" "item_id")
+    local item_name=$(json_extract_field "$json_obj" "item_name")
 
     # inspection 객체에서 추출
-    local summary=$(echo "$json_obj" 2>/dev/null | grep -oP '"inspection":\s*\{[^}]*"summary":\s*"\K[^"]+' | head -1 || echo "")
-    if [ -z "$summary" ]; then
-        summary=$(echo "$json_obj" 2>/dev/null | grep -oP '"summary":\s*"\K[^"]+' | head -1) || echo ""
-    fi
+    local summary=$(json_extract_field "$json_obj" "summary")
 
-    local command=$(echo "$json_obj" 2>/dev/null | grep -oP '"command":\s*"\K[^"]+' | head -1) || echo ""
-    local command_result=$(echo "$json_obj" 2>/dev/null | grep -oP '"command_result":\s*"\K[^"]+' | head -1 || echo "")
+    local command=$(json_extract_field "$json_obj" "command")
+    local command_result=$(json_extract_field "$json_obj" "command_result")
     # \r\n 이스케이프 문자를 실제 줄바꿈으로 변환
     command_result=$(echo "$command_result" | sed 's/\\r\\n/\n/g; s/\\n/\n/g; s/\\r/\r/g')
-    local final_result=$(echo "$json_obj" 2>/dev/null | grep -oP '"final_result":\s*"\K[^"]+' | head -1) || echo ""
+    local final_result=$(json_extract_field "$json_obj" "final_result")
 
     # guideline 객체에서 추출 (단순화된 패턴)
-    local guideline_purpose=$(echo "$json_obj" 2>/dev/null | grep -oP '"purpose":\s*"\K[^"]+' | tail -1 || echo "")
-    local guideline_threat=$(echo "$json_obj" 2>/dev/null | grep -oP '"security_threat":\s*"\K[^"]+' | tail -1 || echo "")
-    local guideline_criteria_good=$(echo "$json_obj" 2>/dev/null | grep -oP '"judgment_criteria_good":\s*"\K[^"]+' | tail -1 || echo "")
-    local guideline_criteria_bad=$(echo "$json_obj" 2>/dev/null | grep -oP '"judgment_criteria_bad":\s*"\K[^"]+' | tail -1 || echo "")
-    local guideline_remediation=$(echo "$json_obj" 2>/dev/null | grep -oP '"remediation":\s*"\K[^"]+' | tail -1 || echo "")
+    local guideline_purpose=$(json_extract_field "$json_obj" "purpose" tail)
+    local guideline_threat=$(json_extract_field "$json_obj" "security_threat" tail)
+    local guideline_criteria_good=$(json_extract_field "$json_obj" "judgment_criteria_good" tail)
+    local guideline_criteria_bad=$(json_extract_field "$json_obj" "judgment_criteria_bad" tail)
+    local guideline_remediation=$(json_extract_field "$json_obj" "remediation" tail)
 
     # TXT 형식으로 append (PC run_all과 동일한 형식)
     cat >> "${txt_file}" << EOF
@@ -515,8 +528,8 @@ create_runall_aggregated_results() {
 
     for json_obj in "${all_args[@]}"; do
         # JSON 파싱
-        local item_id=$(echo "$json_obj" 2>/dev/null | grep -oP '"item_id":\s*"\K[^"]+' | head -1 || echo "")
-        local final_result=$(echo "$json_obj" 2>/dev/null | grep -oP '"final_result":\s*"\K[^"]+' | head -1 || echo "")
+        local item_id=$(json_extract_field "$json_obj" "item_id")
+        local final_result=$(json_extract_field "$json_obj" "final_result")
 
         results_json_array+=("$json_obj")
 

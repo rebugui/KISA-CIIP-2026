@@ -35,48 +35,37 @@ if (-not (Test-RunallMode)) {
 Write-Host ""
 
 # 1. Run diagnostic
+# NOTE: The criterion is the establishment of a patch PROCEDURE ("패치 절차를 수립하여
+# 주기적으로 패치를 확인 및 설치"). Hotfix recency is not a valid proxy: WSUS/SCCM-managed
+# hosts can show stale Get-HotFix entries while fully patched, and recent hotfixes do not
+# prove a formal procedure exists. This emits MANUAL with a hotfix inventory as evidence.
 try {
     $hotFixes = Get-HotFix -ErrorAction SilentlyContinue | Sort-Object InstalledOn -Descending
     $out = ""
 
     if ($hotFixes) {
         $lastUpdate = $hotFixes[0].InstalledOn
-        $daysSince = 0
-
         if ($lastUpdate -is [DateTime]) {
-            $daysSince = (New-TimeSpan -Start $lastUpdate).Days
             $lastUpdateStr = $lastUpdate.ToString("yyyy-MM-dd")
         } else {
-            # Handle MinValue or invalid dates
-            $daysSince = 9999
             $lastUpdateStr = "Unknown"
         }
 
         $out = "총 $($hotFixes.Count)개의 핫픽스 확인됨`n"
         $out += "최근 패치 날짜: $lastUpdateStr`n"
-        $out += "경과 일수: $daysSince일`n"
-        $out += "최근 핫픽스 5개:`n"
-
-        for ($i = 0; $i -lt [Math]::Min(5, $hotFixes.Count); $i++) {
+        $out += "최근 핫픽스 10개:`n"
+        for ($i = 0; $i -lt [Math]::Min(10, $hotFixes.Count); $i++) {
             $hf = $hotFixes[$i]
             $out += "  - $($hf.HotFixID) 설치일: $($hf.InstalledOn)`n"
         }
-
-        if ($daysSince -le 90) {
-            $finalResult = "GOOD"
-            $summary = "최근 90일 이내에 보안 패치가 적용됨 (최근 패치: $lastUpdateStr, ${daysSince}일 경과)"
-            $status = "양호"
-        } else {
-            $finalResult = "VULNERABLE"
-            $summary = "90일 이상 보안 패치가 적용되지 않음 (최근 패치: $lastUpdateStr, ${daysSince}일 경과)"
-            $status = "취약"
-        }
+        $summary = "핫픽스 $($hotFixes.Count)개 확인됨 (최근: $lastUpdateStr). 패치 절차 수립 및 주기적 적용 여부는 수동 확인 필요"
     } else {
-        $out = "패치 정보를 찾을 수 없음"
-        $finalResult = "MANUAL"
-        $summary = "패치 정보 확인 불가, 수동으로 패치 절차 수립 여부 확인 필요"
-        $status = "수동진단"
+        $out = "핫픽스 정보를 찾을 수 없음 (WSUS/SCCM 관리 환경일 수 있음)"
+        $summary = "핫픽스 정보 확인 불가: 패치 절차 수립 및 주기적 적용 여부 수동 확인 필요"
     }
+
+    $finalResult = "MANUAL"
+    $status = "수동진단"
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"

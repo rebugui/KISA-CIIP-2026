@@ -50,13 +50,16 @@ diagnose() {
         local ls_out=$(ls -l "$file_path")
 
         # 2. 판정 로직: 소유자 root/bin/sys 및 권한 644 이하
-        if [[ ! "$owner" =~ ^(root|bin|sys)$ ]] || [ "$perm" -gt 644 ]; then
+        if [[ ! "$owner" =~ ^(root|bin|sys)$ ]] || ! [[ "$perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perm & ~8#644 & 07777 ))" -ne 0 ]; then
             status="취약"
             diagnosis_result="VULNERABLE"
             inspection_summary="/etc/services 파일의 소유자 또는 권한 설정이 부적절합니다."
         fi
         command_result="설정 현황: [ ${ls_out} ]"
     else
+        status="N/A"
+        diagnosis_result="N/A"
+        inspection_summary="/etc/services 파일이 존재하지 않아 점검 대상이 아닙니다."
         command_result="/etc/services 파일이 존재하지 않습니다."
     fi
 

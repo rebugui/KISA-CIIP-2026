@@ -77,12 +77,45 @@ diagnose() {
 
     command_executed="ls -la /etc/ftpusers /etc/vsftpd/ftpusers /etc/pure-ftpd/ftpusers 2>/dev/null"
 
+    # ProFTPD 설정 확인 (UseFtpUsers / RootLogin)
+    local proftpd_conf=""
+    local proftpd_root_login=""
+    local proftpd_use_ftpusers=""
+    for pconf in /etc/proftpd.conf /etc/proftpd/proftpd.conf; do
+        if [ -f "$pconf" ]; then
+            proftpd_conf="$pconf"
+            proftpd_root_login=$(grep -iE '^[[:space:]]*RootLogin[[:space:]]' "$pconf" 2>/dev/null | tail -1 | awk '{print tolower($2)}') || true
+            proftpd_use_ftpusers=$(grep -iE '^[[:space:]]*UseFtpUsers[[:space:]]' "$pconf" 2>/dev/null | tail -1 | awk '{print tolower($2)}') || true
+            break
+        fi
+    done || true
+
     # 최종 판정
-    if [ -z "$found_file" ]; then
+    if [ -n "$proftpd_conf" ] && [ "$proftpd_root_login" = "on" ]; then
+        # proftpd RootLogin on이면 ftpusers와 무관하게 root 접속 허용 상태
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="proftpd 설정에서 RootLogin on으로 root FTP 접속이 허용되어 있습니다(${proftpd_conf})."
+        command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login}, UseFtpUsers: ${proftpd_use_ftpusers:-on(기본값)}"
+    elif [ -n "$proftpd_conf" ] && [ "$proftpd_use_ftpusers" = "off" ]; then
+        # UseFtpUsers off이면 ftpusers 파일이 적용되지 않음 → 다른 차단 수단(RootLogin off) 필요
+        if [ "$proftpd_root_login" = "off" ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="proftpd UseFtpUsers off 설정이나 RootLogin off로 root FTP 접속이 차단되어 있습니다(${proftpd_conf})."
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="proftpd UseFtpUsers off 설정으로 ftpusers 파일이 적용되지 않으며, RootLogin 차단 설정이 없습니다(${proftpd_conf})."
+        fi
+        command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login:-미설정}, UseFtpUsers: ${proftpd_use_ftpusers}"
+    elif [ -z "$found_file" ]; then
         # ftpusers 파일이 존재하지 않음
-        # FTP 서비스가 설치되어 있는지 확인 (AIX: lssrc)
+        # FTP 서비스가 실행 중인지 확인 (AIX: inetd 서브서버 우선, lssrc 보조)
         local ftp_installed=false
-        if lssrc -s ftpd 2>/dev/null | grep -q "active" || lssrc -s vsftpd 2>/dev/null | grep -q "active"; then
+        if grep -qE '^ftp[[:space:]]' /etc/inetd.conf 2>/dev/null; then
+            ftp_installed=true
+        elif lssrc -s ftpd 2>/dev/null | grep -q "active" || lssrc -s vsftpd 2>/dev/null | grep -q "active"; then
             ftp_installed=true
         fi
 

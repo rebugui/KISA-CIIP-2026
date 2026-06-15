@@ -57,83 +57,114 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # 관리자 권한 분리 확인 (UID 0 또는 wheel group 사용자)
-    # GOOD: 관리자 권한이 적절히 분리됨 (여러 관리자 계정 존재)
-    # VULNERABLE: 단일 관리자 계정만 존재
+    # 세션 타임아웃 설정 확인 (Solaris)
+    # - sh/ksh/bash: /etc/profile의 TMOUT (초 단위, 1~600초 양호)
+    # - csh: /etc/.login, /etc/csh.cshrc, /etc/csh.login의 set autologout (분 단위, 1~10분 양호)
+    # GOOD: 시스템 설정 파일에 TMOUT 1~600초 또는 autologout 1~10분 설정
+    # VULNERABLE: 미설정 또는 범위 벗어남(0, 600초/10분 초과)
+    # MANUAL: 설정 파일을 읽을 수 없어 확인 불가
 
     local is_secure=false
     local config_details=""
+    local tmout_value=""
+    local tmout_source=""
+    local tmout_found=false
+    local autologout_value=""
+    local autologout_source=""
+    local autologout_found=false
+    local unreadable_files=""
+    local cmd_tmout="grep -E '^[[:space:]]*(export[[:space:]]+)?TMOUT=' /etc/profile"
+    local cmd_autologout="grep -E '^[[:space:]]*set[[:space:]]+autologout[[:space:]]*=' /etc/.login /etc/csh.cshrc /etc/csh.login"
 
-    # UID 0인 계정 (root 계정) 목록 추출
-    local uid_zero_users=$(awk -F: '$3 == 0 {print $1}' /etc/passwd)
-    local uid_zero_count=$(echo "$uid_zero_users" | wc -l)
+    # 1) sh/ksh/bash 계열: /etc/profile에서 TMOUT 확인 (시스템 설정 파일만 인정, 환경변수 상속은 미인정)
+    local sh_file=""
+    for sh_file in /etc/profile; do
+        if [ -f "${sh_file}" ]; then
+            if [ ! -r "${sh_file}" ]; then
+                unreadable_files="${unreadable_files}${sh_file} "
+                continue
+            fi
+            local tmout_line=""
+            tmout_line=$(grep -E '^[[:space:]]*(export[[:space:]]+)?TMOUT=' "${sh_file}" 2>/dev/null | tail -n 1 || true)
+            if [ -n "${tmout_line}" ]; then
+                tmout_found=true
+                tmout_value=$(echo "${tmout_line}" | sed -e 's/^.*TMOUT=//' -e 's/[^0-9].*$//')
+                tmout_source="${sh_file}"
+            fi
+        fi
+    done
 
-    config_details="UID 0 계정 (${uid_zero_count}개): ${uid_zero_users}"
+    # 2) csh 계열: /etc/.login, /etc/csh.cshrc, /etc/csh.login에서 autologout 확인 (분 단위)
+    local csh_file=""
+    for csh_file in /etc/.login /etc/csh.cshrc /etc/csh.login; do
+        if [ -f "${csh_file}" ]; then
+            if [ ! -r "${csh_file}" ]; then
+                unreadable_files="${unreadable_files}${csh_file} "
+                continue
+            fi
+            local autologout_line=""
+            autologout_line=$(grep -E '^[[:space:]]*set[[:space:]]+autologout[[:space:]]*=' "${csh_file}" 2>/dev/null | tail -n 1 || true)
+            if [ -n "${autologout_line}" ] && [ "${autologout_found}" = false ]; then
+                autologout_found=true
+                autologout_value=$(echo "${autologout_line}" | sed -e 's/^.*autologout[[:space:]]*=[[:space:]]*//' -e 's/[^0-9].*$//')
+                autologout_source="${csh_file}"
+            fi
+        fi
+    done
 
-    # wheel 그룹 사용자 확인
-    local wheel_users=""
-    if getent group wheel >/dev/null 2>&1; then
-        wheel_users=$(getent group wheel | cut -d: -f4)
-        if [ -n "$wheel_users" ]; then
-            local wheel_count=$(echo "$wheel_users" | tr ',' '\n' | wc -l)
-            config_details="${config_details}\\nwheel 그룹 멤버 (${wheel_count}개): ${wheel_users}"
+    # 3) TMOUT 값 판정 (1~600초 양호, 0 또는 600 초과 취약)
+    local tmout_in_range=false
+    if [ "${tmout_found}" = true ]; then
+        if [ -n "${tmout_value}" ] && [[ "${tmout_value}" =~ ^[0-9]+$ ]] && [ "${tmout_value}" -ge 1 ] && [ "${tmout_value}" -le 600 ]; then
+            tmout_in_range=true
+            config_details="TMOUT=${tmout_value}초 (${tmout_source}) - 1~600초(10분) 이내 [양호]"
         else
-            config_details="${config_details}\\nwheel 그룹 멤버: 없음"
+            config_details="TMOUT=${tmout_value:-비정상값} (${tmout_source}) - 1~600초(10분) 범위 벗어남 [취약] (0은 자동 종료 비활성화)"
         fi
     else
-        config_details="${config_details}\\nwheel 그룹: 존재하지 않음"
+        config_details="/etc/profile: TMOUT 설정 없음"
     fi
 
-    # sudo 그룹 사용자 확인 (Debian에서 관리자 그룹)
-    local sudo_users=""
-    if getent group sudo >/dev/null 2>&1; then
-        sudo_users=$(getent group sudo | cut -d: -f4)
-        if [ -n "$sudo_users" ]; then
-            local sudo_count=$(echo "$sudo_users" | tr ',' '\n' | wc -l)
-            config_details="${config_details}\\nsudo 그룹 멤버 (${sudo_count}개): ${sudo_users}"
+    # 4) autologout 값 판정 (분 단위: 1~10분 = 60~600초 양호)
+    local autologout_in_range=false
+    if [ "${autologout_found}" = true ]; then
+        if [ -n "${autologout_value}" ] && [[ "${autologout_value}" =~ ^[0-9]+$ ]] && [ "${autologout_value}" -ge 1 ] && [ "${autologout_value}" -le 10 ]; then
+            autologout_in_range=true
+            config_details="${config_details}${newline}autologout=${autologout_value}분 (${autologout_source}) - 1~10분(600초) 이내 [양호]"
         else
-            config_details="${config_details}\\nsudo 그룹 멤버: 없음"
+            config_details="${config_details}${newline}autologout=${autologout_value:-비정상값} (${autologout_source}) - 1~10분(600초) 범위 벗어남 [취약]"
         fi
     else
-        config_details="${config_details}\\nsudo 그룹: 존재하지 않음"
+        config_details="${config_details}${newline}/etc/.login, /etc/csh.cshrc, /etc/csh.login: autologout 설정 없음"
     fi
 
-    # 최종 판정
-    # UID 0 계정이 2개 이상이거나, wheel/sudo 그룹에 멤버가 있는 경우 양호
-    local admin_count=0
-
-    # UID 0 계정 수 (root 포함)
-    admin_count=$((admin_count + uid_zero_count))
-
-    # wheel 그룹 멤버 수
-    if [ -n "$wheel_users" ]; then
-        local wheel_members_count=$(echo "$wheel_users" | tr ',' '\n' | wc -l)
-        admin_count=$((admin_count + wheel_members_count))
+    if [ -n "${unreadable_files}" ]; then
+        config_details="${config_details}${newline}읽기 불가 파일: ${unreadable_files}"
     fi
 
-    # sudo 그룹 멤버 수
-    if [ -n "$sudo_users" ]; then
-        local sudo_members_count=$(echo "$sudo_users" | tr ',' '\n' | wc -l)
-        admin_count=$((admin_count + sudo_members_count))
-    fi
-
-    if [ "$admin_count" -ge 2 ]; then
+    # 5) 최종 판정
+    if [ "${tmout_in_range}" = true ] || [ "${autologout_in_range}" = true ]; then
         is_secure=true
     fi
 
-    # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "${is_secure}" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="관리자 권한 적절히 분리됨 (총 ${admin_count}개 관리자 계정/그룹)\\n${config_details}"
+        inspection_summary="세션 타임아웃 적절히 설정됨 (600초/10분 이하)${newline}${config_details}"
         command_result="${config_details}"
-        command_executed="awk -F: '\$3 == 0 {print \$1}' /etc/passwd && getent group wheel sudo"
+        command_executed="${cmd_tmout}; ${cmd_autologout}"
+    elif [ "${tmout_found}" = false ] && [ "${autologout_found}" = false ] && [ -n "${unreadable_files}" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="세션 타임아웃 설정 파일을 읽을 수 없어 수동 확인 필요 (${unreadable_files})${newline}${config_details}"
+        command_result="${config_details}"
+        command_executed="${cmd_tmout}; ${cmd_autologout}"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="관리자 권한 분리 미흡 (단일 관리자 계정만 존재)\\n${config_details}"
+        inspection_summary="세션 타임아웃 설정 미흡 (TMOUT 1~600초 또는 autologout 1~10분 설정 필요)${newline}${config_details}"
         command_result="${config_details}"
-        command_executed="awk -F: '\$3 == 0 {print \$1}' /etc/passwd && getent group wheel sudo"
+        command_executed="${cmd_tmout}; ${cmd_autologout}"
     fi
 
     # echo ""

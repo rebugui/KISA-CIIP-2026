@@ -107,11 +107,30 @@ diagnose() {
     fi
 
     # 5) autofs 설정 파일 확인
-    if [ -f /etc/auto.master ] || [ -f /etc/auto.master.d/*.conf ]; then
+    # 주의: [ -f /etc/auto.master.d/*.conf ] 는 glob 이 2개 이상 매칭되면
+    #       set -euo pipefail 하에서 "binary operator expected" 로 실패하므로
+    #       glob-safe 한 방식(compgen)으로 설정 파일 존재 여부를 확인함.
+    local autofs_conf_present=false
+    if [ -f /etc/auto.master ]; then
+        autofs_conf_present=true
+    elif compgen -G "/etc/auto.master.d/*.conf" >/dev/null 2>&1; then
+        autofs_conf_present=true
+    fi
+    if [ "$autofs_conf_present" = true ]; then
         automount_info="${automount_info}autofs 설정 파일 존재\\n"
         if [ -f /etc/auto.master ]; then
             automount_info="${automount_info}$(head -5 /etc/auto.master 2>/dev/null)\\n"
         fi
+        automount_running=true
+    fi
+
+    # 6) 실행 중인 automount/automountd/autofs 프로세스 확인 (process-based)
+    #    SysV-init 또는 systemd 에 등록되지 않은 상태로 실제 구동 중인 autofs 를
+    #    systemctl 만으로는 탐지하지 못하므로 ps 기반으로 보강함.
+    local automount_proc=""
+    automount_proc=$(ps -e -o args= 2>/dev/null | grep -E '(^|/)(automount|automountd|autofs)( |$)' | grep -v 'grep' || true)
+    if [ -n "$automount_proc" ]; then
+        automount_info="${automount_info}실행 중인 automount 프로세스 발견:${newline}${automount_proc}${newline}"
         automount_running=true
     fi
 

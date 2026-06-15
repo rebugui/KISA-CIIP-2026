@@ -57,8 +57,8 @@ diagnose() {
     local orphan_count=0
     local raw_output=""
     
-    # GID Threshold (AIX standard user often starts lower, using 500 as safe threshold for Unixes)
-    local GID_MIN=500
+    # GID Threshold (AIX mkgroup assigns IDs from 200; use 200 so the default group band is inspected)
+    local GID_MIN=200
 
     # 1. Collect Used GIDs from passwd
     local used_gids

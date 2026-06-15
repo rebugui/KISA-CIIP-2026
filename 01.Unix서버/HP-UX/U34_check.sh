@@ -86,8 +86,14 @@ diagnose() {
         fi
     fi
 
-    # 3) 실행 중인 finger 프로세스 확인
+    # 3) 실행 중인 finger 프로세스 확인 (단독 실행형 fingerd도 활성 벡터로 판정에 반영)
     local finger_processes=$(ps -ef | grep -E "[f]inger[d]?" | grep -v grep || echo "")
+    if [ -n "$finger_processes" ]; then
+        finger_enabled=true
+        if [ -z "$inetd_info" ] || [ "$finger_enabled" = true ]; then
+            inetd_info="${inetd_info:+${inetd_info}${newline}}실행 중인 fingerd 프로세스 탐지"
+        fi
+    fi
 
     # 4) HP-UX 특정: inetd 또는 기타 서비스 관리자 확인
     # HP-UX는 주로 inetd를 사용하므로 inetd.conf 확인이 중요

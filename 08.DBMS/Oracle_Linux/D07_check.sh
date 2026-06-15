@@ -60,112 +60,32 @@ diagnose() {
         init_oracle_vars
     fi
 
-    # Oracle 서비스 확인
-    if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
-        if declare -f save_dual_result >/dev/null 2>&1; then
-            save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        fi
-        if declare -f verify_result_saved >/dev/null 2>&1; then
-            verify_result_saved "${ITEM_ID}"
-        fi
-        return 0
-    fi
-
-    # sqlplus check
-    if ! command -v sqlplus &>/dev/null; then
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="Oracle SQL*Plus 클라이언트가 설치되지 않았습니다. 수동으로 확인이 필요합니다."
-        command_result="sqlplus command not found"
-        command_executed="command -v sqlplus"
-        if declare -f save_dual_result >/dev/null 2>&1; then
-            save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        fi
-        if declare -f verify_result_saved >/dev/null 2>&1; then
-            verify_result_saved "${ITEM_ID}"
-        fi
-        return 0
-    fi
-
-    # FR-022: Check required tools (only if library function exists)
-    if declare -f check_oracle_tools >/dev/null 2>&1; then
-        if ! check_oracle_tools; then
-            if declare -f handle_missing_tools >/dev/null 2>&1; then
-                handle_missing_tools "oracle" "${ITEM_ID}" "${ITEM_NAME}" \
-                    "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-                    "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-            fi
-            return 0
-        fi
-    fi
-
-    # Connection prompt if not already connected (FR-018)
-    if [ -z "${DBMS_HOST:-}" ] || [ -z "${DBMS_USER:-}" ]; then
-        echo "[INFO] Oracle 연결 정보 입력이 필요합니다."
-        if declare -f prompt_dbms_connection >/dev/null 2>&1; then
-            prompt_dbms_connection "oracle"
-        fi
-    fi
-
-    # Test connection
-    if ! echo "SELECT 1 FROM DUAL;" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" &>/dev/null; then
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="Oracle 연결에 실패했습니다. 연결 정보를 확인하고 다시 시도하세요."
-        command_result="Connection failed"
-        command_executed="sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
-        if declare -f save_dual_result >/dev/null 2>&1; then
-            save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        fi
-        if declare -f verify_result_saved >/dev/null 2>&1; then
-            verify_result_saved "${ITEM_ID}"
-        fi
-        return 0
-    fi
-
-    echo "[INFO] Oracle 연결 성공"
+    # D-07 은 OS 프로세스 소유자 점검 항목 (KISA 가이드: ps -ef | grep tnslsnr).
+    # SQL 접속 불필요. 리스너 프로세스가 없으면 자동 점검 불가 -> 수동진단.
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
+    command_executed="ps -ef | grep tnslsnr | grep -v grep"
+    local listener_ps
+    listener_ps=$(ps -ef 2>/dev/null | grep "tnslsnr" | grep -v "grep" || true)
+    command_result="${listener_ps}"
 
-
-    if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
-        if declare -f save_dual_result >/dev/null 2>&1; then
-            save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        fi
-        if declare -f verify_result_saved >/dev/null 2>&1; then
-            verify_result_saved "${ITEM_ID}"
-        fi
-        return 0
-    fi
-
-    # DBA 권한 확인
-    local dba_query="SELECT grantee FROM dba_role_privs WHERE granted_role='DBA' AND grantee NOT IN ('SYS', 'SYSTEM') ORDER BY grantee;"
-    command_executed="sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" \"${dba_query}\""
-    command_result=$(sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" "${dba_query}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
-
-    # 결과 분석
-    if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "no rows selected"; then
-        local dba_count=$(echo "$command_result" | grep -v "no rows selected" | grep -v "^$" | wc -l)
-
-        if [ "$dba_count" -gt 0 ]; then
+    if [ -z "${listener_ps}" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="서비스 미실행으로 자동 점검 불가 (수동진단 필요). 리스너(tnslsnr) 프로세스를 찾을 수 없습니다. 서비스 시작 후 'ps -ef | grep tnslsnr' 로 구동 계정을 확인하세요."
+    else
+        # 프로세스 소유자(첫 번째 필드) 확인. root 로 구동 시 취약, 그 외 별도 계정이면 양호.
+        local owners
+        owners=$(echo "${listener_ps}" | awk '{print $1}' | sort -u | tr '\n' ',' | sed 's/,$//')
+        if echo "${listener_ps}" | awk '{print $1}' | grep -qx "root"; then
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="비-SYS/SYSTEM 계정에 DBA 권한 부여됨 (${dba_count}개): $(echo "$command_result" | grep -v "no rows selected" | head -5 | tr '\n' ', ')"
+            inspection_summary="리스너(tnslsnr) 프로세스가 root 권한으로 구동되고 있습니다 (소유자: ${owners}). 별도의 전용 계정으로 구동하도록 변경하세요."
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="SYS, SYSTEM에만 DBA 권한 부여됨"
+            inspection_summary="리스너(tnslsnr) 프로세스가 root 가 아닌 별도 계정으로 구동되고 있습니다 (소유자: ${owners})."
         fi
-    else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="관리자 권한 적절히 제한됨"
     fi
 
         if declare -f save_dual_result >/dev/null 2>&1; then

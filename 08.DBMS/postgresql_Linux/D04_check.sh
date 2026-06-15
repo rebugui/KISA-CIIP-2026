@@ -78,7 +78,7 @@ diagnose() {
     # superuser 권한 확인
     local superuser_query="SELECT rolname FROM pg_roles WHERE rolsuper=true;"
     command_executed="psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_ADMIN_USER} -d postgres -c \"${superuser_query}\""
-    command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -c "${superuser_query}" 2>/dev/null || echo "")
+    command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -tAc "${superuser_query}" 2>/dev/null | grep -v '^$' || true)
 
     # 결과 분석
     local superuser_count=0
@@ -87,7 +87,14 @@ diagnose() {
         superuser_count=$(echo "$command_result" | grep -v "^$" | grep -v "rolname" | wc -l)
     fi
 
-    if [ "$superuser_count" -le 1 ]; then
+    if [ -z "$command_result" ] || [ "$superuser_count" -eq 0 ]; then
+        # 연결은 성공했으나 pg_roles 조회 결과가 비어 있음(쿼리 오류/권한 문제).
+        # SUPERUSER 계정은 최소 postgres 1개가 반환되어야 정상이므로, 0건은 증거 미확보로 간주.
+        # 양호(0개)로 오판하지 않도록 수동진단 처리.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="SUPERUSER 권한 계정 조회 결과가 비어 있어 자동 판정이 불가합니다(쿼리 오류 가능). 수동으로 관리자 권한 부여 계정을 확인하세요."
+    elif [ "$superuser_count" -le 1 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="SUPERUSER 권한 계정 ${superuser_count}개 (양호 - postgres만 보유)"

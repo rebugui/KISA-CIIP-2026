@@ -125,7 +125,7 @@ diagnose() {
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="기본 인증은 SHA-256이나 일부 계정이 SHA-1(mysql_native_password) 사용 중: ${details}"
-            command_result="${details}${newline}취약 계정:${newline}${weak_users}"
+            command_result="${details}"$'\n'"취약 계정:"$'\n'"${weak_users}"
         else
             diagnosis_result="GOOD"
             status="양호"
@@ -143,7 +143,14 @@ diagnose() {
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="SHA-1(mysql_native_password) 사용 계정 존재: ${details}"
-            command_result="${details}${newline}취약 계정:${newline}${weak_users}"
+            command_result="${details}"$'\n'"취약 계정:"$'\n'"${weak_users}"
+        elif [ -z "$default_plugin" ]; then
+            # 기본 플러그인 조회 결과가 비어 있음(연결/쿼리 실패 또는 연결 헬퍼 미적재).
+            # 암호화 알고리즘 증거를 확보하지 못한 상태이므로 양호로 단정하지 않고 수동진단 처리.
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="기본 인증 플러그인 정보를 확인하지 못해 해시 알고리즘을 자동 판정할 수 없습니다. 수동으로 default_authentication_plugin 및 계정별 plugin 을 확인하세요: ${details}"
+            command_result="${details}"
         else
             diagnosis_result="GOOD"
             status="양호"

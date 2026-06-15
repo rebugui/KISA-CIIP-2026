@@ -45,17 +45,72 @@ diagnose() {
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    if ! pgrep -x "nginx" > /dev/null; then
+    local nginx_running=true
+    if command -v pgrep >/dev/null 2>&1; then
+        if ! pgrep -x "nginx" > /dev/null 2>&1; then
+            nginx_running=false
+        fi
+    else
+        echo "[INFO] pgrep command missing, skipping process check."
+    fi
+    if [ "${nginx_running}" = false ]; then
         diagnosis_result="N/A"; status="N/A"
         inspection_summary="Nginx 웹 서버가 실행 중이 아닙니다."
         command_result="Nginx process not found"
         command_executed="pgrep -x nginx"
     else
-        local def_srv=$(grep -rhE "default_server" /etc/nginx/ 2>/dev/null | grep -v "^\s*#" | head -3 || true)
-        command_result="${def_srv}"
-        command_executed="grep -rhE default_server /etc/nginx/"
-        diagnosis_result="MANUAL"; status="수동진단"
-        inspection_summary="Nginx 웹 서비스 경로 내 파일 접근 권한은 default_server 존재만으로 양호/취약을 확정할 수 없습니다. 웹 루트, 설정 파일, include 파일의 소유자와 권한을 수동 확인하세요."
+        # 주요 설정 파일 및 웹 루트 디렉터리의 권한(타 사용자 쓰기 권한) 점검
+        # 판단기준: 불필요한 접근 권한(world-writable, others-write 비트)이 부여되면 취약
+        local web_root
+        web_root=$(grep -rhE "^\s*root\s+" /etc/nginx/ 2>/dev/null | grep -v "^\s*#" \
+            | sed -E 's/^\s*root\s+//; s/;.*$//' | tr -d ' ' | head -1 || true)
+        [ -z "${web_root}" ] && web_root="/usr/share/nginx/html"
+
+        local targets=(
+            "/etc/nginx/nginx.conf"
+            "/etc/nginx/conf.d"
+            "${web_root}"
+        )
+        # conf.d 내 개별 설정 파일도 대상에 포함
+        local f
+        for f in /etc/nginx/conf.d/*.conf; do
+            [ -e "${f}" ] && targets+=("${f}")
+        done
+
+        command_executed="stat -c '%a %U %n' /etc/nginx/nginx.conf /etc/nginx/conf.d ${web_root}"
+
+        local insecure_list=""
+        local detail=""
+        local t perm operm gperm
+        for t in "${targets[@]}"; do
+            [ -e "${t}" ] || continue
+            perm=$(stat -c '%a' "${t}" 2>/dev/null || true)
+            [ -z "${perm}" ] && continue
+            detail="${detail}"$'\n'"$(stat -c '%a %U:%G %n' "${t}" 2>/dev/null || true)"
+            # 4자리(setuid/setgid/sticky 포함) 모드 대응: 마지막 3자리(소유자/그룹/기타)로 정규화
+            local perm3="${perm: -3}"
+            # others 권한 비트 (8진수 마지막 자리), group 권한 비트 (마지막에서 두 번째 자리)
+            operm="${perm3:2:1}"
+            gperm="${perm3:1:1}"
+            [ -z "${operm}" ] && operm=0
+            [ -z "${gperm}" ] && gperm=0
+            # 판단기준(chmod 750): 일반 사용자(group/other)에게 불필요한 접근 권한이 부여되면 취약.
+            # - others에 어떤 권한이든(r/w/x, 8진수 마지막 자리 != 0) 부여 → 민감 파일(nginx.conf 등) 읽기 노출 포함하여 취약
+            # - group에 쓰기 비트(2) 부여 → 취약
+            if [ "${operm}" -ne 0 ] || [ $(( gperm & 2 )) -ne 0 ]; then
+                insecure_list="${insecure_list} ${t}(${perm})"
+            fi
+        done
+
+        command_result="${detail}"
+
+        if [ -n "${insecure_list}" ]; then
+            diagnosis_result="VULNERABLE"; status="취약"
+            inspection_summary="주요 설정 파일/디렉터리 또는 웹 루트에 일반 사용자(group 쓰기 또는 other 읽기/쓰기/실행)의 불필요한 접근 권한이 부여되어 있습니다:${insecure_list}. 불필요한 접근 권한을 제거하세요(chmod 750 등)."
+        else
+            diagnosis_result="GOOD"; status="양호"
+            inspection_summary="주요 설정 파일/디렉터리 및 웹 루트에 타 사용자(other) 접근 권한 및 group 쓰기 권한 등 불필요한 접근 권한이 부여되어 있지 않습니다."
+        fi
     fi
     # Run-all 모드 확인
     # 결과 저장 (run_all 모드는 라이브러리에서 판단)

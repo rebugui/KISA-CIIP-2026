@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="불필요한 가상 디렉터리 존재 여부 점검 및
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -87,19 +87,26 @@ diagnose() {
         "/usr/share/tomcat*/conf/server.xml"
     )
 
+    # 불필요한 가상 디렉터리 점검
+    # 가이드라인 기준: server.xml의 <Context> 블록 중 path 속성으로 정의된 가상 디렉터리
+    # 존재 여부 점검. examples/docs/sample/test 등 기본 예제 가상 디렉터리는 불필요 → 취약.
+    # 그 외 사용자 정의 Context는 업무 필요 여부를 자동 판단할 수 없으므로 MANUAL.
+    # (criteria_bad: 불필요한 가상 디렉터리가 존재하는 경우)
     local contexts=""
+    local config_found=false
 
     for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                # Context 정의 확인
-                local found_context=$(grep "<Context" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                config_found=true
+                # path 속성을 가진 가상 디렉터리 Context 정의 확인 (주석 제외)
+                local found_context=$(grep -iE "<Context[^>]*path\s*=" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 if [ -n "${found_context}" ]; then
                     contexts="${contexts}"$'\n'"${found_context}"
-                    context_count=$(echo "${found_context}" | wc -l)
+                    context_count=$(echo "${found_context}" | grep -c "<Context" || true)
 
-                    # 예제 Context 확인 (examples, docs, manager, host-manager)
-                    if echo "${found_context}" | grep -iqE "examples|docs|sample|test"; then
+                    # 예제/테스트 가상 디렉터리 확인 (examples, docs, sample, test, manager 등)
+                    if echo "${found_context}" | grep -iqE "examples|docs|sample|test|manager|host-manager"; then
                         example_contexts=$((example_contexts + 1))
                     fi
                 fi
@@ -108,25 +115,25 @@ diagnose() {
         done
     done
 
-    command_executed="grep '<Context' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
-    command_result="${contexts:-No Context definitions found}"
+    command_executed="grep -iE '<Context[^>]*path\\s*=' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
+    command_result="${contexts:-No virtual directory (Context path=) definitions found}"
 
-    if [ ${context_count} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="가상 디렉토리(Context) 정의가 없습니다. 기본 webapps만 사용 중입니다."
+    if [ "${config_found}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat server.xml을 찾을 수 없습니다. <Context> 블록의 path 속성으로 정의된 불필요한 가상 디렉터리 존재 여부를 수동으로 확인하세요."
     elif [ ${example_contexts} -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="${example_contexts}개의 예제/테스트 Context가 발견되었습니다. 불필요한 가상 디렉토리 제거 권장."
-    elif [ ${context_count} -le 3 ]; then
+        inspection_summary="${example_contexts}개의 예제/테스트 가상 디렉터리(Context)가 발견되었습니다. 불필요한 가상 디렉터리 제거 권장."
+    elif [ ${context_count} -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="${context_count}개의 사용자 정의 가상 디렉터리(Context path=)가 발견되었습니다. 각 가상 디렉터리가 업무상 필요한지 수동으로 확인하세요."
+    else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="${context_count}개의 Context 정의가 있습니다. 최소한의 가상 디렉토리만 유지 권장."
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="다수의 가상 디렉토리(${context_count}개)가 정의되어 있습니다. 불필요한 Context 제거 권장."
+        inspection_summary="server.xml에 불필요한 가상 디렉터리(Context path=) 정의가 발견되지 않았습니다. (보안 권고사항 준수)"
     fi
 
     # Run-all 모드 확인

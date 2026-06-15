@@ -11,7 +11,7 @@
 # @Platform    : mysql_Linux
 # @Severity    : 중
 # @Title       : 인가되지 않은 GRANTOPTION 사용 제한
-# @Description : local_infile 비활성화로 LOAD DATA INFILE을 통한 파일 읽기 방지
+# @Description : 일반 사용자(관리자 제외)에게 GRANT OPTION이 부여되지 않았는지 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -90,24 +90,36 @@ diagnose() {
         fi
     fi
 
-    # local_infile 설정 확인
-    local local_infile_query="SHOW VARIABLES LIKE 'local_infile';"
-    command_executed="mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e \"${local_infile_query}\""
-    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${local_infile_query}" 2>/dev/null || echo "")
+    # D-21: 일반 사용자(관리자 제외)에게 GRANT OPTION(Grant_priv)이 부여되어 있으면 취약.
+    # 관리자 계정(root, mysql.sys, mysql.session)은 제외하고, 그 외 계정의 GRANT 권한 보유 여부를 확인.
+    local grant_option_query="SELECT user, host FROM mysql.user WHERE Grant_priv='Y' AND user NOT IN ('root','mysql.sys','mysql.session') ORDER BY user, host;"
+    command_executed="mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e \"${grant_option_query}\""
+    local query_ok=1
+    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${grant_option_query}" 2>/dev/null) || query_ok=0
 
     # 결과 분석
-    if echo "$command_result" | grep -q "ON"; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="local_infile이 ON으로 설정됨 (취약 - 서버 파일 접근 가능)"
-    elif echo "$command_result" | grep -q "OFF"; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="local_infile이 OFF로 설정됨 (양호)"
-    else
+    if [ "$query_ok" -eq 0 ]; then
+        # 쿼리 자체가 실패함(권한 부족 등) → 자동 판단 불가
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="local_infile 설정 확인 불가 - 수동 진단 필요"
+        inspection_summary="쿼리 결과 확인 불가 - 권한 부족 가능. 일반 사용자(관리자 제외)의 GRANT OPTION 보유 여부를 수동으로 확인 필요"
+    elif [ -z "$command_result" ]; then
+        # 헤더조차 없는 공백 출력 → 쿼리 결과 확인 불가
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="쿼리 결과 확인 불가 - 권한 부족 가능. 일반 사용자(관리자 제외)의 GRANT OPTION 보유 여부를 수동으로 확인 필요"
+    else
+        local grantee_count=$(echo "$command_result" | tail -n +2 | grep -v "^$" | wc -l)
+        if [ "$grantee_count" -gt 0 ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="관리자 외 ${grantee_count}개 계정에 GRANT OPTION 부여됨: $(echo "$command_result" | tail -n +2 | grep -v "^$" | head -5 | tr '\n' ', ')"
+        else
+            # 쿼리 성공 + 0행 → 관리자 외 GRANT OPTION 보유 계정 없음 (양호)
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="관리자 외 GRANT OPTION을 보유한 일반 사용자 계정 없음 (양호)"
+        fi
     fi
 
     # Save results (only if library function exists)

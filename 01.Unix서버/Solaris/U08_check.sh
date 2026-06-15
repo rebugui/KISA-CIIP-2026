@@ -89,20 +89,30 @@ diagnose() {
         inspection_summary="root 그룹 설정을 확인할 수 없음 (/etc/group)"
     fi
 
-    command_result="${root_group_row}"
-    command_executed="grep '^root:' /etc/group"
-
-    # 최종 판정
-    if [ "$diagnosis_result" != "MANUAL" ]; then
-        if [ "$is_vulnerable" = true ]; then
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="${vuln_details}"
+    # 2. /etc/passwd 에서 기본 GID(4번째 필드)가 0인 root 외 계정 점검
+    local gid0_users=""
+    gid0_users=$(awk -F: '$4 == 0 && $1 != "root" {print $1}' /etc/passwd 2>/dev/null | xargs || true)
+    if [ -n "$gid0_users" ]; then
+        is_vulnerable=true
+        if [ -n "$vuln_details" ]; then
+            vuln_details="${vuln_details} / 기본 그룹(GID 0)이 root인 계정 존재: ${gid0_users// /, }"
         else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="관리자 그룹(root)에 불필요한 계정이 존재하지 않음"
+            vuln_details="기본 그룹(GID 0)이 root인 계정 존재: ${gid0_users// /, }"
         fi
+    fi
+
+    command_result="${root_group_row}${newline}GID 0 계정(/etc/passwd): ${gid0_users:-없음}"
+    command_executed="grep '^root:' /etc/group; awk -F: '\$4 == 0 && \$1 != \"root\" {print \$1}' /etc/passwd"
+
+    # 최종 판정 (취약 판정이 수동진단보다 우선)
+    if [ "$is_vulnerable" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="${vuln_details}"
+    elif [ "$diagnosis_result" != "MANUAL" ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="관리자 그룹(root)에 불필요한 계정이 존재하지 않음"
     fi
 
     # 결과 저장

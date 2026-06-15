@@ -33,29 +33,73 @@ if (-not (Test-RunallMode)) {
     Write-Host "카테고리: $CATEGORY"
 }
 
-# 1. Check file system type (NTFS vs FAT)
+# 1. Check file system type (NTFS vs FAT) across ALL fixed local volumes.
+#    Checking only the system drive masks FAT/FAT32 data volumes (D:, E:, ...).
 try {
-    $systemDrive = $env:SystemDrive
-    $volInfo = fsutil fsinfo volumeinfo $systemDrive 2>&1
+    $fatVolumes = @()
+    $volDetails = @()
+    $checkedAny = $false
+    $commandExecuted = "Get-Volume (fixed volumes) / Win32_Volume fallback"
 
-    if ($volInfo -match 'File System Name\s*:\s*NTFS') {
-        $finalResult = "GOOD"
-        $summary = "NTFS 파일 시스템을 사용함"
-        $status = "양호"
-    } else {
-        $finalResult = "VULNERABLE"
-        $summary = "FAT 파일 시스템을 사용함 (취약)"
-        $status = "취약"
+    $volumes = $null
+    try {
+        # DriveType 3 = Fixed local disk
+        $volumes = Get-Volume -ErrorAction Stop | Where-Object { $_.DriveType -eq 'Fixed' }
+    } catch {
+        $volumes = $null
     }
 
-    $commandExecuted = "fsutil fsinfo volumeinfo $systemDrive"
-    $commandOutput = $volInfo
+    if ($volumes) {
+        foreach ($vol in $volumes) {
+            $fs = $vol.FileSystem
+            $label = if ($vol.DriveLetter) { "$($vol.DriveLetter):" } else { $vol.Path }
+            # Skip volumes with no recognizable filesystem (e.g. unformatted/recovery)
+            if ([string]::IsNullOrWhiteSpace($fs)) { continue }
+            $checkedAny = $true
+            $volDetails += "$label : $fs"
+            if ($fs -match '^FAT') {
+                $fatVolumes += "$label ($fs)"
+            }
+        }
+    } else {
+        # Fallback: Win32_Volume (DriveType 3 = Local Disk)
+        $wmiVolumes = Get-WmiObject -Class Win32_Volume -Filter 'DriveType=3' -ErrorAction SilentlyContinue
+        if ($wmiVolumes) {
+            foreach ($vol in $wmiVolumes) {
+                $fs = $vol.FileSystem
+                $label = if ($vol.DriveLetter) { $vol.DriveLetter } else { $vol.Name }
+                if ([string]::IsNullOrWhiteSpace($fs)) { continue }
+                $checkedAny = $true
+                $volDetails += "$label : $fs"
+                if ($fs -match '^FAT') {
+                    $fatVolumes += "$label ($fs)"
+                }
+            }
+        }
+    }
+
+    if (-not $checkedAny) {
+        $finalResult = "MANUAL"
+        $summary = "고정 볼륨의 파일 시스템 정보를 확인할 수 없음: 수동 확인 필요"
+        $status = "수동진단"
+        $commandOutput = "고정 볼륨 정보를 가져올 수 없음"
+    } elseif ($fatVolumes.Count -gt 0) {
+        $finalResult = "VULNERABLE"
+        $summary = "FAT 계열 파일 시스템을 사용하는 볼륨이 존재함: $($fatVolumes -join ', ')"
+        $status = "취약"
+        $commandOutput = $volDetails -join "`n"
+    } else {
+        $finalResult = "GOOD"
+        $summary = "모든 고정 볼륨이 NTFS 파일 시스템을 사용함"
+        $status = "양호"
+        $commandOutput = $volDetails -join "`n"
+    }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "fsutil fsinfo volumeinfo $env:SystemDrive"
+    $commandExecuted = "Get-Volume (fixed volumes) / Win32_Volume fallback"
     $commandOutput = "진단 실패: $_"
 }
 

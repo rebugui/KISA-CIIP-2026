@@ -70,7 +70,7 @@ diagnose() {
         status="수동진단"
         inspection_summary="/var/log 디렉터리가 존재하지 않습니다"
         local log_check=$(ls -ld /var/log 2>/dev/null || echo "Directory not found")
-        command_result="[Command: ls -ld /var/log]\${newline}${log_check}"
+        command_result="[Command: ls -ld /var/log]${newline}${log_check}"
         command_executed="ls -ld /var/log"
 
         echo ""
@@ -102,8 +102,17 @@ diagnose() {
         return 0
     fi
 
-    # Capture raw output for /var/log directory and files (Solaris uses perl for stat)
-    raw_output=$(echo "=== /var/log Directory Info ===" && ls -ld /var/log 2>/dev/null && echo -e "\n=== Critical Log Files ===" && ls -la /var/log/syslog 2>/dev/null && echo -e "\n=== World-Writable Files ===" && find /var/log -type f -perm -o+w 2>/dev/null | head -5 || echo "None found")
+    # Capture raw output for /var/log and /var/adm (Solaris uses perl for stat)
+    raw_output=$(
+        echo "=== /var/log Directory Info ==="
+        ls -ld /var/log /var/adm 2>/dev/null
+        echo ""
+        echo "=== Critical Log Files ==="
+        ls -la /var/log/syslog /var/log/authlog /var/adm/messages /var/adm/sulog /var/adm/loginlog /var/adm/authlog 2>/dev/null
+        echo ""
+        echo "=== Group/World-Writable Log Files ==="
+        find /var/log /var/adm -type f \( -perm -g+w -o -perm -o+w \) 2>/dev/null | head -5 || echo "None found"
+    )
 
     # 권한 및 소유자 확인
     local perms=$(perl -e 'printf "%04o\n", (stat)[2] & 07777' "$log_dir" 2>/dev/null || echo "000")
@@ -114,43 +123,58 @@ diagnose() {
 
     # 보안 판정 (권한 700 또는 750 (디렉토리), 소유자 root)
     if [ "$owner" = "root" ]; then
-        if [[ "$perms" =~ ..0$ ]] || [[ "$perms" =~ ..5$ ]]; then  # Others have no write/execute (mostly) or just read/execute? 
-        # Usually 755 is default for /var/log in some old systems but 750/700 is better.
+        # 디렉터리 권한에서 그룹/기타 자릿수를 추출 (4자리 sticky 모드도 정규화)
+        # 마지막 3자리만 사용 (owner/group/other), 그룹·기타에 쓰기 비트(2,3,6,7) 없을 것
+        # → group-write 가능 디렉토리(760/770 등)를 GOOD으로 오판하던 미탐(false-good) 차단
+        local perms_norm="${perms: -3}"        # 마지막 3자리 (owner/group/other)
+        local dir_group_digit="${perms_norm:1:1}"
+        local dir_other_digit="${perms_norm:2:1}"
+        # 권한 형식이 비정상(숫자 아님)이면 보수적으로 취약 처리
+        if [[ "$perms" =~ ^[0-7]{3,4}$ ]] \
+           && [[ ! "$dir_group_digit" =~ [2367] ]] \
+           && [[ ! "$dir_other_digit" =~ [2367] ]]; then  # 그룹/기타 쓰기 권한 없음 (700/750 허용)
         # Guideline says 644 for files. For Dir, it implies access control.
-           
-           # Check for world writable files
-           local insecure_files=$(find "$log_dir" -type f -perm -o+w 2>/dev/null | head -5)
-           
+
+           # Check for group/world writable files (664 등 그룹 쓰기 가능 파일 포함, /var/adm 포함)
+           local insecure_files=$(find "$log_dir" /var/adm -type f \( -perm -g+w -o -perm -o+w \) 2>/dev/null | head -5 || true)
+
            if [ -n "$insecure_files" ]; then
                 is_secure=false
-                details="${details}, World-writable files found: ${insecure_files}..."
+                details="${details}, Group/World-writable files found: ${insecure_files}..."
            else
-                # Check specific critical logs
-                local critical_logs=("syslog" "auth.log" "kern.log" "daemon.log" "mail.log")
+                # Check specific critical logs (Solaris-native /var/adm 로그 포함)
+                local critical_logs=("/var/log/syslog" "/var/log/authlog" "/var/adm/messages" "/var/adm/sulog" "/var/adm/loginlog" "/var/adm/authlog")
                 local crit_issue=false
-                
+
                 for log in "${critical_logs[@]}"; do
-                    if [ -f "$log_dir/$log" ]; then
-                        local l_perm=$(perl -e 'printf "%04o\n", (stat)[2] & 07777' "$log_dir/$log")
-                        local l_owner=$(perl -e 'print getpwuid((stat)[4])' "$log_dir/$log")
-                        
+                    if [ -f "$log" ]; then
+                        local l_perm=$(perl -e 'printf "%04o\n", (stat)[2] & 07777' "$log" 2>/dev/null || echo "")
+                        local l_owner=$(perl -e 'print getpwuid((stat)[4])' "$log" 2>/dev/null || echo "")
+
                         # Expected: 600 or 640. 644 is arguably OK if info leakage is not critical, but guideline says <= 644.
                         # If > 644 (e.g. 666), bad.
-                        
-                        if [ "$l_owner" != "root" ] && [ "$l_owner" != "syslog" ]; then
-                            # Allow syslog user owner
+
+                        if [ "$l_owner" != "root" ] && [ "$l_owner" != "syslog" ] && [ "$l_owner" != "adm" ] && [ "$l_owner" != "sys" ]; then
+                            # Allow syslog/adm/sys system owners
                             crit_issue=true
                             details="${details}, ${log} owner invalid ($l_owner)"
                         fi
-                        
+
                         # Check if group/others writable
-                        if [[ "$l_perm" =~ .2. ]] || [[ "$l_perm" =~ ..2 ]] || [[ "$l_perm" =~ .6. ]] || [[ "$l_perm" =~ ..6 ]]; then
+                        if [[ "$l_perm" =~ [2367].$ ]] || [[ "$l_perm" =~ [2367]$ ]]; then
                              crit_issue=true
                              details="${details}, ${log} writable by group/others ($l_perm)"
                         fi
                     fi
                 done || true
-                
+
+                # critical 목록 외 파일 포함 비표준 소유자 로그 파일 검사
+                local bad_owner_files=$(find "$log_dir" /var/adm -type f ! -user root ! -user adm ! -user sys ! -user bin ! -user syslog 2>/dev/null | head -5 || true)
+                if [ -n "$bad_owner_files" ]; then
+                    crit_issue=true
+                    details="${details}, 비표준 소유자 로그 파일: ${bad_owner_files//$'\n'/ }"
+                fi
+
                 if [ "$crit_issue" = true ]; then
                     is_secure=false
                 else
@@ -166,7 +190,7 @@ diagnose() {
         details="${details} (디렉토리 소유자 취약)"
     fi
 
-    command_executed="perl -e 'printf \"%04o %s %s\${newline}\", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' /var/log && find /var/log -type f -perm -o+w"
+    command_executed="perl -e 'printf \"%04o %s %s\", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' /var/log; find /var/log /var/adm -type f ( -perm -g+w -o -perm -o+w )"
 
     # 최종 판정
     if [ "$is_secure" = true ]; then

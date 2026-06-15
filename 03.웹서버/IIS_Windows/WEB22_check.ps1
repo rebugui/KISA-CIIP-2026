@@ -27,44 +27,75 @@ $ITEM_NAME = "에러 페이지 관리"
 Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
-    # IIS Error Page 확인
+    # IIS 대상: 사용자 지정 오류 페이지 설정 및 errorMode 점검
+    # - httpErrors 가 없거나 비어있으면(사용자 지정 에러 페이지 미설정) -> 취약
+    # - errorMode 가 Detailed (원격 클라이언트에 상세 오류 노출) -> 취약
+    # - 기본 IIS 오류 페이지(custerr) 사용 -> 취약
     $sites = Get-Website
-    $defaultErrorPages = @()
-    $defaultPageFound = $false
+    $vulnSites = @()
+    $details = @()
 
     foreach ($site in $sites) {
         $siteName = $site.Name
+        $siteVuln = @()
 
-        # Error Pages 설정 확인
-        $errorPages = Get-WebConfiguration -Filter "/system.webServer/httpErrors" -Location $siteName -ErrorAction SilentlyContinue
-        if ($errorPages) {
-            $errorMode = $errorPages.errorMode
-            foreach ($error in $errorPages.Collection) {
-                $statusCode = $error.statusCode
-                $prefix = $error.prefix
-                $path = $error.path
+        # 사이트가 서버 수준(applicationHost.config) 설정을 상속하는 경우 -Location 은 null 을
+        # 반환하므로, -PSPath 로 상속이 반영된 유효(effective) 구성을 조회한다.
+        $errorPages = Get-WebConfiguration -Filter "/system.webServer/httpErrors" -PSPath "IIS:\Sites\$siteName" -ErrorAction SilentlyContinue
 
-                # 기본 에러 페이지 사용 확인
-                if ($path -like "%SystemDrive%\inetpub\custerr\*" -or $path -eq "" -or $path -eq $null) {
-                    $defaultPageFound = $true
-                    $defaultErrorPages += "Site: $siteName, Code: $statusCode, Path: Default IIS error page"
+        if (-not $errorPages) {
+            # 상속을 포함해도 httpErrors 구성이 전혀 없음 -> 사용자 지정 에러 페이지 미지정
+            $siteVuln += "httpErrors 미구성(사용자 지정 에러 페이지 없음)"
+        } else {
+            $errorMode = "$($errorPages.errorMode)"
+
+            # errorMode=Detailed: 원격 클라이언트에 상세 오류 정보 노출
+            if ($errorMode -ieq "Detailed") {
+                $siteVuln += "errorMode=Detailed (원격 정보 노출)"
+            }
+
+            $entryCount = 0
+            $defaultPageEntries = @()
+            if ($errorPages.Collection) {
+                foreach ($error in $errorPages.Collection) {
+                    $entryCount++
+                    $statusCode = $error.statusCode
+                    $path = "$($error.path)"
+                    # 기본 IIS 오류 페이지(custerr) 또는 경로 미지정
+                    if ($path -like "*custerr*" -or $path -eq "") {
+                        $defaultPageEntries += "Code ${statusCode}: 기본 IIS 오류 페이지"
+                    }
                 }
             }
+
+            # 사용자 지정 에러 페이지 항목이 전혀 없음
+            if ($entryCount -eq 0) {
+                $siteVuln += "사용자 지정 에러 페이지 항목 없음"
+            }
+            if ($defaultPageEntries.Count -gt 0) {
+                $siteVuln += ($defaultPageEntries -join ", ")
+            }
+        }
+
+        $details += "Site: $siteName, errorMode: $($errorPages.errorMode), 문제: $($siteVuln -join '|')"
+
+        if ($siteVuln.Count -gt 0) {
+            $vulnSites += "Site: $siteName -> " + ($siteVuln -join "; ")
         }
     }
 
     $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/httpErrors'"
+    $commandOutput = $details -join "`n"
 
-    if ($defaultPageFound) {
+    if ($vulnSites.Count -gt 0) {
         $finalResult = "VULNERABLE"
-        $summary = "기본 에러 페이지가 사용되고 있습니다: " + ($defaultErrorPages[0] + " 외 " + ($defaultErrorPages.Count - 1) + "개")
+        $summary = "사용자 지정 에러 페이지가 지정되지 않았거나 상세 오류가 노출되는 사이트가 있습니다: " + ($vulnSites -join " / ")
         $status = "취약"
-        $commandOutput = $defaultErrorPages -join "`n"
+        $commandOutput = $commandOutput + "`n`n취약 항목:`n" + ($vulnSites -join "`n")
     } else {
         $finalResult = "GOOD"
-        $summary = "기본 에러 페이지가 사용되지 않거나 커스텀 에러 페이지가 구성되어 있습니다. (보안 권고사항 준수)"
+        $summary = "모든 웹사이트에 사용자 지정 에러 페이지가 지정되어 있으며 상세 오류가 노출되지 않습니다. (보안 권고사항 준수)"
         $status = "양호"
-        $commandOutput = "Error Pages: Custom pages configured or default pages removed"
     }
 
 } catch {

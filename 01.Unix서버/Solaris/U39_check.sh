@@ -11,7 +11,7 @@
 # @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 불필요한 NFS 서비스 비활성화
-# @Description : SSH 보안 설정 확인 - Protocol 2, PermitRootLogin no, X11Forwarding no, MaxAuthTries <= 3
+# @Description : NFS 서버 SMF 서비스(network/nfs/server) 및 공유 설정 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -54,84 +54,80 @@ diagnose() {
     local inspection_summary=""
     local command_result=""
     local command_executed=""
+    local newline=$'\n'
 
     # 진단 로직 구현
-    # /etc/ssh/sshd_config 보안 설정 확인
+    # Solaris NFS 서버 SMF 서비스(network/nfs/server) 및 공유 설정 점검
+    # 가이드라인: 불필요한 NFS 서비스 관련 데몬이 비활성화된 경우 양호
 
-    local is_secure=true
-    local config_details=""
-    local issues=()
+    local nfs_active=false
+    local probe_available=false
+    local active_evidence=()
+    local raw_output=""
 
-    local sshd_config="/etc/ssh/sshd_config"
-
-    if [ ! -f "$sshd_config" ]; then
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="SSH 설정 파일 없음 (서비스 미설치)"
-        local sshd_check=$(ls -la "$sshd_config" 2>/dev/null || echo "File not found: $sshd_config")
-        command_result="[Command: ls -la $sshd_config]${newline}${sshd_check}"
-        command_executed="ls -la $sshd_config"
+    # 1) SMF 서비스 상태 확인 (svcs)
+    if command -v svcs >/dev/null 2>&1; then
+        probe_available=true
+        local svc_state=$(svcs -H -o state svc:/network/nfs/server 2>/dev/null || echo "")
+        raw_output="${raw_output}[Command: svcs -H -o state svc:/network/nfs/server]${newline}${svc_state:-서비스 미등록(absent)}${newline}"
+        if [ "$svc_state" = "online" ]; then
+            nfs_active=true
+            active_evidence+=("SMF 서비스 network/nfs/server 상태 online")
+        fi
     else
-        # 1) Protocol 설정 확인 (Protocol 2 또는 Protocol 2,1)
-        local protocol=$(grep -E "^Protocol" "$sshd_config" | awk '{print $2}')
-        if [ -z "$protocol" ]; then
-            # 기본값은 2 (OpenSSH 5.4+는 Protocol 2만 지원)
-            protocol="2"
-        fi
-        if [ "$protocol" != "2" ]; then
-            is_secure=false
-            issues+=("Protocol=${protocol} (2여야 함)")
-        fi
-
-        # 2) PermitRootLogin 확인
-        local root_login=$(grep -E "^PermitRootLogin" "$sshd_config" | awk '{print $2}')
-        if [ -z "$root_login" ]; then
-            root_login=$(ssh -G root 2>/dev/null | grep permitrootlogin | awk '{print $2}' || echo "yes")
-        fi
-        if [ "$root_login" != "no" ]; then
-            is_secure=false
-            issues+=("PermitRootLogin=${root_login} (no여야 함)")
-        fi
-
-        # 3) X11Forwarding 확인
-        local x11_forwarding=$(grep -E "^X11Forwarding" "$sshd_config" | awk '{print $2}')
-        if [ -z "$x11_forwarding" ]; then
-            x11_forwarding="yes"  # 기본값
-        fi
-        if [ "$x11_forwarding" != "no" ]; then
-            is_secure=false
-            issues+=("X11Forwarding=${x11_forwarding} (no여야 함)")
-        fi
-
-        # 4) MaxAuthTries 확인 (<= 3)
-        local max_auth_tries=$(grep -E "^MaxAuthTries" "$sshd_config" | awk '{print $2}')
-        if [ -n "$max_auth_tries" ]; then
-            if [ "$max_auth_tries" -gt 3 ]; then
-                is_secure=false
-                issues+=("MaxAuthTries=${max_auth_tries} (<= 3이어야 함)")
+        raw_output="${raw_output}[Command: svcs] 명령을 사용할 수 없음${newline}"
+        # 2) svcs 미지원 시 NFS 서버 데몬 프로세스 확인 (fallback)
+        if command -v ps >/dev/null 2>&1; then
+            probe_available=true
+            local ps_output=$(ps -ef 2>/dev/null | grep -E 'nfsd|mountd' | grep -vE 'automountd|grep' || echo "")
+            raw_output="${raw_output}[Command: ps -ef | grep -E 'nfsd|mountd']${newline}${ps_output:-실행 중인 NFS 서버 데몬 없음}${newline}"
+            if [ -n "$ps_output" ]; then
+                nfs_active=true
+                active_evidence+=("NFS 서버 데몬(nfsd/mountd) 실행 중")
             fi
         else
-            # 기본값은 6
-            is_secure=false
-            issues+=("MaxAuthTries 미설정 (기본값 6, <= 3이어야 함)")
+            raw_output="${raw_output}[Command: ps] 명령을 사용할 수 없음${newline}"
         fi
+    fi
 
-        config_details="Protocol=${protocol}, PermitRootLogin=${root_login}, X11Forwarding=${x11_forwarding}"
-        [ -n "$max_auth_tries" ] && config_details="${config_details}, MaxAuthTries=${max_auth_tries}"
-
-        if [ "$is_secure" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="SSH 보안 설정 적절함 (${config_details})"
-            command_result="${config_details}"
-            command_executed="grep -E '^Protocol|^PermitRootLogin|^X11Forwarding|^MaxAuthTries' $sshd_config"
-        else
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="SSH 보안 설정 미흡: ${issues[*]}"
-            command_result="${config_details}"
-            command_executed="grep -E '^Protocol|^PermitRootLogin|^X11Forwarding|^MaxAuthTries' $sshd_config"
+    # 3) 공유 자원 확인 (share 명령) - 증적
+    if command -v share >/dev/null 2>&1; then
+        local share_output=$(share 2>/dev/null || echo "")
+        raw_output="${raw_output}[Command: share]${newline}${share_output:-공유 중인 자원 없음}${newline}"
+        if [ -n "$share_output" ] && [ "$nfs_active" = true ]; then
+            active_evidence+=("share 명령 결과 공유 중인 자원 존재")
         fi
+    else
+        raw_output="${raw_output}[Command: share] 명령을 사용할 수 없음${newline}"
+    fi
+
+    # 4) /etc/dfs/dfstab 공유 설정 확인 - 증적
+    if [ -f /etc/dfs/dfstab ]; then
+        local dfstab_entries=$(grep -v '^#' /etc/dfs/dfstab 2>/dev/null | grep -v '^[[:space:]]*$' || echo "")
+        raw_output="${raw_output}[Command: cat /etc/dfs/dfstab]${newline}${dfstab_entries:-공유(share) 설정 없음}${newline}"
+        if [ -n "$dfstab_entries" ] && [ "$nfs_active" = true ]; then
+            active_evidence+=("/etc/dfs/dfstab에 공유(share) 설정 존재")
+        fi
+    else
+        raw_output="${raw_output}[File: /etc/dfs/dfstab] 파일 없음${newline}"
+    fi
+
+    command_executed="svcs -H -o state svc:/network/nfs/server; ps -ef | grep -E 'nfsd|mountd'; share; cat /etc/dfs/dfstab"
+    command_result="${raw_output}"
+
+    # 최종 판정
+    if [ "$nfs_active" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="NFS 서비스가 활성화되어 있습니다: ${active_evidence[*]}"
+    elif [ "$probe_available" = true ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="NFS 서버 서비스(network/nfs/server)가 비활성화 또는 미등록 상태입니다."
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="svcs 및 ps 명령을 사용할 수 없어 NFS 서비스 상태를 수동으로 점검해야 합니다."
     fi
 
     # echo ""

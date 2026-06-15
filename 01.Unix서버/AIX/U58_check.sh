@@ -67,7 +67,11 @@ diagnose() {
 
     for svc in "${snmp_service_list[@]}"; do
         # 서비스 상태 확인
-        local svc_status=$(lssrc -s "$svc" 2>/dev/null | grep "${svc}" | awk '{print $2}' || echo "inoperative")
+        local svc_lssrc=$(lssrc -s "$svc" 2>/dev/null || echo "")
+        local svc_status="inoperative"
+        if echo "$svc_lssrc" | grep -q "active"; then
+            svc_status="active"
+        fi
         if [ "$svc_status" = "active" ]; then
             snmp_running=true
             service_details="${service_details}${svc}: active, "
@@ -76,12 +80,12 @@ diagnose() {
 
     command_executed="lssrc -a | grep -E 'snmp|mib'"
 
-    # 프로세스 확인 (백업 방법)
-    if ! $snmp_running && command -v pgrep >/dev/null 2>&1; then
-        if pgrep -x "snmpd" >/dev/null 2>&1; then
+    # 프로세스 확인 (백업 방법, AIX 에이전트 포함)
+    if ! $snmp_running; then
+        if ps -ef 2>/dev/null | grep -E 'snmpd|snmpdv3ne|snmpmibd|hostmibd' | grep -v grep >/dev/null; then
             snmp_running=true
             service_details="${service_details}snmpd 프로세스 실행 중"
-            command_executed="${command_executed}; pgrep -x snmpd"
+            command_executed="${command_executed}; ps -ef | grep -E 'snmpd|snmpdv3ne|snmpmibd|hostmibd' | grep -v grep"
         fi
     fi
 
@@ -89,15 +93,21 @@ diagnose() {
     if [ "$snmp_running" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="SNMP 서비스가 활성화되어 있습니다 (${service_details%, }). 불필요한 경우 서비스를 중지하고 비활성화해야 합니다: systemctl stop snmpd; systemctl disable snmpd"
+        inspection_summary="SNMP 서비스가 활성화되어 있습니다 (${service_details%, }). 불필요한 경우 서비스를 중지하고 비활성화해야 합니다: stopsrc -s snmpd 실행 후 /etc/rc.tcpip에서 snmpd 기동 라인 주석 처리"
         command_result="${service_details%, }"
     else
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="SNMP 서비스가 비활성화되어 있습니다."
         local lssrc_out=$(lssrc -s snmpd 2>/dev/null || echo "SNMP service not found")
-        local ss_out=$(ss -tuln | grep ":161 " 2>/dev/null || echo "Port 161 not listening")
-        command_result="[Command: lssrc -s snmpd]${newline}${lssrc_out}${newline}${newline}[Command: ss -tuln | grep :161]${newline}${ss_out}"
+        # AIX에는 ss가 없으므로 netstat으로 포트 확인 (netstat 미가용 시 포트 측정값을 날조하지 않음)
+        if command -v netstat >/dev/null 2>&1; then
+            local netstat_out=$(netstat -an 2>/dev/null | grep -E '[.:]161[[:space:]]' || echo "Port 161 not listening")
+            command_result="[Command: lssrc -s snmpd]${newline}${lssrc_out}${newline}${newline}[Command: netstat -an | grep 161]${newline}${netstat_out}"
+            command_executed="${command_executed}; netstat -an | grep 161"
+        else
+            command_result="[Command: lssrc -s snmpd]${newline}${lssrc_out}${newline}${newline}[netstat 미가용: 포트 점검 생략]"
+        fi
     fi
 
     # echo ""

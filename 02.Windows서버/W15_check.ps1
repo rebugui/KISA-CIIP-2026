@@ -34,23 +34,44 @@ if (-not (Test-RunallMode)) {
     Write-Host "카테고리: $CATEGORY"
 }
 
-# 1. check ProtectionPolicy for private key password
+# 1. check ForceKeyProtection policy for private key password
+# 정책 위치: HKLM:\SOFTWARE\Policies\Microsoft\Cryptography 값 ForceKeyProtection
+#   2 = 키를 사용할 때마다 암호 입력 (양호)
+#   1 = 키를 처음 사용할 때 프롬프트 (수동진단 - 매번 입력 아님)
+#   0 또는 미설정 = 암호 입력 없음 (취약)
 try {
-    $prop = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Cryptography\Protect\Providers\Protected" -ErrorAction SilentlyContinue
+    # 점검 대상 OS 게이트: 가이드 target = Windows 2016, 2019, 2022 (Build 14393 이상)
+    $osBuild = [int]([System.Environment]::OSVersion.Version.Build)
 
-    if ($prop -and $prop.ProtectionPolicy -eq 1) {
-        $finalResult = "GOOD"
-        $summary = "사용자 개인키 사용 시마다 암호 입력이 요구됨"
-        $status = "양호"
-        $commandOutput = "ProtectionPolicy = 1 (Password required)"
+    if ($osBuild -lt 14393) {
+        $finalResult = "N/A"
+        $summary = "본 점검 항목은 Windows Server 2016/2019/2022 대상이며, 현재 OS 빌드($osBuild)는 점검 대상이 아님"
+        $status = "N/A"
+        $commandOutput = "OS Build $osBuild is out of target scope (requires >= 14393)"
+        $commandExecuted = "[System.Environment]::OSVersion.Version.Build"
     } else {
-        $finalResult = "VULNERABLE"
-        $summary = "사용자 개인키 사용 시 암호 입력이 요구되지 않음"
-        $status = "취약"
-        $commandOutput = "ProtectionPolicy = $(if ($prop) { $prop.ProtectionPolicy } else { 'Not set' }) (No password required)"
-    }
+        $prop = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Cryptography" -Name "ForceKeyProtection" -ErrorAction SilentlyContinue
+        $fkp = if ($null -ne $prop) { $prop.ForceKeyProtection } else { $null }
 
-    $commandExecuted = "reg query 'HKLM\SOFTWARE\Microsoft\Cryptography\Protect\Providers\Protected' /v ProtectionPolicy"
+        if ($fkp -eq 2) {
+            $finalResult = "GOOD"
+            $summary = "사용자 개인키 사용 시마다 암호 입력이 요구됨 (ForceKeyProtection = 2)"
+            $status = "양호"
+            $commandOutput = "ForceKeyProtection = 2 (Password required on every use)"
+        } elseif ($fkp -eq 1) {
+            $finalResult = "MANUAL"
+            $summary = "개인키 최초 사용 시에만 암호 입력 프롬프트가 설정됨 (매번 입력 아님). 운영 정책상 매번 입력 요구 여부를 수동 확인 필요 (ForceKeyProtection = 1)"
+            $status = "수동진단"
+            $commandOutput = "ForceKeyProtection = 1 (Prompt on first use only)"
+        } else {
+            $finalResult = "VULNERABLE"
+            $summary = "사용자 개인키 사용 시 암호 입력이 요구되지 않음 (정책 미설정 또는 ForceKeyProtection = 0)"
+            $status = "취약"
+            $commandOutput = "ForceKeyProtection = $(if ($null -ne $fkp) { $fkp } else { 'Not set' }) (No password required)"
+        }
+
+        $commandExecuted = "reg query 'HKLM\SOFTWARE\Policies\Microsoft\Cryptography' /v ForceKeyProtection"
+    }
 
 } catch {
     $finalResult = "MANUAL"

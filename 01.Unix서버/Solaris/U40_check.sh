@@ -45,6 +45,28 @@ GUIDELINE_REMEDIATION="NFS 서비스를 사용하지 않는 경우 서비스 중
 # 진단 함수
 # ============================================================================
 
+# 공유 설정 라인 접근 통제 판정 (dfstab/share 출력 공용)
+# $1: 공유 설정 텍스트, $2: 출처 라벨
+judge_share_entries() {
+    local src_label="$2"
+    local line
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        # 호스트 접근 제한 옵션(rw=호스트, ro=호스트, access=호스트) 존재 시 접근 통제 설정으로 인정
+        if echo "$line" | grep -Eq '(rw|ro|access)=[^[:space:],]'; then
+            continue
+        fi
+        # 접근 제한 없는 공유: 명시적 rw 또는 옵션 없음(기본 rw) → 전체 공개
+        if echo "$line" | grep -Eq '(^|[[:space:],])rw($|[[:space:],"])'; then
+            is_secure=false
+            issues+=("${src_label} 전체 공개 쓰기(rw) 공유: $line")
+        else
+            is_secure=false
+            issues+=("${src_label} 호스트 접근 제한 없는 공유: $line")
+        fi
+    done <<< "$1"
+}
+
 # 진단 수행
 diagnose() {
 
@@ -62,70 +84,45 @@ diagnose() {
     local issues=()
     local exports_info=""
 
-    # 1) NFS 서비스 설치 확인
-    if [ -f /etc/exports ]; then
-        nfs_installed=true
-        exports_info="NFS exports 파일 존재\\n\\n"
-
-        # exports 파일 내용 확인
-        if [ -s /etc/exports ]; then
-            exports_info="${exports_info}$(cat /etc/exports)\\n\\n"
-
-            # 각 exports 라인 확인
-            while IFS= read -r line; do
-                # 주석和无용行 무시
-                [[ "$line" =~ ^#.*$ ]] && continue
-                [[ -z "$line" ]] && continue
-
-                # 취약한 옵션 확인
-                if ! echo "$line" | grep -q "ro"; then
-                    if echo "$line" | grep -q "rw"; then
-                        is_secure=false
-                        issues+=("쓰기 권한(rw) 허용됨: $line")
-                    fi
-                fi
-
-                # root_squash 확인 (없으면 취약)
-                if ! echo "$line" | grep -q "root_squash"; then
-                    if echo "$line" | grep -q "no_root_squash"; then
-                        is_secure=false
-                        issues+=("root 권한 승급 가능(no_root_squash): $line")
-                    else
-                        # 기본값은 root_squash지만 명시적인 것이 좋음
-                        issues+=("root_squash 옵션 미명시: $line")
-                    fi
-                fi
-
-                # sync 확인
-                if ! echo "$line" | grep -q "sync"; then
-                    if echo "$line" | grep -q "async"; then
-                        issues+=("비동기 모드(async) 사용: $line")
-                    fi
-                fi
-
-                # insecure 옵션 확인 (1024 이상 포트 허용)
-                if echo "$line" | grep -q "insecure"; then
-                    is_secure=false
-                    issues+=("insecure 옵션 사용: $line")
-                fi
-            done < /etc/exports || true
+    # 1) Solaris 주 설정 파일 /etc/dfs/dfstab 공유 설정 확인
+    if [ -f /etc/dfs/dfstab ]; then
+        local dfstab_entries
+        dfstab_entries=$(grep -v '^[[:space:]]*#' /etc/dfs/dfstab 2>/dev/null | grep -v '^[[:space:]]*$' || true)
+        if [ -n "$dfstab_entries" ]; then
+            nfs_installed=true
+            exports_info="${exports_info}/etc/dfs/dfstab 공유(share) 설정 존재\\n${dfstab_entries}\\n\\n"
+            judge_share_entries "$dfstab_entries" "dfstab"
         else
-            exports_info="${exports_info}exports 파일이 비어있음 (안전)\\n"
+            exports_info="${exports_info}/etc/dfs/dfstab 공유(share) 설정 없음\\n"
         fi
     fi
 
-    # 2) NFS 서비스 실행 확인 (Solaris: svcs 사용)
-    if svcs nfs/server 2>/dev/null | grep -q online || svcs server 2>/dev/null | grep -q online; then
-        nfs_installed=true
-        exports_info="${exports_info}NFS 서비스 실행 중\\n"
+    # 2) share 명령 출력 확인 (현재 공유 중인 자원)
+    if command -v share >/dev/null 2>&1; then
+        local share_output
+        share_output=$(share 2>/dev/null || true)
+        if [ -n "$share_output" ]; then
+            nfs_installed=true
+            exports_info="${exports_info}share 명령 공유 자원:\\n${share_output}\\n\\n"
+            judge_share_entries "$share_output" "share"
+        fi
     fi
 
-    # 3) 포트 확인 (NFS: 2049, mountd: 20048)
-    if command -v ss &>/dev/null; then
-        local nfs_port=$(ss -tuln | grep -E ":2049 |:20048 " || echo "")
-        if [ -n "$nfs_port" ]; then
+    # 3) NFS 서버 SMF 서비스 상태 확인 (svcs, U-39와 동일 FMRI)
+    if command -v svcs >/dev/null 2>&1; then
+        local svc_state
+        svc_state=$(svcs -H -o state svc:/network/nfs/server 2>/dev/null || echo "")
+        exports_info="${exports_info}SMF 서비스 network/nfs/server 상태: ${svc_state:-미등록}\\n"
+        if [ "$svc_state" = "online" ]; then
             nfs_installed=true
-            exports_info="${exports_info}NFS 포트 활성화 (2049/20048)\\n"
+        fi
+    elif command -v ps >/dev/null 2>&1; then
+        # svcs 미지원 환경: NFS 서버 데몬 프로세스 확인 (fallback)
+        local ps_output
+        ps_output=$(ps -ef 2>/dev/null | grep -E 'nfsd|mountd' | grep -vE 'automountd|grep' || true)
+        if [ -n "$ps_output" ]; then
+            nfs_installed=true
+            exports_info="${exports_info}NFS 서버 데몬(nfsd/mountd) 실행 중\\n${ps_output}\\n"
         fi
     fi
 
@@ -134,20 +131,20 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="NFS 서비스 미사용"
-        command_result="NFS service disabled"
-        command_executed="svcs nfs/server server 2>/dev/null | grep online; ss -tuln | grep -E ':2049|:20048'"
+        command_result="NFS service disabled${newline}${exports_info}"
+        command_executed="svcs -H -o state svc:/network/nfs/server; share; cat /etc/dfs/dfstab"
     elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="NFS 접근 통제 적절히 설정됨"
         command_result="${exports_info}"
-        command_executed="cat /etc/exports; svcs nfs/server 2>/dev/null | grep online"
+        command_executed="cat /etc/dfs/dfstab; share; svcs -H -o state svc:/network/nfs/server"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="NFS 접근 통제 미흡: ${issues[*]}"
         command_result="${exports_info}"
-        command_executed="cat /etc/exports; exportfs -v 2>/dev/null"
+        command_executed="cat /etc/dfs/dfstab; share; svcs -H -o state svc:/network/nfs/server"
     fi
 
     # echo ""

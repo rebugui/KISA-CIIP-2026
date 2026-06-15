@@ -112,6 +112,7 @@ diagnose() {
     local default_accounts=("root" "test")
     local vulnerable_accounts=()
     local secure_accounts=()
+    local manual_accounts=()
     local check_results=""
 
     for account in "${default_accounts[@]}"; do
@@ -136,17 +137,13 @@ diagnose() {
                 vulnerable_accounts+=("${account} (비밀번호 미설정)")
                 check_results="${check_results}[취약] ${account}: 비밀번호 미설정\\n"
             else
-                # 비밀번호 변경일 확인 (MySQL 5.7+)
-                local password_changed=$(MYSQL_PWD="${DB_ADMIN_PASS}" mysql -u"${DB_ADMIN_USER}" -h"${DB_HOST}" -P"${DB_PORT}" -se \
-                    "SELECT password_changed FROM mysql.user WHERE user='${account}';" 2>/dev/null || echo "unknown")
-
-                if [ "${password_changed}" = "Y" ] || [ "${password_changed}" != "N" ]; then
-                    secure_accounts+=("${account}")
-                    check_results="${check_results}[양호] ${account}: 비밀번호 변경됨\\n"
-                else
-                    vulnerable_accounts+=("${account} (초기 비밀번호 의심)")
-                    check_results="${check_results}[취약] ${account}: 초기 비밀번호 의심\\n"
-                fi
+                # 비밀번호가 설정된 기본/테스트 계정.
+                # mysql.user에는 비밀번호가 초기값에서 변경되었는지를 나타내는 신뢰 가능한 컬럼이
+                # 없다(예: password_changed 컬럼은 MySQL 5.7/8.x에 존재하지 않음). 따라서 계정이
+                # 존재하고 로그인 가능하다는 사실만으로 초기 비밀번호 변경 여부를 정적으로 증명할 수
+                # 없으므로 자동 GOOD 판정하지 않고 수동 점검(MANUAL) 대상으로 둔다.
+                manual_accounts+=("${account} (비밀번호 설정됨, 초기값 변경 여부 미확인)")
+                check_results="${check_results}[수동확인] ${account}: 계정 존재 - 초기 비밀번호 변경 여부 수동 확인 필요\\n"
             fi
         fi
     done
@@ -161,15 +158,13 @@ diagnose() {
     fi
 
     # 최종 판정
+    # 우선순위: 취약(빈 비밀번호/익명 계정 등 명백한 결함) > 수동(비밀번호가 설정된 기본
+    # 계정의 초기값 변경 여부 미증명) > 양호(점검 대상 기본 계정 없음). 계정 존재 사실만으로
+    # 비밀번호 변경을 증명할 수 없으므로 GOOD으로 판정하지 않는다.
     local total_vulnerabilities=${#vulnerable_accounts[@]}
+    local total_manual=${#manual_accounts[@]}
 
-    if [ ${total_vulnerabilities} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="모든 기본 계정의 비밀번호가 적절히 설정됨"
-        command_result="MySQL 버전: ${mysql_version}\\n${check_results}"
-        command_executed="mysql -u${DB_ADMIN_USER} -p*** -h${DB_HOST} -P${DB_PORT} -e \"SELECT user, host, authentication_string FROM mysql.user;\""
-    else
+    if [ ${total_vulnerabilities} -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="기본 계정 비밀번호 미변경: ${total_vulnerabilities}개"
@@ -178,6 +173,22 @@ diagnose() {
             command_result="${command_result}- ${account}\\n"
         done
         command_result="${command_result}\\n상세:\\n${check_results}"
+        command_executed="mysql -u${DB_ADMIN_USER} -p*** -h${DB_HOST} -P${DB_PORT} -e \"SELECT user, host, authentication_string FROM mysql.user;\""
+    elif [ ${total_manual} -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="비밀번호가 설정된 기본 계정 ${total_manual}개에 대해 초기 비밀번호 변경 여부를 자동으로 증명할 수 없습니다. 해당 계정의 초기 비밀번호 변경 또는 잠금/삭제 여부를 수동으로 확인하세요."
+        command_result="MySQL 버전: ${mysql_version}\\n수동 확인 필요 계정:\\n"
+        for account in "${manual_accounts[@]}"; do
+            command_result="${command_result}- ${account}\\n"
+        done
+        command_result="${command_result}\\n상세:\\n${check_results}"
+        command_executed="mysql -u${DB_ADMIN_USER} -p*** -h${DB_HOST} -P${DB_PORT} -e \"SELECT user, host, authentication_string FROM mysql.user;\""
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="점검 대상 기본 계정(root/test) 및 익명 계정이 존재하지 않음"
+        command_result="MySQL 버전: ${mysql_version}\\n${check_results}"
         command_executed="mysql -u${DB_ADMIN_USER} -p*** -h${DB_HOST} -P${DB_PORT} -e \"SELECT user, host, authentication_string FROM mysql.user;\""
     fi
 

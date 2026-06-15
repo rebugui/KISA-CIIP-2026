@@ -37,28 +37,37 @@ if (-not (Test-RunallMode)) {
 # 1. Check local logon allowed users
 try {
     $right = secedit /export /cfg "$env:TEMP\secedit.tmp" 2>&1
-    $content = Get-Content "$env:TEMP\secedit.tmp"
+    $content = Get-Content "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
     Remove-Item "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
 
+    $policyFound = $false
     $allowedSIDs = @()
     $content | Where-Object { $_ -match 'SeInteractiveLogonRight\s*=\s*(.+)' } | ForEach-Object {
+        $policyFound = $true
         $values = $Matches[1].Trim()
         $allowedSIDs += $values -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
     }
 
-    # Criteria expects only Administrators (S-1-5-32-544) and IUSR/Local Service (S-1-5-19)
-    $builtinAllowed = @('*S-1-5-32-544', '*S-1-5-19')
-    $extraSIDs = $allowedSIDs | Where-Object { $_ -notin $builtinAllowed -and $_ -notmatch '^\*S-1-5-21' }
+    # 허용 기준: Administrators(S-1-5-32-544)와 IUSR(Internet Guest, S-1-5-17)만 허용.
+    # 도메인 SID(S-1-5-21-*, 예: Domain Users)는 면제 대상이 아니며 해당 권한 부여 시 위반에 해당하므로 제외 필터를 두지 않는다.
+    $builtinAllowed = @('*S-1-5-32-544', '*S-1-5-17')
+    $extraSIDs = $allowedSIDs | Where-Object { $_ -notin $builtinAllowed }
 
-    if ($extraSIDs.Count -eq 0) {
+    if (-not $policyFound) {
+        # secedit 결과에 SeInteractiveLogonRight 항목이 없으면 정책 판단 불가 -> 수동진단 (GOOD 단정 금지)
+        $finalResult = "MANUAL"
+        $summary = "secedit 결과에 'SeInteractiveLogonRight'(로컬 로그온 허용) 정책 항목이 없어 확인 불가. 로컬 보안 정책 > 사용자 권한 할당에서 수동 확인 필요"
+        $status = "수동진단"
+        $commandOutput = "SeInteractiveLogonRight policy not found in secedit export"
+    } elseif ($extraSIDs.Count -eq 0) {
         $finalResult = "GOOD"
         $summary = "로컬 로그온 허용 정책에 Administrators, IUSR만 존재"
         $status = "양호"
-        $commandOutput = "SeInteractiveLogonRight: Built-in groups only ($($allowedSIDs -join ', '))"
+        $commandOutput = "SeInteractiveLogonRight: Built-in only ($($allowedSIDs -join ', '))"
     } else {
         $finalResult = "VULNERABLE"
         $extraUsersList = $extraSIDs -join ', '
-        $summary = "로컬 로그온 허용 정책에 추가 계정 존재: $extraUsersList"
+        $summary = "로컬 로그온 허용 정책에 Administrators, IUSR 외 다른 계정/그룹 존재: $extraUsersList"
         $status = "취약"
         $commandOutput = "SeInteractiveLogonRight: $extraUsersList"
     }

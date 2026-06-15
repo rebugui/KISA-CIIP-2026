@@ -63,6 +63,9 @@ diagnose() {
     local banner_details=""
     local ftp_config_files=()
     local raw_output=""
+    local manual_needed=false
+    local manual_details=""
+    local ident_quote_re="[\"']([^\"']*)[\"']"
 
     # FTP 설정 파일 검색
     if [ -f /etc/proftpd/proftpd.conf ]; then
@@ -84,6 +87,8 @@ diagnose() {
     # 각 설정 파일에서 배너 정보 확인
     for config_file in "${ftp_config_files[@]}"; do
         local banner_value=""
+        local banner_text=""
+        local custom_banner=""
 
         # Capture raw grep output for each config file
         local grep_output=$(grep -E "ftpd_banner|ServerIdent|banner_file" "$config_file" 2>/dev/null | grep -v "^#" || echo "")
@@ -93,23 +98,66 @@ diagnose() {
 
         # vsftpd 배너 설정 확인
         if [[ "$config_file" == *"vsftpd"* ]]; then
-            banner_value=$(grep -E "^[\s]*ftpd_banner|^[\s]*banner_file" "$config_file" 2>/dev/null | grep -v "^#" | head -1)
-            if [ -n "$banner_value" ]; then
-                # 배너에 버전 정보가 포함되어 있는지 확인
-                if echo "$banner_value" | grep -qiE "version|vsftpd|proftpd"; then
+            if [ ! -r "$config_file" ]; then
+                manual_needed=true
+                manual_details="${manual_details}${config_file}: 설정 파일 읽기 불가, "
+            else
+                banner_value=$(grep -E "^[[:space:]]*(ftpd_banner|banner_file)" "$config_file" 2>/dev/null | grep -v "^[[:space:]]*#" | head -1 || true)
+                if [ -z "$banner_value" ]; then
+                    # 배너 지시자 미설정 시 기본 배너가 vsFTPd 이름/버전 정보를 노출함
                     ftp_banner_issue=true
-                    banner_details="${banner_details}${config_file}: ${banner_value}, "
+                    banner_details="${banner_details}${config_file}: ftpd_banner/banner_file 미설정(기본 배너 노출), "
+                elif [[ "$banner_value" == *"banner_file"* ]]; then
+                    # banner_file 내용까지 검사: 파일 내 서비스 이름/버전 노출 시 취약,
+                    # 내용 확인 불가 시 수동 진단 (무조건 양호 처리로 인한 false-good 방지)
+                    local banner_file_path="${banner_value#*=}"
+                    banner_file_path="$(echo "$banner_file_path" | tr -d '[:space:]')"
+                    if [ -n "$banner_file_path" ] && [ -r "$banner_file_path" ]; then
+                        if grep -qiE "version|vsftpd|proftpd|wu-ftpd|[0-9]+\.[0-9]" "$banner_file_path" 2>/dev/null; then
+                            ftp_banner_issue=true
+                            banner_details="${banner_details}${config_file}: banner_file(${banner_file_path})에 서비스/버전 정보 노출, "
+                        fi
+                    else
+                        manual_needed=true
+                        manual_details="${manual_details}${config_file}: banner_file(${banner_file_path:-경로 미확인}) 내용 확인 불가, "
+                    fi
+                else
+                    # ftpd_banner 값에 서비스 이름/버전 정보가 포함되어 있는지 확인
+                    banner_text="${banner_value#*=}"
+                    if echo "$banner_text" | grep -qiE "version|vsftpd|proftpd|wu-ftpd|[0-9]+\.[0-9]"; then
+                        ftp_banner_issue=true
+                        banner_details="${banner_details}${config_file}: ${banner_value}, "
+                    fi
                 fi
             fi
         fi
 
         # proftpd 배너 설정 확인
         if [[ "$config_file" == *"proftpd"* ]]; then
-            banner_value=$(grep -E "^[\s]*ServerIdent" "$config_file" 2>/dev/null | grep -v "^#" | head -1)
-            if [ -n "$banner_value" ]; then
-                if echo "$banner_value" | grep -qiE "On|PROFTPD"; then
+            if [ ! -r "$config_file" ]; then
+                manual_needed=true
+                manual_details="${manual_details}${config_file}: 설정 파일 읽기 불가, "
+            else
+                banner_value=$(grep -E "^[[:space:]]*ServerIdent" "$config_file" 2>/dev/null | grep -v "^[[:space:]]*#" | head -1 || true)
+                if [ -z "$banner_value" ]; then
+                    # ServerIdent 미설정 시 기본 배너가 ProFTPD 이름/버전 정보를 노출함
                     ftp_banner_issue=true
-                    banner_details="${banner_details}${config_file}: ${banner_value}, "
+                    banner_details="${banner_details}${config_file}: ServerIdent 미설정(기본 배너 노출), "
+                elif echo "$banner_value" | grep -qiE "^[[:space:]]*ServerIdent[[:space:]]+off"; then
+                    : # ServerIdent off → 배너 정보 미노출(양호)
+                else
+                    # ServerIdent on: 따옴표 안 사용자 배너 텍스트만 검사
+                    custom_banner=""
+                    if [[ "$banner_value" =~ $ident_quote_re ]]; then
+                        custom_banner="${BASH_REMATCH[1]}"
+                    fi
+                    if [ -z "$custom_banner" ]; then
+                        ftp_banner_issue=true
+                        banner_details="${banner_details}${config_file}: ${banner_value} (사용자 배너 미지정), "
+                    elif echo "$custom_banner" | grep -qiE "version|proftpd|vsftpd|wu-ftpd|[0-9]+\.[0-9]"; then
+                        ftp_banner_issue=true
+                        banner_details="${banner_details}${config_file}: ${banner_value}, "
+                    fi
                 fi
             fi
         fi
@@ -139,7 +187,13 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="FTP 배너에 버전/시스템 정보 노출: ${banner_details%, }"
-        command_result="${raw_output}"
+        command_result="${raw_output:-${banner_details%, }}"
+        command_executed="grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null"
+    elif [ "$manual_needed" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="FTP 배너 설정 수동 확인 필요: ${manual_details%, }"
+        command_result="${raw_output:-${manual_details%, }}"
         command_executed="grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null"
     else
         # FTP 서비스가 설치되지 않았거나 배너가 적절하게 설정됨

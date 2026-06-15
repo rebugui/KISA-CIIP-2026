@@ -40,18 +40,36 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="DNS 동적 업데이트 설정이 적절하게 제한되어 있습니다."
     local command_result=""
-    local command_executed="grep 'allow-update' /etc/named.conf"
+    local command_executed="sed -n '/allow-update/,/;/p' /etc/named.conf /etc/named.rfc1912.zones"
 
-    if [ -f "/etc/named.conf" ]; then
-        local update_opt=$(grep -i "allow-update" /etc/named.conf | tr -d '[:space:]' || echo "not-set")
-        if [[ "$update_opt" =~ "any" ]]; then
-            status="취약"
-            diagnosis_result="VULNERABLE"
-            inspection_summary="DNS 동적 업데이트가 모든 호스트(any)에 대해 허용되어 있습니다."
+    local conf_found=false
+    local evidence=""
+    local conf_file=""
+
+    for conf_file in /etc/named.conf /etc/named.rfc1912.zones; do
+        if [ -f "$conf_file" ]; then
+            conf_found=true
+            # 주석 제거 후 다중행 allow-update 블록을 한 줄로 평탄화하여 점검
+            local au_flat=$(grep -vE '^[[:space:]]*(//|#)' "$conf_file" 2>/dev/null | sed -n '/allow-update/,/;/p' | tr '\n' ' ' || echo "")
+            local au_blocks=$(echo "$au_flat" | grep -oiE 'allow-update[[:space:]]*\{[^};]*' || echo "")
+            if [ -n "$au_blocks" ]; then
+                evidence="${evidence}${conf_file}: [ $(echo "$au_blocks" | tr '\n' ' ') ]. "
+                # none·키·특정 IP 제한은 양호(가이드 조치방법 부합), any만 취약
+                if echo "$au_blocks" | grep -qiw "any"; then
+                    status="취약"
+                    diagnosis_result="VULNERABLE"
+                    inspection_summary="DNS 동적 업데이트가 모든 호스트(any)에 대해 허용되어 있습니다. (${conf_file})"
+                fi
+            else
+                evidence="${evidence}${conf_file}: allow-update 미설정(기본값 none). "
+            fi
         fi
-        command_result="allow-update 설정 현황: [ ${update_opt} ]"
+    done
+
+    if [ "$conf_found" = true ]; then
+        command_result="allow-update 설정 현황: ${evidence}"
     else
-        command_result="DNS 설정 파일(/etc/named.conf)이 존재하지 않습니다."
+        command_result="DNS 설정 파일(/etc/named.conf, /etc/named.rfc1912.zones)이 존재하지 않습니다."
     fi
 
     command_result=$(echo "$command_result" | tr -d '\n\r')

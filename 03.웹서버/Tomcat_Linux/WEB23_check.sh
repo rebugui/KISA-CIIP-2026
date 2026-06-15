@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="LDAP 연결 인증 시 SHA-256 이상의 알고리즘을 
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -83,34 +83,57 @@ diagnose() {
         "/etc/tomcat*/server.xml"
         "/var/lib/tomcat*/conf/server.xml"
         "/usr/share/tomcat*/conf/server.xml"
+        "/usr/local/tomcat/conf/server.xml"
+        "/opt/tomcat*/conf/server.xml"
     )
 
     local ldap_config=""
+    local digest_lines=""
+    local found_xml=""
 
     for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                # JNDIRealm 또는 LDAP 설정 확인
-                local found_ldap=$(grep -iE "JNDIRealm|LDAP|userPattern|connectionURL" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                found_xml="${xml_file}"
+                # JNDIRealm 또는 LDAP 설정 확인 (주석 제외)
+                local found_ldap=$(grep -iE "JNDIRealm|connectionURL=\"ldap|userPattern" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 if [ -n "${found_ldap}" ]; then
                     ldap_config="${found_ldap}"
+                    # digest= 속성 추출 (주석 제외)
+                    digest_lines=$(grep -i "digest=" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 fi
                 break 2
             fi
         done
     done
 
-    command_executed="grep -iE 'JNDIRealm|LDAP|userPattern' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
-    command_result="${ldap_config:-No LDAP configuration found}"
+    command_executed="grep -iE 'JNDIRealm|digest=' \"${found_xml:-/[Tomcat]/conf/server.xml}\" 2>/dev/null | grep -v '^\\s*<!--'"
 
-    if [ -n "${ldap_config}" ]; then
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="LDAP 설정이 발견되었습니다. 사용 중인 알고리즘을 수동으로 확인하세요. MD5, SHA-1 사용 시 SHA-256 이상으로 변경 권장."
+    if [ -z "${ldap_config}" ]; then
+        # LDAP(JNDIRealm) 인증을 사용하지 않음 -> 점검 대상 아님
+        diagnosis_result="N/A"
+        status="N/A"
+        command_result="No LDAP/JNDIRealm configuration found"
+        inspection_summary="LDAP(JNDIRealm) 인증 설정이 발견되지 않았습니다. (해당 사항 없음)"
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="LDAP 설정이 발견되지 않았습니다. (해당 사항 없음)"
+        # digest= 값 추출하여 알고리즘 안전성 판단
+        local digest_algo=$(echo "${digest_lines}" | grep -ioE 'digest="[^"]*"' | head -1 | sed -E 's/.*digest="([^"]*)".*/\1/' || true)
+        command_result="${ldap_config}${digest_lines:+ | }${digest_lines}"
+
+        if [ -z "${digest_algo}" ]; then
+            # JNDIRealm은 있으나 digest 속성을 판별할 수 없음 -> 수동진단
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="LDAP(JNDIRealm) 설정이 발견되었으나 digest 알고리즘을 자동 판별할 수 없습니다. 사용 중인 알고리즘을 수동으로 확인하세요."
+        elif echo "${digest_algo}" | grep -iqE '^(SHA-256|SHA256|SHA-384|SHA384|SHA-512|SHA512|SSHA-256|SSHA256|SSHA-384|SSHA-512)$'; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="LDAP 연결 인증 시 안전한 다이제스트 알고리즘(${digest_algo})을 사용하고 있습니다."
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="LDAP 연결 인증 시 취약한 다이제스트 알고리즘(${digest_algo})을 사용하고 있습니다. SHA-256 이상으로 변경하십시오."
+        fi
     fi
 
     # Run-all 모드 확인

@@ -37,61 +37,70 @@ if (-not (Test-RunallMode)) {
 
 # 1. Check screensaver settings
 try {
+    $active = Get-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaveActive" -ErrorAction SilentlyContinue
     $timeout = Get-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaveTimeOut" -ErrorAction SilentlyContinue
     $secure = Get-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "ScreenSaverIsSecure" -ErrorAction SilentlyContinue
 
     $commandOutput = ""
+    $activeInfo = ""
     $timeoutInfo = ""
     $secureInfo = ""
 
+    # ScreenSaveActive: 화면보호기 작동 여부. 0이면 화면보호기 자체가 비활성(작동 안 함).
+    $activeEnabled = $false
+    if ($active -ne $null) {
+        $activeVal = [int]$active.ScreenSaveActive
+        $activeInfo = "ScreenSaveActive: $activeVal"
+        if ($activeVal -eq 1) { $activeEnabled = $true }
+    } else {
+        $activeInfo = "ScreenSaveActive: Not set"
+    }
+    $commandOutput += $activeInfo + "`r`n"
+
+    # ScreenSaveTimeOut(초). 0이면 화면보호기가 작동하지 않으므로 유효한 대기시간이 아님.
+    $timeoutMinutes = 0
+    $timeoutValid = $false
     if ($timeout -ne $null) {
         $timeoutSeconds = [int]$timeout.ScreenSaveTimeOut
         $timeoutMinutes = [math]::Round($timeoutSeconds / 60, 0)
-        $timeoutInfo = "ScreenSaveTimeOut: $timeoutMinutes minutes"
-        $commandOutput += $timeoutInfo + "`r`n"
+        $timeoutInfo = "ScreenSaveTimeOut: $timeoutMinutes minutes ($timeoutSeconds sec)"
+        if ($timeoutSeconds -gt 0 -and $timeoutMinutes -le 10) { $timeoutValid = $true }
     } else {
         $timeoutInfo = "ScreenSaveTimeOut: Not set"
-        $commandOutput += $timeoutInfo + "`r`n"
     }
+    $commandOutput += $timeoutInfo + "`r`n"
 
+    $secureEnabled = $false
     if ($secure -ne $null) {
         $secureInfo = "ScreenSaverIsSecure: $($secure.ScreenSaverIsSecure)"
-        $commandOutput += $secureInfo + "`r`n"
+        if ([int]$secure.ScreenSaverIsSecure -eq 1) { $secureEnabled = $true }
     } else {
         $secureInfo = "ScreenSaverIsSecure: Not set"
-        $commandOutput += $secureInfo + "`r`n"
     }
+    $commandOutput += $secureInfo + "`r`n"
 
-    $isSecure = $false
-    if ($timeout -ne $null -and $secure -ne $null) {
-        $timeoutSeconds = [int]$timeout.ScreenSaveTimeOut
-        $timeoutMinutes = [math]::Round($timeoutSeconds / 60, 0)
-        if ($timeoutMinutes -le 10 -and $secure.ScreenSaverIsSecure -eq 1) {
-            $isSecure = $true
-        }
-    }
-
-    if ($isSecure) {
+    # 양호 조건: 화면보호기 작동(Active=1) AND 0 < 대기시간 <= 10분 AND 암호보호(IsSecure=1) 모두 충족
+    if ($activeEnabled -and $timeoutValid -and $secureEnabled) {
         $finalResult = "GOOD"
-        $summary = "화면보호기 대기시간 10분 이하이고 암호보호 설정됨 ($timeoutInfo, $secureInfo)"
+        $summary = "화면보호기 작동, 대기시간 10분 이하, 암호보호 설정됨 ($activeInfo, $timeoutInfo, $secureInfo)"
         $status = "양호"
     } else {
         $finalResult = "VULNERABLE"
-        if ($timeout -ne $null -and $secure -ne $null) {
-            $timeoutSeconds = [int]$timeout.ScreenSaveTimeOut
-            $timeoutMinutes = [math]::Round($timeoutSeconds / 60, 0)
-            if ($timeoutMinutes -gt 10) {
-                $summary = "화면보호기 대기시간 10분 초과 ($timeoutMinutes분, 암호보호: $($secure.ScreenSaverIsSecure))"
-            } else {
-                $summary = "화면보호기 암호보호 미설정 (대기시간: $timeoutMinutes분)"
-            }
-        } else {
-            $summary = "화면보호기 설정 안 됨 ($timeoutInfo, $secureInfo)"
+        $reasons = @()
+        if (-not $activeEnabled) { $reasons += "화면보호기 비활성(ScreenSaveActive≠1)" }
+        if ($timeout -eq $null) {
+            $reasons += "대기시간 미설정"
+        } elseif ([int]$timeout.ScreenSaveTimeOut -le 0) {
+            $reasons += "대기시간 0(화면보호기 작동 안 함)"
+        } elseif ($timeoutMinutes -gt 10) {
+            $reasons += "대기시간 10분 초과($timeoutMinutes분)"
         }
+        if (-not $secureEnabled) { $reasons += "암호보호 미설정(ScreenSaverIsSecure≠1)" }
+        $summary = "화면보호기 설정 미흡: " + ($reasons -join ", ") + " ($activeInfo, $timeoutInfo, $secureInfo)"
         $status = "취약"
     }
 
-    $commandExecuted = "reg query HKCU\Control Panel\Desktop /v ScreenSaveTimeOut /v ScreenSaverIsSecure"
+    $commandExecuted = "reg query 'HKCU\Control Panel\Desktop' /v ScreenSaveActive /v ScreenSaveTimeOut /v ScreenSaverIsSecure"
 
 } catch {
     $finalResult = "MANUAL"

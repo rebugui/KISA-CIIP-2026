@@ -44,13 +44,29 @@ try {
         $config = Get-NginxWindowsConfigText -ConfigFiles $configFiles
         $lines = Get-NginxActiveLines -ConfigText $config.Text
         $http = @($lines | Where-Object { $_ -match '^(?i)listen\s+.*\b80\b' -and $_ -notmatch '443|ssl' })
-        $redirect = @($lines | Where-Object { $_ -match '^(?i)return\s+30[18]\s+https://' -or $_ -match '^(?i)rewrite\s+.+\s+https://' -or $_ -match '^(?i)add_header\s+Strict-Transport-Security\b' })
+        # 실제 HTTP→HTTPS 리디렉션은 return 30x https:// 또는 rewrite ... https:// 만 인정.
+        # HSTS(add_header Strict-Transport-Security)는 HTTP 요청을 리디렉션하지 않으므로 리디렉션 증적이 아님.
+        $redirect = @($lines | Where-Object { $_ -match '^(?i)return\s+30[1278]\s+https://' -or $_ -match '^(?i)rewrite\s+.+\s+https://' })
+        $hsts = @($lines | Where-Object { $_ -match '^(?i)add_header\s+Strict-Transport-Security\b' })
         $commandExecuted = "Parse Nginx Windows HTTP listen and HTTPS redirect directives"
-        $commandOutput = (@($http + $redirect) -join "`n")
+        $commandOutput = (@($http + $redirect + $hsts) -join "`n")
         if (-not $commandOutput) { $commandOutput = "No HTTP listener or HTTPS redirect evidence found." }
-        if ($redirect.Count -gt 0) { $finalResult = "GOOD"; $status = "양호"; $summary = "HTTPS redirect or HSTS evidence was found." }
-        elseif ($http.Count -gt 0) { $finalResult = "VULNERABLE"; $status = "취약"; $summary = "HTTP listener evidence was found without HTTPS redirection evidence." }
-        else { $finalResult = "MANUAL"; $status = "수동진단"; $summary = "No port 80 listener was found in static configuration; confirm active server blocks and upstream redirect policy." }
+        if ($redirect.Count -gt 0) {
+            $finalResult = "GOOD"; $status = "양호"; $summary = "HTTP-to-HTTPS redirection (return 30x https:// or rewrite ... https://) was found."
+        }
+        elseif ($http.Count -gt 0) {
+            # HTTP 리스너가 있으나 실제 리디렉션 지시자가 없음. HSTS만 있는 경우도 리디렉션이 아니므로 취약.
+            $finalResult = "VULNERABLE"; $status = "취약"
+            if ($hsts.Count -gt 0) {
+                $summary = "HTTP listener was found with an HSTS header but no actual HTTP-to-HTTPS redirect (return 30x/rewrite). HSTS alone does not redirect plaintext HTTP requests; add a redirect."
+            }
+            else {
+                $summary = "HTTP listener evidence was found without HTTPS redirection evidence."
+            }
+        }
+        else {
+            $finalResult = "MANUAL"; $status = "수동진단"; $summary = "No port 80 listener was found in static configuration; confirm active server blocks and upstream redirect policy."
+        }
     }
 }
 catch {

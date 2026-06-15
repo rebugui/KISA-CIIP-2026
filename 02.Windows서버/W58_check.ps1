@@ -37,38 +37,82 @@ if (-not (Test-RunallMode)) {
 try {
     $homeDirs = @('C:\Users', 'C:\Documents and Settings')
     $hasEveryone = $false
+    $checkedCount = 0
+    $unreadableDirs = @()
+    $everyoneDirs = @()
 
     foreach ($dir in $homeDirs) {
         if (Test-Path $dir) {
             $acls = Get-ChildItem $dir -Directory -ErrorAction SilentlyContinue
             foreach ($acl in $acls) {
                 if ($acl.Name -notin @('All Users', 'Default User', 'Public', 'Default')) {
+                    $access = $null
                     try {
-                        $access = Get-Acl $acl.FullName -ErrorAction SilentlyContinue
-                        if ($access.AccessToString -match 'Everyone') {
-                            $hasEveryone = $true
+                        $access = Get-Acl $acl.FullName -ErrorAction Stop
+                    } catch {
+                        # Record (do NOT swallow) unreadable profile ACLs so an
+                        # all-unreadable run cannot silently pass as GOOD.
+                        $unreadableDirs += $acl.FullName
+                        continue
+                    }
+
+                    if ($null -eq $access) {
+                        $unreadableDirs += $acl.FullName
+                        continue
+                    }
+
+                    $checkedCount++
+
+                    # Everyone localizes (Korean: '모든 사람'); compare by well-known
+                    # SID S-1-1-0 rather than the localized AccessToString.
+                    $dirHasEveryone = $false
+                    foreach ($ace in $access.Access) {
+                        $sid = $null
+                        try {
+                            $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+                        } catch {
+                            $sid = $null
+                        }
+                        if ($sid -eq 'S-1-1-0' -or $ace.IdentityReference.Value -like '*Everyone*') {
+                            $dirHasEveryone = $true
                             break
                         }
-                    } catch {
-                        # Ignore access errors
+                    }
+
+                    if ($dirHasEveryone) {
+                        $hasEveryone = $true
+                        $everyoneDirs += $acl.FullName
                     }
                 }
             }
         }
     }
 
-    if (-not $hasEveryone) {
+    $commandExecuted = "Get-Acl 확인 (C:\Users 또는 C:\Documents and Settings 하위 사용자 디렉터리, SID S-1-1-0 비교)"
+
+    if ($hasEveryone) {
+        $finalResult = "VULNERABLE"
+        $summary = "홈 디렉터리에 Everyone 권한이 존재함: $($everyoneDirs -join ', ')"
+        $status = "취약"
+        $commandOutput = "Everyone 권한 존재 디렉터리: $($everyoneDirs -join ', ')"
+    } elseif ($checkedCount -eq 0) {
+        # No directory ACL could be read -> cannot conclude GOOD
+        $finalResult = "MANUAL"
+        $summary = "홈 디렉터리 ACL을 읽을 수 없음: 수동 확인 필요 (읽기 실패: $($unreadableDirs.Count)건)"
+        $status = "수동진단"
+        $commandOutput = "ACL 읽기 실패 디렉터리: $($unreadableDirs -join ', ')"
+    } elseif ($unreadableDirs.Count -gt 0) {
+        # Some readable and none had Everyone, but some were unreadable -> MANUAL
+        $finalResult = "MANUAL"
+        $summary = "일부 홈 디렉터리 ACL을 읽을 수 없어 일부만 점검됨: 수동 확인 필요 (점검: ${checkedCount}건, 읽기 실패: $($unreadableDirs.Count)건)"
+        $status = "수동진단"
+        $commandOutput = "점검 완료: ${checkedCount}건 (Everyone 없음), 읽기 실패: $($unreadableDirs -join ', ')"
+    } else {
         $finalResult = "GOOD"
         $summary = "홈 디렉터리에 Everyone 권한이 없음 (적절하게 설정됨)"
         $status = "양호"
-    } else {
-        $finalResult = "VULNERABLE"
-        $summary = "홈 디렉터리에 Everyone 권한이 존재함"
-        $status = "취약"
+        $commandOutput = "점검 완료: ${checkedCount}건, Everyone 권한 없음"
     }
-
-    $commandExecuted = "Get-Acl 확인 (C:\Users 또는 C:\Documents and Settings 하위 사용자 디렉터리)"
-    $commandOutput = "Everyone 권한 존재: $hasEveryone"
 
 } catch {
     $finalResult = "MANUAL"

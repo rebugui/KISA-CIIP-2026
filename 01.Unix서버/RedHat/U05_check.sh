@@ -44,14 +44,21 @@ diagnose() {
     local command_executed="awk -F: '\$3 == 0 {print \$1}' /etc/passwd"
 
     # 1. 실제 데이터 추출: UID 0 계정 리스트
-    local uid_zero_users=$(awk -F: '$3 == 0 {print $1}' /etc/passwd | xargs | sed 's/ /, /g')
-    local user_count=$(awk -F: '$3 == 0 {print $1}' /etc/passwd | wc -l)
+    local uid_zero_names=""
+    uid_zero_names=$(awk -F: '$3 == 0 {print $1}' /etc/passwd 2>/dev/null) || uid_zero_names=""
+    local uid_zero_users=$(printf '%s\n' "$uid_zero_names" | xargs | sed 's/ /, /g')
+    local non_root_list=$(printf '%s\n' "$uid_zero_names" | awk 'NF && $0 != "root"' | xargs | sed 's/ /, /g')
+    local user_count=$(printf '%s\n' "$uid_zero_names" | awk 'NF' | wc -l)
 
-    # 2. 판정 로직
-    if [ "$user_count" -gt 1 ]; then
+    # 2. 판정 로직: UID 0 계정의 이름이 모두 root인지 확인 (개수가 아닌 이름 기준)
+    if [ -n "$non_root_list" ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
-        inspection_summary="root 이외에 UID 0을 사용하는 계정이 발견되었습니다."
+        inspection_summary="root 이외에 UID 0을 사용하는 계정이 발견되었습니다: ${non_root_list}"
+    elif [ "$user_count" -eq 0 ]; then
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="/etc/passwd에서 UID 0 계정을 확인할 수 없습니다(파일 손상 또는 읽기 실패 가능). 수동 점검이 필요합니다."
     fi
 
     # 3. command_result에 실제 데이터 기록

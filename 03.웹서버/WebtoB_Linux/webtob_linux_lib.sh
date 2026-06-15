@@ -83,6 +83,28 @@ webtob_config_grep() {
     return "${found}"
 }
 
+# Comment-aware variant of webtob_config_grep.
+# Drops lines whose first non-whitespace character is '#' (WebtoB http.m
+# comment syntax) before matching, so commented-out directives do not produce
+# false evidence. Emits "file:lineno:text" (lineno from the original file) for
+# traceability. Returns 0 if at least one active line matched.
+webtob_config_grep_active() {
+    local pattern="$1"
+    local found=1
+    local file
+    local match
+    for file in "${WEBTOB_CONFIGS[@]}"; do
+        [ -f "${file}" ] || continue
+        # grep -vn keeps original line numbers; drop comment lines, then match.
+        match="$(grep -vn '^[[:space:]]*#' "${file}" 2>/dev/null | grep -Ei -- "${pattern}" || true)"
+        if [ -n "${match}" ]; then
+            printf '%s\n' "${match}" | sed "s|^|${file}:|"
+            found=0
+        fi
+    done
+    return "${found}"
+}
+
 webtob_acl_check() {
     local role="$1"
     shift
@@ -96,15 +118,22 @@ webtob_acl_check() {
         checked+="${target}"$'\n'
         if command -v stat >/dev/null 2>&1; then
             mode="$(stat -c '%a %U:%G %n' "${target}" 2>/dev/null || true)"
-            case "${mode%% *}" in
-                *2|*3|*6|*7) bad+="${mode}"$'\n' ;;
+            # criteria_bad: ANY general-user (other) access incl. read.
+            # The fix is chmod 750 / o-rwx, so the trailing (other) octal digit
+            # must be 0. Any non-zero other digit (read=4, exec=1, write=2 and
+            # their combinations 3/5/6/7) is a broad-access finding.
+            local other_digit="${mode%% *}"
+            other_digit="${other_digit: -1}"
+            case "${other_digit}" in
+                ''|0) : ;;
+                *) bad+="${mode}"$'\n' ;;
             esac
         fi
     done
     if [ -n "${bad}" ]; then
-        webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "Broad write permission evidence was found on WebtoB ${role} paths." "${bad}" "stat WebtoB ${role} paths"
+        webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "Broad general-user (other) access permission evidence was found on WebtoB ${role} paths." "${bad}" "stat WebtoB ${role} paths"
     elif [ -n "${checked}" ]; then
-        webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No broad write permission evidence was found on assessed WebtoB ${role} paths." "${checked}" "stat WebtoB ${role} paths"
+        webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No broad general-user (other) access permission evidence was found on assessed WebtoB ${role} paths." "${checked}" "stat WebtoB ${role} paths"
     else
         webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB ${role} paths were not found for permission assessment." "$(webtob_evidence)" "stat WebtoB ${role} paths"
     fi
@@ -148,13 +177,31 @@ invoke_webtob_linux_check() {
             fi
             ;;
         WEB-07)
-            lines=""
-            [ -n "${WEBTOB_HOME}" ] && lines="$(find "${WEBTOB_HOME}" -maxdepth 4 -type d \( -iname '*sample*' -o -iname '*example*' -o -path '*/docs/manuals*' \) 2>/dev/null | head -50 || true)"
-            [ -n "${lines}" ] && webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB sample/manual directories were found." "${lines}" "find WebtoB samples/docs/manuals" || webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB sample/manual directories were found in inspected homes." "$(webtob_evidence)" "find WebtoB samples/docs/manuals"
+            if [ -z "${WEBTOB_HOME}" ]; then
+                # Installed (per webtob_is_installed) but home not derivable:
+                # no path can be inspected, so GOOD cannot be asserted -> MANUAL.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its home directory could not be derived; manually inspect for sample/manual files." "$(webtob_evidence)" "find WebtoB samples/docs/manuals"
+            else
+                lines="$(find "${WEBTOB_HOME}" -maxdepth 4 -type d \( -iname '*sample*' -o -iname '*example*' -o -path '*/docs/manuals*' \) 2>/dev/null | head -50 || true)"
+                [ -n "${lines}" ] && webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB sample/manual directories were found." "${lines}" "find WebtoB samples/docs/manuals" || webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB sample/manual directories were found in inspected homes." "$(webtob_evidence)" "find WebtoB samples/docs/manuals"
+            fi
             ;;
         WEB-08)
-            lines="$(webtob_config_grep 'LimitRequestBody' || true)"
-            [ -n "${lines}" ] && webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB upload/download size limit evidence was found." "${lines}" "grep LimitRequestBody http.m" || webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB upload/download size limit evidence was not found." "$(webtob_evidence)" "grep LimitRequestBody http.m"
+            # Oracle: a non-zero upload/download size limit must be configured.
+            # Use the comment-aware grep so commented-out directives do not count,
+            # and require LimitRequestBody to carry a positive (non-zero) value.
+            # A value of 0 means "unlimited" -> not a real limit -> VULNERABLE.
+            lines="$(webtob_config_grep_active 'LimitRequestBody' || true)"
+            if printf '%s' "${lines}" | grep -Eiq 'LimitRequestBody[[:space:]]*=?[[:space:]]*0+([[:space:]]|$)'; then
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB LimitRequestBody is set to 0 (unlimited); upload/download size is not effectively limited." "${lines}" "grep LimitRequestBody http.m"
+            elif printf '%s' "${lines}" | grep -Eiq 'LimitRequestBody[[:space:]]*=?[[:space:]]*[1-9][0-9]*'; then
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB upload/download size limit (non-zero LimitRequestBody) evidence was found." "${lines}" "grep LimitRequestBody http.m"
+            elif [ -n "${lines}" ]; then
+                # Directive present (active) but value not parseable as a number.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB LimitRequestBody directive was found but its value could not be confirmed as a non-zero limit; verify the configured size." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep LimitRequestBody http.m"
+            else
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB upload/download size limit evidence was not found." "$(webtob_evidence)" "grep LimitRequestBody http.m"
+            fi
             ;;
         WEB-09)
             lines="${WEBTOB_PROCESS_EVIDENCE}"
@@ -185,7 +232,7 @@ invoke_webtob_linux_check() {
             webtob_acl_check "config/root" "${WEBTOB_CONFIGS[@]}" "${WEBTOB_HOME}"
             ;;
         WEB-16)
-            lines="$(webtob_config_grep 'ServerTokens|ServerSignature' || true)"
+            lines="$(webtob_config_grep_active 'ServerTokens|ServerSignature' || true)"
             if printf '%s' "${lines}" | grep -Eiq 'ServerTokens[[:space:]]+(Prod|ProductOnly)|ServerSignature[[:space:]]+off'; then
                 webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB server header minimization evidence was found." "${lines}" "grep ServerTokens/ServerSignature http.m"
             else
@@ -201,19 +248,61 @@ invoke_webtob_linux_check() {
             [ -n "${lines}" ] && webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSI server mapping evidence was found." "${lines}" "grep SSI http.m" || webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB SSI mapping evidence was found." "$(webtob_evidence)" "grep SSI http.m"
             ;;
         WEB-20)
-            lines="$(webtob_config_grep 'SSLFLAG[[:space:]]*=[[:space:]]*Y|SSLNAME|CertificateFile|Protocols' || true)"
-            [ -n "${lines}" ] && webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB SSL/TLS configuration evidence was found." "${lines}" "grep SSL http.m" || webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSL/TLS configuration evidence was not found." "$(webtob_evidence)" "grep SSL http.m"
+            # Oracle: GOOD only when SSL/TLS is actually ENABLED (SSLFLAG=Y).
+            # A defined *SSL block (SSLNAME/CertificateFile) with SSLFLAG=N means
+            # SSL is configured but disabled -> not GOOD.
+            lines="$(webtob_config_grep_active 'SSLFLAG[[:space:]]*=[[:space:]]*[NY]|SSLNAME|CertificateFile|Protocols' || true)"
+            if printf '%s' "${lines}" | grep -Eiq 'SSLFLAG[[:space:]]*=[[:space:]]*Y'; then
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB SSL/TLS is enabled (SSLFLAG=Y)." "${lines}" "grep SSL http.m"
+            elif printf '%s' "${lines}" | grep -Eiq 'SSLFLAG[[:space:]]*=[[:space:]]*N'; then
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSL/TLS is disabled (SSLFLAG=N) despite SSL configuration being present." "${lines}" "grep SSL http.m"
+            elif [ -n "${lines}" ]; then
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB SSL configuration directives were found but the SSLFLAG activation state could not be determined." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep SSL http.m"
+            else
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSL/TLS activation evidence was not found." "$(webtob_evidence)" "grep SSL http.m"
+            fi
             ;;
         WEB-21)
-            lines="$(webtob_config_grep 'URLRewrite[[:space:]]*=[[:space:]]*Y|URLRewriteConfig|https://|RewriteRule' || true)"
-            [ -n "${lines}" ] && webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB HTTP-to-HTTPS redirection evidence was found." "${lines}" "grep rewrite http.m" || webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB HTTP-to-HTTPS redirection evidence was not found." "$(webtob_evidence)" "grep rewrite http.m"
+            # Oracle: GOOD only when HTTPS redirection is ACTIVE: URLRewrite=Y
+            # must be enabled AND an actual redirect to https must exist
+            # (RewriteRule -> https or URLRewriteConfig referencing the rewrite
+            # config). URLRewrite=N with a rewrite config present is not GOOD.
+            lines="$(webtob_config_grep_active 'URLRewrite[[:space:]]*=[[:space:]]*[NY]|URLRewriteConfig|RewriteRule|https://' || true)"
+            if printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*Y' \
+                && printf '%s' "${lines}" | grep -Eiq 'URLRewriteConfig|RewriteRule.*https://|https://'; then
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB HTTP-to-HTTPS redirection is enabled (URLRewrite=Y with redirect configuration)." "${lines}" "grep rewrite http.m"
+            elif printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*N'; then
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB URL rewrite is disabled (URLRewrite=N); HTTPS redirection is not active." "${lines}" "grep rewrite http.m"
+            elif printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*Y'; then
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB URLRewrite=Y is set but an explicit HTTPS redirect rule could not be confirmed; verify the rewrite config." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep rewrite http.m"
+            else
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB HTTP-to-HTTPS redirection activation evidence was not found." "$(webtob_evidence)" "grep rewrite http.m"
+            fi
             ;;
         WEB-22)
-            lines="$(webtob_config_grep 'ERRORDOCUMENT|ErrorDocument|40[134]|50[034]' || true)"
-            [ -n "${lines}" ] && webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB custom error document evidence was found." "${lines}" "grep ERRORDOCUMENT http.m" || webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB custom error document evidence was not found." "$(webtob_evidence)" "grep ERRORDOCUMENT http.m"
+            # Oracle: a custom error page must be SEPARATELY DESIGNATED, i.e. an
+            # active ERRORDOCUMENT directive that assigns a url= to a custom
+            # page (e.g. `503  status = 503, url = "/503.html"`). A bare numeric
+            # match on 401/403/404/500/503/504 (ports, paths, comments) or an
+            # ERRORDOCUMENT line without a url= value is NOT sufficient.
+            lines="$(webtob_config_grep_active 'ERRORDOCUMENT|[[:space:]]url[[:space:]]*=' || true)"
+            if printf '%s' "${lines}" | grep -Eiq 'url[[:space:]]*=[[:space:]]*"?[^",[:space:]]+'; then
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB custom error page is designated (ERRORDOCUMENT with a url= assignment)." "${lines}" "grep ERRORDOCUMENT http.m"
+            elif printf '%s' "${lines}" | grep -Eiq 'ERRORDOCUMENT'; then
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB ERRORDOCUMENT section was found but no custom error page (url=) was designated." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep ERRORDOCUMENT http.m"
+            else
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB custom error page designation evidence was not found." "$(webtob_evidence)" "grep ERRORDOCUMENT http.m"
+            fi
             ;;
-        WEB-23|WEB-24)
-            webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "This WebtoB item requires application or site-specific policy review." "$(webtob_evidence)" "Review WebtoB application/site policy"
+        WEB-23)
+            # Oracle target = Tomcat only; WebtoB is out of scope for the LDAP
+            # digest-algorithm item -> N/A (not MANUAL).
+            webtob_set_result "N/A" "N/A" "LDAP digest algorithm item (WEB-23) targets Tomcat only; WebtoB is out of scope." "WEB-23 target excludes WebtoB." "Map WebtoB guideline applicability"
+            ;;
+        WEB-24)
+            # WebtoB IS in target for the separate upload-path item; retain the
+            # manual upload-path/permission review.
+            webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB separate upload path and permission settings require site-specific policy review." "$(webtob_evidence)" "Review WebtoB upload path/permission policy"
             ;;
         WEB-25)
             if [ -n "${WEBTOB_WSCFL}" ]; then

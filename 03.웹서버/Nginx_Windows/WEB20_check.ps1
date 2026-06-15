@@ -48,11 +48,27 @@ try {
         $key = @($lines | Where-Object { $_ -match '^(?i)ssl_certificate_key\s+\S+' })
         $protocols = @($lines | Where-Object { $_ -match '^(?i)ssl_protocols\s+' })
         $weakProtocols = @($protocols | Where-Object { $_ -match '(?i)\bSSLv2\b|\bSSLv3\b|\bTLSv1\b|\bTLSv1\.1\b' })
+        $sslEnabled = ($sslListen.Count -gt 0 -and $cert.Count -gt 0 -and $key.Count -gt 0)
         $commandExecuted = "Parse Nginx Windows SSL listen/certificate/protocol directives"
         $commandOutput = (@($sslListen + $cert + $key + $protocols) -join "`n")
         if (-not $commandOutput) { $commandOutput = "No SSL/TLS directives found." }
-        if ($sslListen.Count -gt 0 -and $cert.Count -gt 0 -and $key.Count -gt 0 -and $weakProtocols.Count -eq 0) { $finalResult = "GOOD"; $status = "양호"; $summary = "SSL/TLS listener and certificate directives were found without weak protocol evidence." }
-        else { $finalResult = "VULNERABLE"; $status = "취약"; $summary = "SSL/TLS configuration is missing, incomplete, or includes weak protocol evidence." }
+        if (-not $sslEnabled) {
+            # SSL 리스너/인증서/키 중 하나라도 누락 → SSL/TLS 미활성화 또는 불완전
+            $finalResult = "VULNERABLE"; $status = "취약"; $summary = "SSL/TLS configuration is missing or incomplete (listener, certificate, or key directive not found)."
+        }
+        elseif ($weakProtocols.Count -gt 0) {
+            # ssl_protocols에 약한 프로토콜(SSLv2/SSLv3/TLSv1/TLSv1.1) 포함 → 취약
+            $finalResult = "VULNERABLE"; $status = "취약"; $summary = "SSL/TLS is enabled but ssl_protocols includes weak protocols (SSLv2/SSLv3/TLSv1/TLSv1.1). Restrict to TLSv1.2/TLSv1.3 only."
+        }
+        elseif ($protocols.Count -eq 0) {
+            # SSL은 활성화되었으나 ssl_protocols 미지정. Nginx 기본값(1.18 이전)은 TLSv1/TLSv1.1을 포함하므로
+            # 약한 프로토콜 차단 여부를 정적으로 단정할 수 없어 수동진단으로 분류한다.
+            $finalResult = "MANUAL"; $status = "수동진단"; $summary = "SSL/TLS is enabled but no explicit ssl_protocols directive was found. Nginx defaults (pre-1.18) may include TLSv1/TLSv1.1; manually confirm the active protocol set and set 'ssl_protocols TLSv1.2 TLSv1.3;'."
+        }
+        else {
+            # ssl_protocols가 명시되어 있고 약한 프로토콜 없음(현대 프로토콜 전용) → 양호
+            $finalResult = "GOOD"; $status = "양호"; $summary = "SSL/TLS listener and certificate directives were found with an explicit ssl_protocols set and no weak protocol evidence."
+        }
     }
 }
 catch {

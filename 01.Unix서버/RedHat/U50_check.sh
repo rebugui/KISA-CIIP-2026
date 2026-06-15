@@ -40,18 +40,51 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="DNS 존 전송 설정이 적절하게 제한되어 있습니다."
     local command_result=""
-    local command_executed="grep 'allow-transfer' /etc/named.conf"
+    local command_executed="grep -v '^//' /etc/named.conf | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*'"
 
-    if [ -f "/etc/named.conf" ]; then
-        local transfer_opt=$(grep -i "allow-transfer" /etc/named.conf | tr -d '[:space:]' || echo "not-set")
-        if [[ "$transfer_opt" == "not-set" ]] || [[ "$transfer_opt" =~ "any" ]]; then
+    # 설정 파일 탐색: 표준 경로 + chroot 운용 경로
+    local named_conf=""
+    local cand
+    for cand in /etc/named.conf /var/named/chroot/etc/named.conf; do
+        if [ -f "$cand" ]; then
+            named_conf="$cand"
+            break
+        fi
+    done
+
+    if [ -n "$named_conf" ]; then
+        # include 지시자 1단계 추적 (zone 별 allow-transfer가 include 파일에 있을 수 있음)
+        local conf_dir=$(dirname "$named_conf")
+        local conf_files="$named_conf"
+        local inc
+        for inc in $(grep -v "^[[:space:]]*//" "$named_conf" 2>/dev/null | grep -v "^[[:space:]]*#" | grep -oE 'include[[:space:]]+"[^"]+"' | sed -E 's/include[[:space:]]+"([^"]+)"/\1/' || true); do
+            if [ -f "$inc" ]; then
+                conf_files="$conf_files $inc"
+            elif [ -f "${conf_dir}/${inc}" ]; then
+                conf_files="$conf_files ${conf_dir}/${inc}"
+            fi
+        done
+
+        # 멀티라인 블록 대응: 주석 제거 후 평탄화하여 allow-transfer 블록 전체 추출
+        local transfer_opt
+        transfer_opt=$(cat $conf_files 2>/dev/null | grep -v "^[[:space:]]*//" | grep -v "^[[:space:]]*#" | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || echo "not-set")
+        if [[ "$transfer_opt" == "not-set" ]] || echo "$transfer_opt" | grep -qiE '(^|[{; ])any *;'; then
             status="취약"
             diagnosis_result="VULNERABLE"
             inspection_summary="DNS 존 전송이 제한되지 않았거나 모든 호스트(any)에 허용되어 있습니다."
         fi
-        command_result="allow-transfer 설정 현황: [ ${transfer_opt} ]"
+        command_result="점검 파일: [ ${conf_files} ] / allow-transfer 설정 현황: [ ${transfer_opt} ]"
     else
-        command_result="DNS 설정 파일(/etc/named.conf)이 존재하지 않습니다."
+        if pgrep -x named >/dev/null 2>&1; then
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            inspection_summary="named 프로세스는 실행 중이나 표준 경로에서 설정 파일을 찾을 수 없습니다. 비표준/chroot 경로의 allow-transfer 설정을 수동으로 확인하십시오."
+        else
+            status="N/A"
+            diagnosis_result="N/A"
+            inspection_summary="DNS(BIND) 서비스 및 설정 파일이 존재하지 않아 점검 대상이 아닙니다."
+        fi
+        command_result="DNS 설정 파일(/etc/named.conf, /var/named/chroot/etc/named.conf)이 존재하지 않습니다."
     fi
 
     command_result=$(echo "$command_result" | tr -d '\n\r')

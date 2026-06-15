@@ -33,7 +33,11 @@ if (-not (Test-RunallMode)) {
     Write-Host "카테고리: $CATEGORY"
 }
 
-# 1. Check startup programs for unusual entries
+# 1. Inventory startup programs (evidence only)
+# NOTE: The criterion is a periodic inspection PROCESS ("정기적으로 검사하고 불필요한
+# 서비스를 비활성화한 경우"). Whether startup entries are *regularly reviewed* cannot be
+# auto-verified, and a vendor-name whitelist neither proves review nor reliably flags
+# malicious entries. This emits MANUAL with a startup inventory as evidence.
 try {
     $startupPaths = @(
         'C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup',
@@ -43,62 +47,47 @@ try {
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
     )
 
-    $hasUnusual = $false
+    $inventory = @()
 
     foreach ($path in $startupPaths) {
         if ($path -like 'HKLM:*' -or $path -like 'HKCU:*') {
-            # Registry path
+            # Registry path: list each value name and its command
             try {
-                $items = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
-                if ($items) {
-                    $props = Get-Item -Path $path -ErrorAction SilentlyContinue |
-                             Select-Object -ExpandProperty Property -ErrorAction SilentlyContinue
-                    if ($props) {
-                        foreach ($prop in $props) {
-                            if ($prop -notlike '*default*' -and
-                                $prop -notlike '*Microsoft*' -and
-                                $prop -notlike '*Windows*' -and
-                                $prop -notlike '*Intel*' -and
-                                $prop -notlike '*AMD*' -and
-                                $prop -notlike '*NVIDIA*' -and
-                                $prop -notlike '*VMware*') {
-                                $hasUnusual = $true
-                                break
-                            }
-                        }
+                $props = Get-Item -Path $path -ErrorAction SilentlyContinue |
+                         Select-Object -ExpandProperty Property -ErrorAction SilentlyContinue
+                if ($props) {
+                    $values = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+                    foreach ($prop in $props) {
+                        $inventory += "[$path] $prop = $($values.$prop)"
                     }
                 }
             } catch {
                 # Ignore registry access errors
             }
         } else {
-            # File system path
+            # File system path: list startup folder entries
             if (Test-Path $path) {
                 $items = Get-ChildItem $path -ErrorAction SilentlyContinue
-                if ($items) {
-                    foreach ($item in $items) {
-                        if ($item.Name -notlike '*desktop.ini' -and $item.Name -notlike '*.lnk') {
-                            $hasUnusual = $true
-                            break
-                        }
+                foreach ($item in $items) {
+                    if ($item.Name -notlike '*desktop.ini') {
+                        $inventory += "[$($item.DirectoryName)] $($item.Name)"
                     }
                 }
             }
         }
     }
 
-    if (-not $hasUnusual) {
-        $finalResult = "GOOD"
-        $summary = "시작 프로그램 목록에 불필요하거나 의심스러운 항목이 없음"
-        $status = "양호"
+    if ($inventory.Count -gt 0) {
+        $commandOutput = "시작 프로그램/Run 키 항목 $($inventory.Count)개:`n" + ($inventory -join "`n")
+        $summary = "시작 프로그램 항목 $($inventory.Count)개 확인됨. 목록의 정기적 검사 및 불필요 항목 비활성화 여부는 수동 확인 필요"
     } else {
-        $finalResult = "VULNERABLE"
-        $summary = "시작 프로그램 목록에 불필요하거나 의심스러운 항목이 존재함"
-        $status = "취약"
+        $commandOutput = "시작 프로그램/Run 키 항목이 확인되지 않음"
+        $summary = "시작 프로그램 항목이 확인되지 않음. 정기적 검사 수행 여부는 수동 확인 필요"
     }
 
-    $commandExecuted = "Get-ItemProperty 및 Get-ChildItem (시작프로그램 경로 및 레지스트리 Run 키 확인)"
-    $commandOutput = "불필요한 항목 존재: $hasUnusual"
+    $finalResult = "MANUAL"
+    $status = "수동진단"
+    $commandExecuted = "Get-ItemProperty 및 Get-ChildItem (시작프로그램 경로 및 레지스트리 Run 키 목록화)"
 
 } catch {
     $finalResult = "MANUAL"

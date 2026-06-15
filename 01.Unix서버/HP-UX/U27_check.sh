@@ -64,6 +64,41 @@ diagnose() {
     local hosts_equiv_exists=0
     local hosts_equiv_details=""
     local details=""
+    local insecure_count=0
+    local insecure_details=""
+    local manual_count=0
+    local manual_details=""
+
+    # 파일 보안 설정 평가: 소유자 root(또는 해당 계정), 권한 600 이하, '+' 미포함 → SECURE
+    u27_eval_file() {
+        local path="$1" acct="${2:-}"
+        local perms owner reasons=""
+        perms=$(perl -e '@s=stat(shift); printf "%04o", $s[2] & 07777' "$path" 2>/dev/null || true)
+        owner=$(perl -e '@s=stat(shift); $u=getpwuid($s[4]); print defined($u) ? $u : $s[4]' "$path" 2>/dev/null || true)
+        if [ "$owner" != "root" ] && { [ -z "$acct" ] || [ "$owner" != "$acct" ]; }; then
+            reasons="${reasons}소유자(${owner:-확인불가}) 부적절; "
+        fi
+        if [[ "$perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms & ~8#600 & 07777 ))" -eq 0 ]; then
+            :
+        else
+            reasons="${reasons}권한(${perms:-확인불가}) 600 초과; "
+        fi
+        if [ -r "$path" ]; then
+            # 주석이 아닌 행에서 '+' 토큰을 위치 무관하게 탐지 (예: 'trustedhost +')
+            if grep -vE '^[[:space:]]*#' "$path" 2>/dev/null | grep -E '(^|[[:space:]])\+([[:space:]]|$)' >/dev/null 2>&1; then
+                reasons="${reasons}'+' 설정 포함; "
+            fi
+        else
+            echo "MANUAL 내용 확인 불가(읽기 권한 없음)"
+            return 0
+        fi
+        if [ -n "$reasons" ]; then
+            echo "INSECURE ${reasons%; }"
+        else
+            echo "SECURE"
+        fi
+        return 0
+    }
 
     # Capture raw find output for .rhosts files
     local rhosts_find=$(find /home -name '.rhosts' 2>/dev/null)
@@ -72,14 +107,27 @@ diagnose() {
     # Build command_result
     command_result="[Command: find /home -name '.rhosts']${newline}${rhosts_find}${newline}${newline}[Command: ls -l /etc/hosts.equiv]${newline}${hosts_equiv_ls}"
 
-    # /etc/hosts.equiv 파일 확인
+    # /etc/hosts.equiv 파일 확인 (존재 시 보안 설정 평가)
     if [ -f "/etc/hosts.equiv" ]; then
         ((hosts_equiv_exists++)) || true
-        local perms=$(perl -e '@stat=stat("/etc/hosts.equiv"); printf "%04o\n", $stat[2] & 07777' 2>/dev/null)
-        local owner=$(perl -e '@stat=lstat("/etc/hosts.equiv"); $uid=$stat[4]; $gid=$stat[5]; $user=getpwuid($uid); $group=getgrgid($gid); print "$user:$group"' 2>/dev/null)
-        local size=$(perl -e 'print (stat("/etc/hosts.equiv"))[7]' 2>/dev/null)
+        local perms=$(perl -e '@stat=stat(shift); printf "%04o\n", $stat[2] & 07777' /etc/hosts.equiv 2>/dev/null)
+        local owner=$(perl -e '@stat=lstat(shift); $uid=$stat[4]; $gid=$stat[5]; $user=getpwuid($uid); $group=getgrgid($gid); print "$user:$group"' /etc/hosts.equiv 2>/dev/null)
+        local size=$(perl -e 'print (stat(shift))[7]' /etc/hosts.equiv 2>/dev/null)
 
         hosts_equiv_details="/etc/hosts.equiv 파일 존재 (권한: ${perms}, 소유자: ${owner}, 크기: ${size}bytes)"
+
+        local he_eval=$(u27_eval_file /etc/hosts.equiv "")
+        case "$he_eval" in
+            SECURE) ;;
+            MANUAL*)
+                ((manual_count++)) || true
+                manual_details="${manual_details}/etc/hosts.equiv: ${he_eval#MANUAL }, "
+                ;;
+            *)
+                ((insecure_count++)) || true
+                insecure_details="${insecure_details}/etc/hosts.equiv: ${he_eval#INSECURE }, "
+                ;;
+        esac
     fi
 
     # 사용자 홈 디렉터리에서 .rhosts 파일 검색
@@ -88,22 +136,38 @@ diagnose() {
         local uid=$(echo "$user_line" | cut -d: -f3)
         local home_dir=$(echo "$user_line" | cut -d: -f6)
 
-        # 홈 디렉터리가 존재하고, UID가 100 이상인 일반 사용자 확인 (HP-UX: 시스템 UID < 100)
-        if [ -d "$home_dir" ] && [ "$uid" -ge 100 ] 2>/dev/null; then
+        # 홈 디렉터리가 존재하고, root(UID 0) 또는 UID가 100 이상인 사용자 확인 (HP-UX: 시스템 UID < 100)
+        if [ -d "$home_dir" ] && { [ "$uid" -eq 0 ] || [ "$uid" -ge 100 ]; } 2>/dev/null; then
             local rhosts_path="${home_dir}/.rhosts"
 
             if [ -f "$rhosts_path" ]; then
                 ((rhosts_count++)) || true
-                local perms=$(perl -e '@stat=stat("'$rhosts_path'"); printf "%04o\n", $stat[2] & 07777' 2>/dev/null)
-                local owner=$(perl -e '@stat=lstat("'$rhosts_path'"); $uid=$stat[4]; $user=getpwuid($uid); print "$user"' 2>/dev/null)
-                local size=$(perl -e 'print (stat("'$rhosts_path'"))[7]' 2>/dev/null)
+                local perms=$(perl -e '@stat=stat(shift); printf "%04o\n", $stat[2] & 07777' "$rhosts_path" 2>/dev/null)
+                local owner=$(perl -e '@stat=lstat(shift); $uid=$stat[4]; $user=getpwuid($uid); print "$user"' "$rhosts_path" 2>/dev/null)
+                local size=$(perl -e 'print (stat(shift))[7]' "$rhosts_path" 2>/dev/null)
 
                 rhosts_files="${rhosts_files}${rhosts_path} (권한: ${perms}, 소유자: ${owner}, 크기: ${size}bytes), "
+
+                local rh_eval=$(u27_eval_file "$rhosts_path" "$username")
+                case "$rh_eval" in
+                    SECURE) ;;
+                    MANUAL*)
+                        ((manual_count++)) || true
+                        manual_details="${manual_details}${rhosts_path}: ${rh_eval#MANUAL }, "
+                        ;;
+                    *)
+                        ((insecure_count++)) || true
+                        insecure_details="${insecure_details}${rhosts_path}: ${rh_eval#INSECURE }, "
+                        ;;
+                esac
             fi
         fi
     done < /etc/passwd || true
 
     # 결과 판정
+    # - 파일 없음 → 양호
+    # - 존재하나 모두 보안 설정 충족(소유자 root/계정, 권한 600 이하, '+' 없음) → 양호
+    # - 보안 설정 미충족 파일 존재 → 취약, 내용 확인 불가 파일만 존재 → 수동진단
     if [ "$hosts_equiv_exists" -eq 0 ] && [ "$rhosts_count" -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
@@ -111,7 +175,7 @@ diagnose() {
         local rhosts_check=$(find /home -name '.rhosts' 2>/dev/null | head -5; ls -l /etc/hosts.equiv 2>/dev/null || echo "No rhosts/hosts.equiv files found")
         command_result="${rhosts_check}"
         command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
-    else
+    elif [ "$insecure_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         details=""
@@ -124,8 +188,23 @@ diagnose() {
             details="${details}.rhosts 파일 ${rhosts_count}개 발견: ${rhosts_files%, }. "
         fi
 
-        inspection_summary="취약: ${details}"
-        command_result="hosts.equiv: ${hosts_equiv_exists}, .rhosts: ${rhosts_count}"
+        inspection_summary="취약: 보안 설정 미충족 파일 ${insecure_count}개 - ${insecure_details%, }. ${details}"
+        command_result="hosts.equiv: ${hosts_equiv_exists}, .rhosts: ${rhosts_count}${newline}[미충족 상세] ${insecure_details%, }"
+        command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
+    elif [ "$manual_count" -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="r 서비스 설정 파일이 존재하나 내용을 확인할 수 없어 수동 점검 필요: ${manual_details%, }"
+        command_result="hosts.equiv: ${hosts_equiv_exists}, .rhosts: ${rhosts_count}${newline}[확인 불가] ${manual_details%, }"
+        command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        details=""
+        [ "$hosts_equiv_exists" -gt 0 ] && details="${details}${hosts_equiv_details}. "
+        [ "$rhosts_count" -gt 0 ] && details="${details}.rhosts 파일 ${rhosts_count}개: ${rhosts_files%, }. "
+        inspection_summary="r 서비스 설정 파일이 존재하나 모두 보안 설정 충족(소유자 root/해당 계정, 권한 600 이하, '+' 없음): ${details}"
+        command_result="hosts.equiv: ${hosts_equiv_exists}, .rhosts: ${rhosts_count} (모두 보안 설정 충족)"
         command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
     fi
 

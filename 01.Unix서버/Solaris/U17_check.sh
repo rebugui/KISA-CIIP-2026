@@ -11,7 +11,7 @@
 # @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 시스템 시작 스크립트 권한 설정
-# @Description : /etc/init.d/* 권한 755 확인
+# @Description : /etc/init.d, /etc/rc*.d 시작 스크립트 소유자/권한 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,116 +57,132 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # SUID/SGID 파일 점검
+    # Solaris 시스템 시작 스크립트 점검: /etc/init.d/*, /etc/rc*.d/*
+    # 가이드라인: 소유자 root, 일반 사용자(others) 쓰기 권한 제거
 
-    local suid_files=""
-    local sgid_files=""
-    local suid_count=0
-    local sgid_count=0
     local vulnerable_files=""
     local vulnerable_count=0
+    local vuln_listed=0
+    local total_files=0
+    local unreadable_dirs=""
+    local found_dirs=""
+    local raw_output=""
+    local evidence_lines=0
+    local rc_dir=""
+    local entry=""
 
-    # 성능 최적화: 핵심 시스템 디렉토리로 검색 범위 제한
-    # WSL/가상환경에서 find /는 매우 느리므로 주요 바이너리 경로만 검색
-    local search_dirs=(
-        "/usr/bin"
-        "/usr/sbin"
-        "/bin"
-        "/sbin"
-        "/usr/local/bin"
-        "/usr/local/sbin"
-        "/lib"
-        "/lib64"
-        "/usr/lib"
-    )
+    for rc_dir in /etc/init.d /etc/rc*.d; do
+        [ -d "$rc_dir" ] || continue
+        found_dirs="${found_dirs}${rc_dir} "
 
-    # 검색 경로 구성
-    local find_paths=""
-    for dir in "${search_dirs[@]}"; do
-        if [ -d "$dir" ]; then
-            if [ -z "$find_paths" ]; then
-                find_paths="$dir"
-            else
-                find_paths="${find_paths} $dir"
-            fi
+        # 디렉터리 읽기 불가 시 수동 진단 대상
+        if [ ! -r "$rc_dir" ]; then
+            unreadable_dirs="${unreadable_dirs}${rc_dir}, "
+            continue
         fi
-    done || true
 
-    # SUID 파일 검색 (시스템 바이너리 외의 파일)
-    while IFS= read -r file; do
-        if [ -n "$file" ]; then
-            ((suid_count++)) || true
-            local perms=$(stat -c "%a" "$file" 2>/dev/null)
-            local owner=$(stat -c "%U" "$file" 2>/dev/null)
+        for entry in "$rc_dir"/*; do
+            # glob 미일치(리터럴 패턴) 및 존재하지 않는 항목 제외
+            [ -e "$entry" ] || continue
+            # 일반 파일만 점검 (심볼릭 링크는 stat이 대상 파일 기준, dangling link 제외)
+            [ -f "$entry" ] || continue
+            ((total_files++)) || true
 
-            # 예상되는 SUID 파일 목록 (시스템 바이너리)
-            local expected_suid_patterns="^(ping|ping6|traceroute|traceroute6|sudo|passwd|su|gpasswd|chsh|chfn|newgrp|umount|mount|pkexec|at|fusermount|Xorg|wbem|doas|chage|expire|ssh-keysign)"
+            # Solaris: perl stat으로 4자리 8진수 권한 + 소유자 확인
+            # (stat(shift)로 파일 인자를 반드시 소비 - U-63 형 bare (stat) 버그 방지)
+            local stat_out=""
+            stat_out=$(perl -e '@s=stat(shift) or exit 1; $o=getpwuid($s[4]); $o=$s[4] unless defined($o) && length($o); printf "%04o %s", $s[2] & 07777, $o' "$entry" 2>/dev/null || true)
+            [ -n "$stat_out" ] || continue
+            local perms="${stat_out%% *}"
+            local owner="${stat_out#* }"
 
-            # 파일명만 추출
-            local filename=$(basename "$file")
-
-            # 예상되는 시스템 바이너리가 아닌 경우 취약
-            if ! [[ "$filename" =~ $expected_suid_patterns ]]; then
-                # 사용자가 쓰기 가능한 스크립트 등 취약한 파일
-                if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]] || [ -w "$file" ]; then
-                    ((vulnerable_count++)) || true
-                    vulnerable_files="${vulnerable_files}${file} (SUID, 권한: ${perms}, 소유자: ${owner}), "
-                fi
+            # 증거 출력은 20개까지만 기록 (개수는 전체 집계)
+            if [ "$evidence_lines" -lt 20 ]; then
+                raw_output="${raw_output}${perms} ${owner} ${entry}${newline}"
+                ((evidence_lines++)) || true
             fi
 
-            suid_files="${suid_files}${file} (SUID, ${perms}:${owner}), "
-        fi
-    done < <(eval "find $find_paths -perm -4000 -type f 2>/dev/null | head -50") || true
-
-    # SGID 파일 검색
-    while IFS= read -r file; do
-        if [ -n "$file" ]; then
-            ((sgid_count++)) || true
-            local perms=$(stat -c "%a" "$file" 2>/dev/null)
-            local owner=$(stat -c "%U" "$file" 2>/dev/null)
-
-            # 예상되는 SGID 디렉터리/파일 (write 가능한 공유 디렉터리 등)
-            if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]] || [ -w "$file" ]; then
+            if [ "$owner" != "root" ]; then
                 ((vulnerable_count++)) || true
-                vulnerable_files="${vulnerable_files}${file} (SGID, 권한: ${perms}, 소유자: ${owner}), "
+                if [ "$vuln_listed" -lt 20 ]; then
+                    vulnerable_files="${vulnerable_files}${entry} (소유자: ${owner}), "
+                    ((vuln_listed++)) || true
+                fi
+            else
+                # 일반 사용자(그룹 또는 others) 쓰기 권한: 4자리 8진수 문자열에서
+                # others(마지막 자리) 또는 group(끝에서 2번째 자리)이 2,3,6,7이면 취약
+                # (산술 % 10 사용 금지 - bash가 선행 0을 8진수로 해석하여 오판)
+                local others_oct="${perms: -1}"
+                local group_oct="${perms: -2:1}"
+                case "$others_oct" in
+                    2|3|6|7)
+                        ((vulnerable_count++)) || true
+                        if [ "$vuln_listed" -lt 20 ]; then
+                            vulnerable_files="${vulnerable_files}${entry} (권한: ${perms}, others 쓰기 가능), "
+                            ((vuln_listed++)) || true
+                        fi
+                        ;;
+                    *)
+                        case "$group_oct" in
+                            2|3|6|7)
+                                ((vulnerable_count++)) || true
+                                if [ "$vuln_listed" -lt 20 ]; then
+                                    vulnerable_files="${vulnerable_files}${entry} (권한: ${perms}, group 쓰기 가능), "
+                                    ((vuln_listed++)) || true
+                                fi
+                                ;;
+                        esac
+                        ;;
+                esac
             fi
+        done
+    done
 
-            sgid_files="${sgid_files}${file} (SGID, ${perms}:${owner}), "
-        fi
-    done < <(eval "find $find_paths -perm -2000 -type f 2>/dev/null | head -50") || true
-
-    # 결과 판정
-    # Capture actual find command output
-    local suid_find_output=$(eval "find $find_paths -perm -4000 -type f 2>/dev/null" | head -20 || echo "No SUID files found")
-    local sgid_find_output=$(eval "find $find_paths -perm -2000 -type f 2>/dev/null" | head -20 || echo "No SGID files found")
-
-    if [ "$vulnerable_count" -eq 0 ]; then
-        if [ "$suid_count" -eq 0 ] && [ "$sgid_count" -eq 0 ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="SUID/SGID 파일 없음 (시스템 보안 양호)"
-            command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}"
-            command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
-        else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="SUID/SGID 파일이 시스템 바이너리로만 구성됨 (SUID: ${suid_count}개, SGID: ${sgid_count}개)"
-            command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}"
-            command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
-        fi
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="취약한 SUID/SGID 파일 ${vulnerable_count}개 발견: ${vulnerable_files%, }"
-        command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}${newline}${newline}[Summary] Total SUID: ${suid_count}, SGID: ${sgid_count} (vulnerable: ${vulnerable_count})"
-        command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
+    if [ "$total_files" -gt "$evidence_lines" ]; then
+        raw_output="${raw_output}... (총 ${total_files}개 중 ${evidence_lines}개 표시)${newline}"
+    fi
+    if [ -n "$unreadable_dirs" ]; then
+        raw_output="${raw_output}[읽기 불가 디렉터리] ${unreadable_dirs%, }${newline}"
     fi
 
-    # echo ""
-    # echo "진단 결과: ${status}"
-    # echo "판정: ${diagnosis_result}"
-    # echo "설명: ${inspection_summary}"
-    # echo ""
+    local exec_cmd="find /etc/init.d /etc/rc*.d -type f 2>/dev/null; perl -e '@s=stat(shift); printf \"%04o %s\", \$s[2] & 07777, scalar getpwuid(\$s[4])' <파일>"
+
+    # 결과 판정
+    if [ "$vulnerable_count" -gt 0 ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        local vuln_extra=""
+        if [ "$vulnerable_count" -gt "$vuln_listed" ]; then
+            vuln_extra=" 외 $((vulnerable_count - vuln_listed))개"
+        fi
+        inspection_summary="취약한 시작 스크립트 ${vulnerable_count}개 발견 (검사 ${total_files}개): ${vulnerable_files%, }${vuln_extra}"
+        command_result="[Command: ${exec_cmd}]${newline}${raw_output}"
+        command_executed="${exec_cmd}"
+    elif [ -n "$unreadable_dirs" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="시작 스크립트 디렉터리 접근 불가로 수동 확인 필요: ${unreadable_dirs%, }"
+        command_result="[Command: ${exec_cmd}]${newline}${raw_output}"
+        command_executed="${exec_cmd}"
+    elif [ -z "$found_dirs" ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="시스템 시작 스크립트 디렉터리(/etc/init.d, /etc/rc*.d) 없음"
+        command_result="[Command: ${exec_cmd}]${newline}[DIR NOT FOUND: /etc/init.d, /etc/rc*.d]"
+        command_executed="${exec_cmd}"
+    elif [ "$total_files" -eq 0 ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="시작 스크립트 디렉터리(${found_dirs% })에 점검 대상 파일 없음"
+        command_result="[Command: ${exec_cmd}]${newline}[NO FILES FOUND in ${found_dirs% }]"
+        command_executed="${exec_cmd}"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="모든 시작 스크립트 소유자 root, others 쓰기 권한 없음 (${total_files}개 검사)"
+        command_result="[Command: ${exec_cmd}]${newline}${raw_output}"
+        command_executed="${exec_cmd}"
+    fi
 
     # 결과 생성 (PC 패턴: 스크립트에서 모드 확인 후 처리)
     # Run-all 모드 확인

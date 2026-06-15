@@ -187,9 +187,20 @@ try {
             }
         }
 
-        foreach ($root in @(Get-ApacheDocumentRoots -ConfigText $config.Text)) {
+        $resolvedRoots = @(Get-ApacheDocumentRoots -ConfigText $config.Text)
+        foreach ($root in $resolvedRoots) {
             $assessedPaths.Add([pscustomobject]@{ Path = $root; Role = 'DocumentRoot' }) | Out-Null
         }
+
+        # 설정에 DocumentRoot가 선언되어 있으나 실제 경로를 확인(resolve)하지 못한 경우 추적.
+        # (예: 환경변수/UNC 경로 → Test-Path 실패로 위 helper에서 제외됨) 웹 루트 ACL을
+        # 점검하지 못하므로 양호로 단정하지 않고 수동진단으로 유도한다.
+        $declaredRootCount = @(
+            $config.Text -split "`r?`n" |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ -notmatch '^#' -and $_ -match '^(?i)DocumentRoot\s+"?([^"#]+?)"?\s*$' }
+        ).Count
+        $webRootUnresolved = ($declaredRootCount -gt 0 -and $resolvedRoots.Count -eq 0)
 
         $aclEvidence = foreach ($pathInfo in $assessedPaths) {
             Get-BroadAclEvidence -Path $pathInfo.Path -PathRole $pathInfo.Role
@@ -221,6 +232,12 @@ try {
             $finalResult = "MANUAL"
             $status = "수동진단"
             $summary = "DocumentRoot has broad read access; confirm whether this is required and whether sensitive files are excluded."
+        }
+        elseif ($webRootUnresolved) {
+            # DocumentRoot는 선언되어 있으나 실제 경로를 확인하지 못해 웹 루트 ACL 미점검 → 양호 단정 불가
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Apache DocumentRoot is declared but its path could not be resolved/accessed (environment variable/UNC). Manually verify ACLs on the web service path; configuration files were checked but the web root was not."
         }
         else {
             $finalResult = "GOOD"

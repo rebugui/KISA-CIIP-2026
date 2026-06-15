@@ -111,9 +111,9 @@ diagnose() {
     local vulnerabilities_found=0
 
     if ! pg_isready -h "${DB_HOST}" -p "${DB_PORT}" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="PostgreSQL 서비스 미실행"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="PostgreSQL 서비스 미실행으로 Object Owner 자동 점검 불가. 서비스 기동 후 재점검 또는 수동 점검 필요."
         save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
         verify_result_saved "${ITEM_ID}"
         return 0
@@ -124,11 +124,22 @@ diagnose() {
     command_executed="psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_ADMIN_USER} -d postgres -c \"${object_owner_query}\""
 
     # Try Unix socket connection first (peer authentication in Docker)
-    command_result=$(psql -U "${DB_ADMIN_USER}" -d postgres -c "${object_owner_query}" 2>/dev/null || echo "")
+    local query_ok=0
+    command_result=$(psql -U "${DB_ADMIN_USER}" -d postgres -tAc "${object_owner_query}" 2>/dev/null) && query_ok=1 || query_ok=0
 
     # Fall back to TCP connection with password
-    if [ -z "$command_result" ]; then
-        command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -c "${object_owner_query}" 2>/dev/null || echo "")
+    if [ "${query_ok}" -ne 1 ]; then
+        command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -tAc "${object_owner_query}" 2>/dev/null) && query_ok=1 || query_ok=0
+    fi
+
+    # 두 연결 모두 쿼리 실패(연결/권한/구문 오류) → 자동 판정 불가, MANUAL 처리
+    if [ "${query_ok}" -ne 1 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="PostgreSQL 쿼리 실행 실패로 Object Owner 자동 점검 불가. 연결 정보/권한 확인 후 재점검 또는 수동 점검 필요."
+        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        verify_result_saved "${ITEM_ID}"
+        return 0
     fi
 
     local non_superuser_objects=0

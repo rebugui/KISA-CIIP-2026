@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="디렉터리 리스팅 기능 차단 설정"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -113,8 +113,8 @@ diagnose() {
     else
         command_executed="ls /etc/tomcat*/web.xml /var/lib/tomcat*/conf/web.xml 2>/dev/null"
         command_result="web.xml file not found"
-        diagnosis_result="UNKNOWN"
-        status="파일없음"
+        diagnosis_result="MANUAL"
+        status="수동진단"
         inspection_summary="web.xml 파일을 찾을 수 없습니다."
 
         # Run-all 모드 확인

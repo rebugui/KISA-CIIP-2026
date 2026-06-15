@@ -42,9 +42,13 @@ try {
 
     $windowsFirewallEnabled = $false
     if ($null -ne $profiles) {
+        # NetFirewallProfile.Enabled는 tri-state(True / False / NotConfigured)임.
+        # 'NotConfigured -eq $false'는 $false이므로 -eq $false 검사는 NotConfigured 프로필을
+        # 조용히 통과시켜 false-good을 유발함. 명시적으로 True(사용)가 아닌 모든 상태를
+        # 비활성으로 간주한다(W-64 수정 미러링).
         $allEnabled = $true
         foreach ($profile in $profiles) {
-            if ($profile.Enabled -eq $false) {
+            if ($profile.Enabled -ne $true) {
                 $allEnabled = $false
                 break
             }
@@ -59,17 +63,20 @@ try {
     $thirdPartyFirewallActive = $false
     $thirdPartyDetails = ""
 
+    $thirdPartyFirewallInstalledOnly = $false
     if ($null -ne $thirdPartyFirewall) {
         foreach ($fw in $thirdPartyFirewall) {
             $fwName = $fw.displayName
             $stateVal = $fw.productState
-            if ($null -ne $stateVal -and ($stateVal -band 0x10) -ne 0) {
+            # SecurityCenter2 productState: 활성화(ON) 상태는 비트 12-15 (마스크 0x1000)로 표현됨
+            # displayName 존재만으로는 "설치됨"일 뿐 "사용 중(활성)"을 증명하지 못하므로
+            # 반드시 productState 활성화 비트를 확인해야 함 (설치-but-비활성 방화벽 false-good 방지)
+            if ($null -ne $stateVal -and ($stateVal -band 0x1000) -ne 0) {
                 $thirdPartyFirewallActive = $true
-                $thirdPartyDetails = "$fwName 활성화"
+                $thirdPartyDetails = "$fwName 활성화 (productState=0x{0:X})" -f [int]$stateVal
             } elseif ($null -ne $fwName) {
-                # productState 체크가 불확실하면 설치 여부만 확인
-                $thirdPartyFirewallActive = $true
-                $thirdPartyDetails = "$fwName 설치됨"
+                $thirdPartyFirewallInstalledOnly = $true
+                $thirdPartyDetails = "$fwName 설치됨 (productState=0x{0:X}, 활성화 비트 미확인)" -f [int]$stateVal
             }
         }
     }
@@ -82,13 +89,15 @@ try {
         $finalResult = "GOOD"
         $summary = "제3자 방화벽 활성화됨: $thirdPartyDetails"
         $status = "양호"
+    } elseif ($thirdPartyFirewallInstalledOnly) {
+        # 제3자 방화벽이 등록되어 있으나 productState 활성화 비트가 확인되지 않음
+        # → 설치되었으나 비활성(사용 안 함)일 가능성이 높음. 양호로 판정하지 않음.
+        $finalResult = "VULNERABLE"
+        $summary = "제3자 방화벽 설치되었으나 활성화(사용) 상태 미확인: $thirdPartyDetails (Windows 방화벽도 비활성)"
+        $status = "취약"
     } else {
         $finalResult = "VULNERABLE"
-        if ($null -ne $thirdPartyFirewall) {
-            $summary = "제3자 방화벽 설치되었으나 활성화 상태 불명확"
-        } else {
-            $summary = "방화벽이 비활성화됨 (Windows 및 제3자 방화벽 모두)"
-        }
+        $summary = "방화벽이 비활성화됨 (Windows 및 제3자 방화벽 모두)"
         $status = "취약"
     }
 

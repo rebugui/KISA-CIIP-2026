@@ -34,16 +34,38 @@ diagnose() {
     local status="양호"; diagnosis_result="GOOD"
     local inspection_summary="/dev 디렉토리에 device 파일이 아닌 일반 파일이 존재하지 않습니다."
     local command_result=""; local command_executed="find /dev -type f"
+    local newline=$'\n'
 
-    # /dev 디렉토리 내 device 파일이 아닌 일반 파일 탐색
-    local fake_dev=$(find /dev -type f 2>/dev/null | xargs)
+    # /dev 디렉토리 자체를 신뢰성 있게 열거할 수 있는지 먼저 확인.
+    # 권한 부족/탐색 실패로 결과가 비는 경우를 GOOD으로 오판하지 않기 위함.
+    if [ ! -d /dev ]; then
+        diagnosis_result="MANUAL"; status="수동진단"
+        inspection_summary="/dev 디렉터리를 확인할 수 없어 수동 점검이 필요합니다."
+        command_result="/dev 디렉터리 없음 또는 접근 불가"
+        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        return 0
+    fi
 
-    if [ -n "$fake_dev" ]; then
+    # /dev 디렉토리 내 device 파일이 아닌 일반 파일 탐색.
+    # find의 stderr와 종료 코드를 모두 캡처하여 탐색 실패(권한 거부 등)를 식별함.
+    local find_err find_rc=0 fake_dev=""
+    find_err=$(mktemp 2>/dev/null || echo "/tmp/u26_find_err.$$")
+    fake_dev=$(find /dev -type f 2>"$find_err") || find_rc=$?
+    local err_content=""
+    [ -f "$find_err" ] && err_content=$(cat "$find_err" 2>/dev/null)
+    rm -f "$find_err" 2>/dev/null || true
+
+    # 탐색이 실패했거나(권한 거부/오류) 검색 자체가 불완전하면 GOOD으로 단정하지 않고 수동 점검.
+    if [ "$find_rc" -ne 0 ] || [ -n "$err_content" ]; then
+        diagnosis_result="MANUAL"; status="수동진단"
+        inspection_summary="/dev 디렉터리를 신뢰성 있게 열거하지 못해(권한 부족/탐색 오류 가능) 수동 점검이 필요합니다."
+        command_result="[find /dev -type f 오류/경고]${newline}${err_content:-탐색 실패(rc=${find_rc})}${newline}부분 결과: [ $(printf '%s' "$fake_dev" | xargs 2>/dev/null) ]"
+    elif [ -n "$fake_dev" ]; then
         status="취약"; diagnosis_result="VULNERABLE"
         inspection_summary="/dev 디렉토리에 device 파일이 아닌 일반 파일이 존재합니다."
-        command_result="발견된 일반 파일: [ $fake_dev ]"
+        command_result="발견된 일반 파일: [ $(printf '%s' "$fake_dev" | xargs 2>/dev/null) ]"
     else
-        command_result="/dev 내 특이 파일 없음"
+        command_result="/dev 내 특이 파일 없음 (정상 열거 완료)"
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

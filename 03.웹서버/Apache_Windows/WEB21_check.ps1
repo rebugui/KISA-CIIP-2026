@@ -53,30 +53,43 @@ try {
         $config = Get-ApacheWindowsConfigText -ConfigFiles $configFiles
         $activeLines = @($config.Text -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notmatch '^#' })
         $httpListeners = @($activeLines | Where-Object { $_ -match '^(?i)(Listen\s+(?:0\.0\.0\.0:|\*:)?80\b|<VirtualHost\s+[^>]*:80\b)' })
+        # Only an actual HTTP->HTTPS redirect counts as evidence. HSTS
+        # (Strict-Transport-Security) does NOT redirect a plain HTTP request
+        # from a new client over port 80, so it is intentionally excluded.
         $redirectRules = @($activeLines | Where-Object {
-            $_ -match '^(?i)Redirect(?:Match)?\s+(?:permanent|301)?\s+/?\s+https://' -or
-            $_ -match '^(?i)RewriteRule\s+.+\s+https://' -or
-            $_ -match '^(?i)Header\s+always\s+set\s+Strict-Transport-Security\b'
+            $_ -match '^(?i)Redirect(?:Match)?\s+(?:permanent\s+|301\s+|seeother\s+|temp\s+|302\s+)?\S*\s+https://' -or
+            $_ -match '^(?i)RewriteRule\s+.+\s+https://'
         })
+        $hstsHeaders = @($activeLines | Where-Object { $_ -match '^(?i)Header\s+always\s+set\s+Strict-Transport-Security\b' })
         $rewriteEnabled = @($activeLines | Where-Object { $_ -match '^(?i)RewriteEngine\s+On\b' })
+        $hasRedirectDirective = @($redirectRules | Where-Object { $_ -match '^(?i)Redirect' }).Count -gt 0
+        $hasRewriteRedirect = @($redirectRules | Where-Object { $_ -match '^(?i)RewriteRule' }).Count -gt 0
 
         $commandExecuted = "Parse Apache Windows Listen/VirtualHost and HTTPS redirect directives"
         $commandOutput = (@(
             if ($httpListeners) { "HTTP listeners:`n" + ($httpListeners -join "`n") }
             if ($rewriteEnabled) { "Rewrite enabled:`n" + ($rewriteEnabled -join "`n") }
             if ($redirectRules) { "Redirect evidence:`n" + ($redirectRules -join "`n") }
+            if ($hstsHeaders) { "HSTS header (not a redirect):`n" + ($hstsHeaders -join "`n") }
             if (-not $httpListeners -and -not $redirectRules) { "No HTTP listener or HTTPS redirect evidence found." }
         ) -join "`n`n")
 
-        if ($redirectRules.Count -gt 0 -and ($rewriteEnabled.Count -gt 0 -or ($redirectRules -join "`n") -match '^(?im)Redirect')) {
+        # GOOD requires a real redirect: a Redirect/RedirectMatch to https://,
+        # or a RewriteRule to https:// backed by RewriteEngine On.
+        if ($hasRedirectDirective -or ($hasRewriteRedirect -and $rewriteEnabled.Count -gt 0)) {
             $finalResult = "GOOD"
             $status = "양호"
-            $summary = "HTTPS redirection or HSTS evidence was found in Apache configuration."
+            $summary = "HTTP-to-HTTPS redirection was found in Apache configuration."
         }
         elseif ($httpListeners.Count -gt 0) {
             $finalResult = "VULNERABLE"
             $status = "취약"
-            $summary = "HTTP listener evidence was found without HTTPS redirection evidence."
+            if ($hstsHeaders.Count -gt 0) {
+                $summary = "HTTP listener found with HSTS only and no HTTP-to-HTTPS redirect. HSTS does not redirect plain HTTP requests from new clients; configure a Redirect or RewriteRule to https://."
+            }
+            else {
+                $summary = "HTTP listener evidence was found without HTTPS redirection evidence."
+            }
         }
         else {
             $finalResult = "MANUAL"

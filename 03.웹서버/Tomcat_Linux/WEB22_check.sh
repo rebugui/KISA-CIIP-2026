@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="필수 에러 코드에 대해 일원화된 에러 페이
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -81,38 +81,60 @@ diagnose() {
     fi
 
     local web_xml_locations=(
+        "${CATALINA_HOME:-/usr/local/tomcat}/conf/web.xml"
+        "/usr/local/tomcat/conf/web.xml"
         "/etc/tomcat*/web.xml"
         "/var/lib/tomcat*/conf/web.xml"
         "/usr/share/tomcat*/conf/web.xml"
     )
 
     local error_config=""
+    local found_web_xml=""
 
     for xml_pattern in "${web_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                # error-page 설정 확인
-                local found_error=$(grep -E "error-page|exception-type|location" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                found_web_xml="${xml_file}"
+                # 커스텀 <error-page> 엘리먼트 확인 (주석 제외)
+                local found_error=$(grep -E "<error-page>" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 if [ -n "${found_error}" ]; then
                     error_config="${found_error}"
-                    error_page_count=$(echo "${found_error}" | grep -c "error-page" || true)
+                fi
+                # 판단기준(가이드): 에러 페이지가 '별도로 지정'되어야 양호.
+                # servlet web.xml에서 <location>은 <error-page> 블록에서만 사용되므로
+                # 비어있지 않은 <location> 값(커스텀 페이지 경로)의 개수로 판정한다.
+                # XML이 여러 줄에 걸쳐 있을 수 있으므로 개행을 공백으로 치환(tr)한 뒤
+                # 주석(<!-- ... -->) 블록을 제거하고 유효한 <location>만 계수한다.
+                if [ -r "${xml_file}" ]; then
+                    error_page_count=$(tr '\n' ' ' < "${xml_file}" 2>/dev/null \
+                        | sed -E 's/<!--.*?-->/ /g; s/<!--.*$//' \
+                        | grep -oE '<location>[[:space:]]*[^<[:space:]][^<]*</location>' \
+                        | grep -c '<location>' || true)
                 fi
                 break 2
             fi
         done
     done
 
-    command_executed="grep -E 'error-page|exception-type|location' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
-    command_result="${error_config:-No error-page configuration found}"
+    command_executed="tr '\\n' ' ' < ${found_web_xml:-/usr/local/tomcat/conf/web.xml} | grep -oE '<location>[^<]+</location>' | grep -c '<location>'"
+    command_result="${error_config:-No <error-page> configuration found}"
 
-    if [ ${error_page_count} -gt 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="${error_page_count}개의 커스텀 에러 페이지가 설정되어 있습니다. (보안 권고사항 준수)"
-    else
+    if [ -z "${found_web_xml}" ]; then
+        # web.xml을 찾지 못하면 자동 판정 불가 → 증거 기반 MANUAL
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="에러 페이지 설정을 수동으로 확인하세요. web.xml에서 error-page 설정 권장."
+        inspection_summary="Tomcat web.xml을 표준 경로 및 CATALINA_HOME에서 찾을 수 없어 자동 판정이 불가합니다. web.xml의 error-page 설정을 수동으로 확인하세요."
+        command_result="web.xml not found in standard or CATALINA_HOME locations"
+    elif [ ${error_page_count} -gt 0 ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="${error_page_count}개의 커스텀 error-page가 web.xml에 설정되어 있습니다. (보안 권고사항 준수)"
+    else
+        # docs WEB-22 criteria_bad: 에러 페이지가 별도로 지정되지 않은 경우 취약
+        # (커스텀 error-page 미설정 시 Tomcat 기본 에러 페이지가 서버/스택 정보를 노출)
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="web.xml에 커스텀 error-page 설정이 없습니다. Tomcat 기본 에러 페이지는 서버 버전 및 스택 정보를 노출하므로 취약합니다. web.xml에 error-page를 설정하세요."
     fi
 
     # Run-all 모드 확인

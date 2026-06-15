@@ -60,31 +60,28 @@ diagnose() {
     local automount_running=false
     local automount_info=""
 
-    # 1) autofs 서비스 확인
-    if [ -f /sbin/init.d/autofs ]; then
-        local active=$(/sbin/init.d/autofs status 2>/dev/null | grep -q "running" 2>/dev/null && echo "active" || echo "inactive")
-        automount_info="${automount_info}autofs 서비스: ${active}\\n"
-
-        if [ "$active" = "active" ]; then
-            automount_running=true
-        fi
+    # 1) 실행 중인 automount/automountd 프로세스 확인 (1차 판정 기준)
+    #    HP-UX는 /sbin/init.d/<svc> status 를 지원하지 않으므로 ps 기반으로 판정
+    local automount_procs
+    automount_procs=$(ps -ef 2>/dev/null | grep -E 'automountd?' | grep -v grep || true)
+    if [ -n "$automount_procs" ]; then
+        automount_running=true
+        automount_info="${automount_info}실행 중인 automount 프로세스:\\n${automount_procs}\\n"
     fi
 
-    # 2) amd(Automount Daemon) 서비스 확인
-    if [ -f /sbin/init.d/amd ]; then
-        local active=$(/sbin/init.d/amd status 2>/dev/null | grep -q "running" 2>/dev/null && echo "active" || echo "inactive")
-        automount_info="${automount_info}amd 서비스: ${active}\\n"
-
-        if [ "$active" = "active" ]; then
-            automount_running=true
+    # 2) init.d 스크립트 존재 여부 (판정에 사용하지 않는 참고 증거)
+    local rc_script
+    for rc_script in autofs amd automountd; do
+        if [ -f "/sbin/init.d/${rc_script}" ]; then
+            automount_info="${automount_info}/sbin/init.d/${rc_script} 스크립트 존재 (참고)\\n"
         fi
-    fi
+    done
 
-    # 3) automountd 서비스 확인 (legacy)
-    if [ -f /sbin/init.d/automountd ]; then
-        local active=$(/sbin/init.d/automountd status 2>/dev/null | grep -q "running" 2>/dev/null && echo "active" || echo "inactive")
-        automount_info="${automount_info}automountd: ${active}\\n"
-        if [ "$active" = "active" ]; then
+    # 3) HP-UX 부팅 설정: /etc/rc.config.d/nfsconf의 AUTOFS 플래그 확인 (가이드 조치: AUTOFS=0)
+    if [ -f /etc/rc.config.d/nfsconf ]; then
+        local autofs_flag=$(grep -E '^[[:space:]]*AUTOFS[[:space:]]*=' /etc/rc.config.d/nfsconf 2>/dev/null | tail -1 | cut -d= -f2 | tr -d ' \t"' || true)
+        if [ -n "$autofs_flag" ] && [ "$autofs_flag" != "0" ]; then
+            automount_info="${automount_info}/etc/rc.config.d/nfsconf AUTOFS=${autofs_flag} (부팅 시 자동 활성화)\\n"
             automount_running=true
         fi
     fi
@@ -98,11 +95,14 @@ diagnose() {
         fi
     fi
 
-    # 5) autofs 설정 파일 확인
-    if [ -f /etc/auto.master ] || [ -f /etc/auto.master.d/*.conf ]; then
+    # 5) autofs 설정 파일 확인 (HP-UX 마스터 맵 /etc/auto_master 포함)
+    if [ -f /etc/auto.master ] || [ -f /etc/auto_master ] || ls /etc/auto.master.d/*.conf >/dev/null 2>&1; then
         automount_info="${automount_info}autofs 설정 파일 존재\\n"
         if [ -f /etc/auto.master ]; then
             automount_info="${automount_info}$(head -5 /etc/auto.master 2>/dev/null)\\n"
+        fi
+        if [ -f /etc/auto_master ]; then
+            automount_info="${automount_info}$(head -5 /etc/auto_master 2>/dev/null)\\n"
         fi
         automount_running=true
     fi
@@ -112,15 +112,14 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="automount 서비스 비활성화됨"
-        local auto_check=$(/sbin/init.d/autofs status 2>/dev/null | head -2; /sbin/init.d/amd status 2>/dev/null | head -2; grep automount /etc/fstab 2>/dev/null || echo "No automount services found")
-        command_result="${auto_check}"
-        command_executed="/sbin/init.d/autofs status 2>/dev/null; /sbin/init.d/amd status 2>/dev/null; grep automount /etc/fstab 2>/dev/null"
+        command_result="실행 중인 automount 프로세스 없음\\n${automount_info}"
+        command_executed="ps -ef | grep -E 'automountd?' | grep -v grep; grep AUTOFS /etc/rc.config.d/nfsconf 2>/dev/null; grep automount /etc/fstab 2>/dev/null; ls /etc/auto.master /etc/auto_master 2>/dev/null"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="automount 서비스 활성화됨"
         command_result="${automount_info}"
-        command_executed="/sbin/init.d/autofs status 2>/dev/null | grep -q "running" amd; cat /etc/auto.master 2>/dev/null; grep automount /etc/fstab"
+        command_executed="ps -ef | grep -E 'automountd?' | grep -v grep; cat /etc/auto.master 2>/dev/null; grep automount /etc/fstab"
     fi
 
     # echo ""

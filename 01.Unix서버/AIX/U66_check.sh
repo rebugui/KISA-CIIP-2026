@@ -80,10 +80,25 @@ diagnose() {
         syslog_service="sysklogd"
         service_active=true
         config_file="/etc/syslog.conf"
+    elif lssrc -s syslogd 2>/dev/null | grep -q "active" >/dev/null 2>&1; then
+        # AIX 기본 syslogd (SRC 관리)
+        syslog_service="syslogd"
+        service_active=true
+        config_file="/etc/syslog.conf"
+    elif ps -ef 2>/dev/null | grep syslogd | grep -v grep >/dev/null 2>&1; then
+        # SRC 미등록 syslogd 프로세스 확인 (fallback)
+        syslog_service="syslogd"
+        service_active=true
+        config_file="/etc/syslog.conf"
     elif [ -f "/etc/rsyslog.conf" ]; then
         syslog_service="rsyslog"
         config_file="/etc/rsyslog.conf"
         # rsyslog 설치되어 있지만 비활성화된 경우
+        service_active=false
+    elif [ -f "/etc/syslog.conf" ]; then
+        # AIX 기본 syslogd가 설치(설정 파일 존재)되어 있으나 데몬이 중지된 경우 → 취약 판정 경로로 진행
+        syslog_service="syslogd"
+        config_file="/etc/syslog.conf"
         service_active=false
     else
         diagnosis_result="MANUAL"
@@ -135,18 +150,31 @@ diagnose() {
         # 설정 파일 내용 확인 (주석 제외한 라인 수)
         local config_lines=$(grep -v "^#" "$config_file" | grep -v "^[[:space:]]*$" | wc -l)
 
-        # 3) 주요 로그 파일 기록 확인
+        # 3) 주요 로그 파일 기록 확인 (표준 경로 + 설정 파일에 정의된 로그 경로)
         local critical_logs=("/var/log/syslog" "/var/log/messages" "/var/log/auth.log" "/var/log/secure" "/var/log/kern.log")
+
+        local configured_logs
+        # AIX 'rotate size ... files N' 접미사가 있어도 로그 경로를 추출하도록 selector 이후 첫 '/' 토큰 사용
+        configured_logs=$(grep -v "^#" "$config_file" 2>/dev/null | awk '{for(i=2;i<=NF;i++){t=$i; sub(/^-/,"",t); if(t ~ /^\//){print t; break}}}' | grep -v "^/dev/" | sort -u || true)
+        local configured_log
+        for configured_log in $configured_logs; do
+            case " ${critical_logs[*]} " in
+                *" ${configured_log} "*) ;;
+                *) critical_logs+=("$configured_log") ;;
+            esac
+        done
 
         for log_file in "${critical_logs[@]}"; do
             ((total_log_files++)) || true
             if [ -f "$log_file" ]; then
                 # 로그 파일이 존재하고 최근 기록이 있는지 확인 (AIX: stat -c 미지원, perl 사용)
-                local last_mod=$(perl -le 'print (stat shift)[9]' "$log_file" 2>/dev/null || echo "0")
-                local current_time=$(perl -le 'print time')
+                local last_mod=$(perl -e 'print((stat(shift))[9])' "$log_file" 2>/dev/null || echo "0")
+                [ -n "$last_mod" ] || last_mod=0
+                local current_time=$(perl -e 'print time' 2>/dev/null || date +%s 2>/dev/null || echo "0")
+                [ -n "$current_time" ] || current_time=0
                 local days_since_mod=$(( (current_time - last_mod) / 86400 ))
 
-                if [ "$days_since_mod" -le 7 ]; then
+                if [ "$last_mod" -gt 0 ] && [ "$current_time" -gt 0 ] && [ "$days_since_mod" -le 7 ]; then
                     ((log_files_check++)) || true
                 fi
             fi
@@ -154,20 +182,14 @@ diagnose() {
 
         command_executed="lssrc -a ${syslog_service}; ls -l /var/log/*.log | head -10"
 
-        # 최종 판정
-        if [ "$service_active" = true ] && [ "$config_lines" -gt 0 ] && [ "$log_files_check" -ge 2 ]; then
+        # 최종 판정 (양호: 데몬 활성 + 설정 존재 + 실제 로그를 남기고 있는 경우 모두 충족)
+        if [ "$service_active" = true ] && [ "$config_lines" -gt 0 ] && [ "$log_files_check" -ge 1 ]; then
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="${syslog_service} 서비스가 활성화되어 있고, 로그 기록 정책이 설정되어 있습니다. (설정 파일: ${config_file}, 활성 로그 파일: ${log_files_check}/${total_log_files}개)"
-            local cat_conf=$(cat /etc/syslog.conf 2>/dev/null | head -30 || echo "syslog.conf not readable")
+            inspection_summary="${syslog_service} 서비스가 활성화되어 있고, 로그 기록 정책이 설정되어 있으며, 로그를 남기고 있습니다. (설정 파일: ${config_file}, 최근 기록 로그 파일: ${log_files_check}/${total_log_files}개)"
+            local cat_conf=$(cat "$config_file" 2>/dev/null | head -30 || echo "config not readable")
             local ls_log=$(ls -la /var/log/*.log 2>/dev/null | head -20 || echo "No log files")
-            command_result="[Command: cat /etc/syslog.conf]${newline}${cat_conf}${newline}${newline}[Command: ls -la /var/log/*.log]${newline}${ls_log}"
-        elif [ "$service_active" = true ] && [ "$config_lines" -gt 0 ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="${syslog_service} 서비스가 활성화되어 있고, 로그 기록 정책이 설정되어 있습니다. (최근 기록된 로그 파일: ${log_files_check}개)"
-            local cat_conf=$(cat /etc/syslog.conf 2>/dev/null | head -30 || echo "syslog.conf not readable")
-            command_result="[Command: cat /etc/syslog.conf]${newline}${cat_conf}"
+            command_result="[Command: cat ${config_file}]${newline}${cat_conf}${newline}${newline}[Command: ls -la /var/log/*.log]${newline}${ls_log}"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
@@ -181,11 +203,11 @@ diagnose() {
                 fi
                 reason="${reason}설정 파일 내용 없음"
             fi
-            if [ "$log_files_check" -lt 2 ]; then
+            if [ "$log_files_check" -lt 1 ]; then
                 if [ -n "$reason" ]; then
                     reason="${reason}, "
                 fi
-                reason="${reason}로그 파일 기록 부족 (${log_files_check}/${total_log_files}개)"
+                reason="${reason}최근 기록된 로그 파일 없음 - 로그를 남기고 있지 않은 경우 (${log_files_check}/${total_log_files}개)"
             fi
             inspection_summary="시스템 로깅 설정이 부적절합니다: ${reason}. ${syslog_service} 서비스를 활성화하고 로그 기록 정책을 설정하세요"
             command_result="${reason}"

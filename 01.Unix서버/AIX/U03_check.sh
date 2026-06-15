@@ -85,18 +85,23 @@ diagnose() {
         # 설정이 없는 경우 AIX 기본값은 보통 3 또는 5
         if [ -z "$default_loginretries" ]; then
             # AIX 시스템 기본값 확인 (lsuser 명령)
+            # lsuser 출력이 비어 있으면 "미설정"으로 간주 — 통과 기본값(3 등)을 주입하지 않는다.
             lsuser_output=$(lsuser -a loginretries root 2>/dev/null || echo "")
-            default_loginretries=$(echo "$lsuser_output" | awk -F= '{print $2}' || echo "3")
+            if [[ "$lsuser_output" == *"loginretries="* ]]; then
+                default_loginretries=$(echo "$lsuser_output" | awk -F'loginretries=' '{print $2}' | awk '{print $1}')
+            else
+                default_loginretries=""
+            fi
         fi
 
         if [ -n "$default_loginretries" ]; then
             # loginretries 값이 숫자인지 확인
             if [[ "$default_loginretries" =~ ^[0-9]+$ ]]; then
-                if [ "$default_loginretries" -le 10 ]; then
+                if [ "$default_loginretries" -ge 1 ] && [ "$default_loginretries" -le 10 ]; then
                     is_secure=true
                     config_details="loginretries=${default_loginretries}"
                 else
-                    config_details="loginretries=${default_loginretries} (기준 10회 초과)"
+                    config_details="loginretries=${default_loginretries} (기준 1~10회 범위 벗어남; 0은 계정 잠금 비활성화)"
                 fi
             else
                 config_details="loginretries 설정값이 숫자가 아님: ${default_loginretries}"

@@ -70,11 +70,13 @@ diagnose() {
         fi
     fi
 
-    # Oracle 서비스 확인
+    # Oracle 서비스 확인 (서비스 미실행 시 자동 점검 불가 -> 수동진단)
     if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="서비스 미실행으로 자동 점검 불가 (수동진단 필요). 서비스 시작 후 감사 기록(audit_trail) 정책을 수동으로 확인하세요."
+        command_result="Oracle process not found"
+        command_executed="pgrep -x tnslsnr; pgrep -x oracle"
         if declare -f save_dual_result >/dev/null 2>&1; then
             save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
         fi
@@ -138,17 +140,21 @@ diagnose() {
     # 감사 로그 설정 확인
     local audit_query="SHOW PARAMETER audit_trail"
     command_executed="sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" \"${audit_query}\""
-    command_result=$(sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" "${audit_query}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
+    command_result=$(echo "${audit_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
 
     # 결과 분석
-    if echo "$command_result" | grep -qi "DB"; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="감사 로깅(audit_trail) 활성화됨 (양호)"
-    elif echo "$command_result" | grep -qi "NONE"; then
+    # NONE → 감사 미수집으로 취약. DB/OS/XML 등으로 audit_trail 이 켜져 있어도, 실제로
+    # 접근/변경/삭제 이벤트를 포괄하는 감사 정책(감사 문장)이 구성되었는지는 audit_trail
+    # 파라미터만으로 정적 확인이 불가하므로 GOOD 으로 단정하지 않고 수동진단으로 처리한다
+    # (MSSQL_Windows/PostgreSQL D-26 와 동일한 보수적 판정).
+    if echo "$command_result" | grep -qi "NONE"; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="감사 로깅 비활성화됨 (취약 - 감사 기능 활성화 권장)"
+        inspection_summary="감사 로깅 비활성화됨 (audit_trail=NONE, 취약 - 감사 기능 활성화 권장)"
+    elif echo "$command_result" | grep -qiE "DB|OS|XML"; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="audit_trail 활성화됨(${command_result}). 단, 접근/변경/삭제 등 필수 이벤트에 대한 감사 정책 적용 여부는 정적 확인 불가 - 감사 정책 수동 점검 필요"
     else
         diagnosis_result="MANUAL"
         status="수동진단"

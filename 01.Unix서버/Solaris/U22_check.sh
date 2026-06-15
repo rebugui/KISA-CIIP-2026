@@ -63,11 +63,11 @@ diagnose() {
     local is_secure=false
     local details=""
 
-    # 파일 존재 확인
+    # 파일 존재 확인 (파일이 없으면 점검 대상 아님 → N/A)
     if [ ! -f "$target_file" ]; then
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="/etc/services 파일 없음"
+        diagnosis_result="N/A"
+        status="해당없음"
+        inspection_summary="/etc/services 파일이 존재하지 않아 점검 대상 아님"
         local raw_output=$(ls -ld "$target_file" 2>/dev/null || echo "File not found")
         command_result="[FILE NOT FOUND: /etc/services]${newline}[Command Output]${newline}${raw_output}"
         command_executed="ls -ld $target_file"
@@ -78,16 +78,36 @@ diagnose() {
         local file_owner=$(perl -e 'if (-f $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; $gid = (stat($ARGV[0]))[5]; $user = getpwuid($uid); $group = getgrgid($gid); print "$user:$group\n"; }' "$target_file" 2>/dev/null)
         local stat_output="Permissions: ${file_perms}, Owner: ${file_owner}"
 
-        # 소유자 및 권한 확인
-        if [ "$file_owner" = "root:root" ] && [ "$file_perms" = "644" ]; then
-            is_secure=true
-            details="권한: $file_perms, 소유자: $file_owner"
+        # 소유자 및 권한 확인 (가이드: 소유자 root/bin/sys, 권한 644 이하)
+        local stat_failed=false
+        if [ -z "$file_perms" ] || [ -z "$file_owner" ]; then
+            stat_failed=true
+            details="권한/소유자 확인 불가 (stat 실패)"
         else
+            local owner_user="${file_owner%%:*}"
+            local owner_ok=false
+            local perm_ok=false
+            case "$owner_user" in
+                root|bin|sys) owner_ok=true ;;
+            esac
+            # 644에 없는 비트(그룹/기타 쓰기, 실행, setuid 등)가 없으면 양호 (444/640/600 등 허용)
+            if [ $(( 8#$file_perms & ~8#644 & 8#7777 )) -eq 0 ]; then
+                perm_ok=true
+            fi
+            if [ "$owner_ok" = true ] && [ "$perm_ok" = true ]; then
+                is_secure=true
+            fi
             details="권한: $file_perms, 소유자: $file_owner"
         fi
 
         # 최종 판정
-        if [ "$is_secure" = true ]; then
+        if [ "$stat_failed" = true ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="/etc/services 권한/소유자를 확인하지 못함 - 수동 점검 필요 ($details)"
+            command_result="[Command: ls -ld]${newline}${raw_output}"
+            command_executed="ls -ld $target_file"
+        elif [ "$is_secure" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="/etc/services 보안 설정 적절 ($details)"

@@ -73,8 +73,8 @@ diagnose() {
         local owner=$(stat -c "%U" "$sudoers_file" 2>/dev/null || echo "unknown")
         local group=$(stat -c "%G" "$sudoers_file" 2>/dev/null || echo "unknown")
 
-        # 권한이 640 초과인지 확인
-        if [ "$perm" -gt 640 ] 2>/dev/null; then
+        # 권한이 640 초과인지 확인 (640을 넘는 비트가 있으면 취약)
+        if ! [[ "$perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perm & ~8#640 & 07777 ))" -ne 0 ] 2>/dev/null; then
             issues="${issues}/etc/sudoers 권한 ${perm} (640 이하 권장). "
             status="취약"
             diagnosis_result="VULNERABLE"
@@ -89,6 +89,10 @@ diagnose() {
 
         command_result="/etc/sudoers: ${perm} ${owner}:${group}"
     else
+        # sudo가 설치되어 있는데 /etc/sudoers가 없는 비정상 구성 → 수동 확인 필요
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="sudo가 설치되어 있으나 /etc/sudoers 파일이 존재하지 않습니다. sudo 권한 구성을 수동으로 확인하십시오."
         command_result="/etc/sudoers: 파일 없음"
     fi
 
@@ -101,7 +105,7 @@ diagnose() {
             local perm=$(stat -c "%a" "$f" 2>/dev/null || echo "000")
             local owner=$(stat -c "%U" "$f" 2>/dev/null || echo "unknown")
 
-            if [ "$perm" -gt 640 ] 2>/dev/null; then
+            if ! [[ "$perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perm & ~8#640 & 07777 ))" -ne 0 ] 2>/dev/null; then
                 issues="${issues}${f} 권한 ${perm} (640 이하 권장). "
                 status="취약"
                 diagnosis_result="VULNERABLE"
@@ -122,7 +126,7 @@ diagnose() {
     # ==========================================================================
     if [ "$diagnosis_result" = "GOOD" ]; then
         inspection_summary="/etc/sudoers 파일 소유자가 root이고 권한이 640 이하입니다."
-    else
+    elif [ "$diagnosis_result" = "VULNERABLE" ]; then
         inspection_summary="sudoers 파일 설정 문제: ${issues}"
     fi
 

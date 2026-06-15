@@ -11,7 +11,7 @@
 # @Platform    : Debian
 # @Severity    : 상
 # @Title       : crontab 설정 파일 권한 설정 미흡
-# @Description : /etc/crontab 권한 600 확인
+# @Description : crontab·at 명령어 권한(750 이하) 및 cron/at 관련 파일 권한 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -45,6 +45,19 @@ GUIDELINE_REMEDIATION="crontab 및 at 명령어 파일 권한 750 이하,cron �
 # 진단 함수
 # ============================================================================
 
+# 권한에 750(rwxr-x---) 초과 비트가 있는지 비트 단위 검사 (crontab/at 명령어용)
+perm_exceeds_750() {
+    local p="$1"
+    while [ "${#p}" -lt 3 ]; do p="0${p}"; done
+    p="${p: -3}"
+    local g="${p:1:1}" t="${p:2:1}"
+    case "$g" in 2|3|6|7) return 0 ;; esac
+    if [ "$t" != "0" ]; then
+        return 0
+    fi
+    return 1
+}
+
 # 진단 수행
 diagnose() {
 
@@ -68,6 +81,30 @@ diagnose() {
     local is_secure=true
     local issues=()
     local file_info=""
+
+    # 0) crontab 및 at 명령어 실행 권한 확인 (750 이하·root 소유, SUID는 증적 기록)
+    local cmd_file=""
+    for cmd_file in /usr/bin/crontab /usr/bin/at; do
+        if [ -f "$cmd_file" ]; then
+            local cmd_perms=$(stat -c "%a" "$cmd_file" 2>/dev/null || echo "000")
+            local cmd_owner=$(stat -c "%U" "$cmd_file" 2>/dev/null || echo "unknown")
+            file_info="${file_info}${cmd_file}: 권한=${cmd_perms}, 소유자=${cmd_owner}${newline}"
+
+            if perm_exceeds_750 "$cmd_perms"; then
+                is_secure=false
+                issues+=("${cmd_file} 권한=${cmd_perms} (명령어 750 이하 필요: 일반 사용자 실행 권한 제거)")
+            fi
+            if [ "$cmd_owner" != "root" ]; then
+                is_secure=false
+                issues+=("${cmd_file} 소유자=${cmd_owner} (root여야 함)")
+            fi
+            if [ "${#cmd_perms}" -eq 4 ] && [ "${cmd_perms:0:1}" != "0" ]; then
+                file_info="${file_info}※ ${cmd_file}: 특수 권한(SUID/SGID) 설정됨 (가이드: SUID 제거 검토 필요)${newline}"
+            fi
+        else
+            file_info="${file_info}${cmd_file}: 파일 없음${newline}"
+        fi
+    done
 
     for file in "${crontab_files[@]}"; do
         if [ -f "$file" ]; then
@@ -124,13 +161,13 @@ diagnose() {
         status="양호"
         inspection_summary="crontab 관련 파일 권한 적절함"
         command_result="${file_info}"
-        command_executed="stat -c '%a %U' /etc/crontab /etc/cron.deny /etc/cron.allow /etc/at.deny /etc/at.allow 2>/dev/null"
+        command_executed="stat -c '%a %U' /usr/bin/crontab /usr/bin/at /etc/crontab /etc/cron.deny /etc/cron.allow /etc/at.deny /etc/at.allow 2>/dev/null"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="crontab 파일 권한 미흡: ${issues[*]}"
         command_result="${file_info}"
-        command_executed="stat -c '%a %U' /etc/crontab /etc/cron.deny /etc/cron.allow 2>/dev/null; find /etc/cron.d -type f -exec stat -c '%n %a %U' {} \\;"
+        command_executed="stat -c '%a %U' /usr/bin/crontab /usr/bin/at /etc/crontab /etc/cron.deny /etc/cron.allow 2>/dev/null; find /etc/cron.d -type f -exec stat -c '%n %a %U' {} \\;"
     fi
 
     # echo ""

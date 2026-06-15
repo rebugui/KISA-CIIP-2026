@@ -38,38 +38,43 @@ try {
         $acl = Get-Acl -Path $logDir
         $commandExecuted = "Get-Acl -Path '$logDir'"
 
-        # ACL 분석
-        $accessRules = $acl.Access | Where-Object { $_.IdentityReference -notlike "*BUILTIN*" -and $_.IdentityReference -notlike "*NT AUTHORITY*" }
+        # 광범위 주체(일반 사용자 그룹) 판정 함수: BUILTIN\Users 를 제외하지 않음
+        # 대상: Everyone, BUILTIN\Users, Authenticated Users, Domain Users 등
+        $broadPrincipals = @("Everyone", "BUILTIN\Users", "Authenticated Users", "Users", "Domain Users")
+        function Test-BroadPrincipal {
+            param([string]$IdentityName)
+            foreach ($bp in $broadPrincipals) {
+                if ($IdentityName -like "*$bp*") {
+                    return $true
+                }
+            }
+            return $false
+        }
 
-        foreach ($rule in $accessRules) {
+        # ACL 분석: 모든 규칙 검사 (BUILTIN 제외 필터 제거)
+        foreach ($rule in $acl.Access) {
             $identity = $rule.IdentityReference.Value
             $rights = $rule.FileSystemRights
             $type = $rule.AccessControlType
 
-            # 일반 사용자 권한 확인
-            if ($identity -like "*Users*" -or $identity -like "Everyone" -or $identity -like "Authenticated Users") {
-                if ($type -eq "Allow") {
-                    $permissionIssues += "ID: $identity, 권한: $rights, 타입: $type"
-                }
+            # 광범위 주체에 Allow 권한(읽기 포함 모든 접근)이 있으면 취약
+            if ($type -eq "Allow" -and (Test-BroadPrincipal $identity)) {
+                $permissionIssues += "ID: $identity, 권한: $rights, 타입: $type"
             }
 
             $aclDetails += "ID: $identity, 권한: $rights, 타입: $type, 상속: $($rule.IsInherited)"
         }
 
-        # 로그 파일 권한 샘플링
-        $logFiles = Get-ChildItem -Path $logDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 5
+        # 로그 파일 권한 샘플링 (샘플링 상한 확대: 5 -> 200)
+        $logFiles = Get-ChildItem -Path $logDir -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 200
         $filePermissionDetails = @()
 
         foreach ($file in $logFiles) {
             try {
                 $fileAcl = Get-Acl -Path $file.FullName
-                $fileRules = $fileAcl.Access | Where-Object { $_.IdentityReference -like "*Users*" -or $_.IdentityReference -like "Everyone" }
-
-                if ($fileRules) {
-                    foreach ($fr in $fileRules) {
-                        if ($fr.AccessControlType -eq "Allow") {
-                            $filePermissionDetails += "파일: $($file.Name), ID: $($fr.IdentityReference), 권한: $($fr.FileSystemRights)"
-                        }
+                foreach ($fr in $fileAcl.Access) {
+                    if ($fr.AccessControlType -eq "Allow" -and (Test-BroadPrincipal $fr.IdentityReference.Value)) {
+                        $filePermissionDetails += "파일: $($file.Name), ID: $($fr.IdentityReference), 권한: $($fr.FileSystemRights)"
                     }
                 }
             } catch {

@@ -41,21 +41,71 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="SHA-2 이상의 안전한 암호화 알고리즘이 설정되어 있습니다."
     local command_result=""
-    local command_executed="grep ENCRYPT_METHOD /etc/login.defs"
+    local command_executed="grep ENCRYPT_METHOD /etc/login.defs; grep pam_unix.so /etc/pam.d/system-auth; grep '^root:' /etc/shadow"
 
-    # 1. 실제 데이터 추출: 설정 파일 및 실제 shadow 파일의 해시 식별자 확인
-    local encrypt_method=$(grep "^ENCRYPT_METHOD" /etc/login.defs | awk '{print $2}' || echo "미설정")
-    local shadow_id=$(grep "^root:" /etc/shadow | cut -d: -f2 | cut -d$ -f2 || echo "N/A")
+    # 1. 실제 데이터 추출: login.defs / PAM(system-auth, password-auth) / shadow root 해시
+    local encrypt_method=$(grep "^ENCRYPT_METHOD" /etc/login.defs 2>/dev/null | awk '{print $2}' || echo "")
+    [ -z "$encrypt_method" ] && encrypt_method="미설정"
+    local root_hash=$(grep "^root:" /etc/shadow 2>/dev/null | cut -d: -f2 || echo "")
+    local pam_lines=$(grep -hE '^[[:space:]]*password[^#]*pam_unix\.so' /etc/pam.d/system-auth /etc/pam.d/password-auth 2>/dev/null || echo "")
 
-    # 2. 판정 로직: SHA-512($6) 또는 SHA-256($5) 인지 확인
-    if [[ "$encrypt_method" != "SHA512" && "$encrypt_method" != "SHA256" ]] && [[ "$shadow_id" != "6" && "$shadow_id" != "5" ]]; then
-        status="취약"
-        diagnosis_result="VULNERABLE"
-        inspection_summary="안전하지 않은 비밀번호 암호화 알고리즘을 사용 중입니다."
+    # 2. 판정 로직 (worst-of): 약한 지표가 하나라도 있으면 취약
+    local weak_findings=""
+    local good_findings=""
+
+    # [Leg 1] login.defs ENCRYPT_METHOD
+    case "$encrypt_method" in
+        SHA512|sha512|SHA256|sha256|YESCRYPT|yescrypt)
+            good_findings="${good_findings}login.defs(${encrypt_method}) " ;;
+        MD5|md5|DES|des|CRYPT|crypt|BIGCRYPT|bigcrypt)
+            weak_findings="${weak_findings}login.defs(${encrypt_method}) " ;;
+    esac
+
+    # [Leg 2] PAM system-auth/password-auth의 pam_unix.so 해시 옵션
+    if [ -n "$pam_lines" ]; then
+        if echo "$pam_lines" | grep -qwE '(md5|des|bigcrypt)'; then
+            weak_findings="${weak_findings}pam_unix(약한 해시 옵션) "
+        elif echo "$pam_lines" | grep -qwE '(sha512|sha256|yescrypt)'; then
+            good_findings="${good_findings}pam_unix(안전 해시 옵션) "
+        fi
     fi
 
-    # 3. command_result에 실제 데이터 기록
-    command_result="ENCRYPT_METHOD: [ ${encrypt_method} ] | Shadow ID: [ \$${shadow_id} ]"
+    # [Leg 3] /etc/shadow root 실해시 접두사 ($y$=yescrypt도 안전 인정)
+    local shadow_summary="판정 제외"
+    case "$root_hash" in
+        ''|'!'*|'*'*)
+            shadow_summary="잠금/없음(판정 제외)" ;;
+        '$6$'*|'$5$'*|'$y$'*|'$7$'*)
+            good_findings="${good_findings}shadow(root ${root_hash:0:3}) "
+            shadow_summary="안전(${root_hash:0:3})" ;;
+        '$1$'*)
+            weak_findings="${weak_findings}shadow(root MD5) "
+            shadow_summary="MD5(\$1\$)" ;;
+        '$'*)
+            shadow_summary="기타(${root_hash:0:3}, 판정 보류)" ;;
+        *)
+            weak_findings="${weak_findings}shadow(root DES 추정) "
+            shadow_summary="DES 추정(\$ 접두사 없음)" ;;
+    esac
+
+    if [ -n "$weak_findings" ]; then
+        status="취약"
+        diagnosis_result="VULNERABLE"
+        inspection_summary="안전하지 않은 비밀번호 암호화 지표 발견: ${weak_findings% }"
+    elif [ -z "$good_findings" ]; then
+        if [ ! -r /etc/login.defs ] && [ ! -r /etc/shadow ] && [ -z "$pam_lines" ]; then
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            inspection_summary="암호화 알고리즘 설정 증거 수집 불가 - /etc/login.defs, /etc/pam.d/system-auth, /etc/shadow 수동 확인 필요"
+        else
+            status="취약"
+            diagnosis_result="VULNERABLE"
+            inspection_summary="비밀번호 암호화 알고리즘 미설정 (ENCRYPT_METHOD/PAM 해시 옵션/안전 해시 증거 없음)"
+        fi
+    fi
+
+    # 3. command_result에 실제 데이터 기록 (해시 원문 미노출)
+    command_result="ENCRYPT_METHOD: [ ${encrypt_method} ] | PAM pam_unix: [ $(echo "${pam_lines:-없음}" | tr '\n' ' ') ] | Shadow(root): [ ${shadow_summary} ]"
 
     save_dual_result \
         "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \

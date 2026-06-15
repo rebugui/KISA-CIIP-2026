@@ -42,81 +42,21 @@ GUIDELINE_REMEDIATION="WebDAV 서비스 비활성화 설정"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="N/A"
+    local status="N/A"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local has_webdav=false
 
-    # Process check (Updated for Docker)
-    if command -v pgrep >/dev/null; then
-        if ! pgrep -f "catalina|tomcat" > /dev/null; then
-            diagnosis_result="N/A"
-            status="N/A"
-            inspection_summary="Tomcat 웹 서버가 실행 중이 아닙니다."
-            command_result="Tomcat process not found"
-            command_executed="pgrep -f 'catalina|tomcat'"
-
-            save_dual_result \
-                "${ITEM_ID}" \
-                "${ITEM_NAME}" \
-                "${status}" \
-                "${diagnosis_result}" \
-                "${inspection_summary}" \
-                "${command_result}" \
-                "${command_executed}" \
-                "${GUIDELINE_PURPOSE}" \
-                "${GUIDELINE_THREAT}" \
-                "${GUIDELINE_CRITERIA_GOOD}" \
-                "${GUIDELINE_CRITERIA_BAD}" \
-                "${GUIDELINE_REMEDIATION}"
-        
-            # 결과 저장 확인
-            verify_result_saved "${ITEM_ID}"
-            return 0
-        fi
-    else
-        echo "[INFO] pgrep command missing, skipping process check."
-    fi
-
-    local web_xml_locations=(
-        "/etc/tomcat*/web.xml"
-        "/var/lib/tomcat*/conf/web.xml"
-        "/usr/share/tomcat*/conf/web.xml"
-    )
-
-    local webdav_config=""
-
-    for xml_pattern in "${web_xml_locations[@]}"; do
-        for xml_file in $xml_pattern; do
-            if [ -f "${xml_file}" ]; then
-                # WebDAV Servlet 확인 (주석 제외)
-                local found_webdav=$(grep -E "WebdavServlet|DavServlet" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
-                if [ -n "${found_webdav}" ]; then
-                    # 활성화된 Servlet인지 확인 (주석 내부가 아닌지)
-                    if ! echo "${found_webdav}" | grep -q "<!--"; then
-                        webdav_config="${found_webdav}"
-                        has_webdav=true
-                    fi
-                fi
-                break 2
-            fi
-        done
-    done
-
-    command_executed="grep -E 'WebdavServlet|DavServlet' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -3"
-    command_result="${webdav_config:-WebDAV Servlet not found or commented}"
-
-    if [ "${has_webdav}" = true ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="WebDAV Servlet이 활성화되어 있습니다. 원격 파일 조작 공격 위험으로 비활성화 권장."
-    else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="WebDAV Servlet이 비활성화되어 있거나 존재하지 않습니다. (보안 권고사항 준수)"
-    fi
+    # 점검 대상 외 항목 (Out-of-target)
+    # WEB-18(WebDAV 비활성화)의 점검 대상은 Apache, Nginx, IIS, WebtoB이며 Tomcat은 제외됨
+    # (docs/guideline_metadata.json target: "Apache, Nginx, IIS, WebtoB")
+    # 따라서 Tomcat에서는 본 항목을 점검하지 않고 N/A로 처리함
+    diagnosis_result="N/A"
+    status="N/A"
+    inspection_summary="WEB-18(웹 서비스 WebDAV 비활성화) 항목의 점검 대상은 Apache, Nginx, IIS, WebtoB이며 Tomcat은 점검 대상에 포함되지 않으므로 N/A로 판단합니다."
+    command_executed="N/A (Tomcat is out of scope for WEB-18)"
+    command_result="점검 대상(target): Apache, Nginx, IIS, WebtoB / 현재 플랫폼: Tomcat_Linux (점검 대상 외)"
 
     # Run-all 모드 확인
     save_dual_result \

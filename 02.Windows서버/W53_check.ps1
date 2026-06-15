@@ -36,32 +36,43 @@ if (-not (Test-RunallMode)) {
 # 1. Check removable media formatting and eject policy (AllocateDASD)
 try {
     $secedit = secedit /export /cfg "$env:TEMP\secedit.tmp" 2>&1
-    $content = Get-Content "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
-    $administratorsOnly = 0
+    # NOTE: Get-Content returns a string[] array. Using -match on an array FILTERS
+    # the array and does NOT populate $matches. Join to a scalar string first so the
+    # captured value in $matches[1] is valid.
+    $contentText = (Get-Content "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue) -join "`n"
+    $administratorsOnly = $null
 
-    if ($content -match 'AllocateDASD\s*=\s*(\d+)') {
+    if ($contentText -match 'AllocateDASD\s*=\s*(\d+)') {
         $administratorsOnly = [int]$matches[1]
     }
 
     Remove-Item "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
 
-    if ($administratorsOnly -eq 0) {
+    # AllocateDASD: 0 = Administrators (GOOD); 1 = Administrators+Power Users,
+    # 2 = Administrators+Interactive Users (both VULNERABLE)
+    if ($null -eq $administratorsOnly) {
+        $finalResult = "MANUAL"
+        $summary = "AllocateDASD 값을 확인할 수 없음: 수동으로 '이동식 미디어 포맷 및 꺼내기 허용' 정책 확인 필요"
+        $status = "수동진단"
+        $commandOutput = "AllocateDASD=(정책 항목 없음)"
+    } elseif ($administratorsOnly -eq 0) {
         $finalResult = "GOOD"
         $summary = "'이동식미디어포맷및꺼내기허용' 정책이 'Administrators'로 설정됨"
         $status = "양호"
+        $commandOutput = "AllocateDASD=$administratorsOnly (Administrators)"
     } else {
+        $policyValue = switch ($administratorsOnly) {
+            1 { "Administrators 및 Power Users" }
+            2 { "Administrators 및 Interactive Users" }
+            default { "알 수 없음 ($administratorsOnly)" }
+        }
         $finalResult = "VULNERABLE"
-        $summary = "'이동식미디어포맷및꺼내기허용' 정책이 'Administrators'로 설정되지 않음"
+        $summary = "'이동식미디어포맷및꺼내기허용' 정책이 'Administrators'로 설정되지 않음 (AllocateDASD=$administratorsOnly)"
         $status = "취약"
+        $commandOutput = "AllocateDASD=$administratorsOnly ($policyValue)"
     }
 
     $commandExecuted = "secedit /export 및 AllocateDASD 값 확인"
-    $policyValue = switch ($administratorsOnly) {
-        0 { "Administrators" }
-        1 { "Administrators 및 Power Users" }
-        default { "알 수 없음 ($administratorsOnly)" }
-    }
-    $commandOutput = "AllocateDASD=$administratorsOnly ($policyValue)"
 
 } catch {
     $finalResult = "MANUAL"

@@ -40,11 +40,19 @@ diagnose() {
     local status="양호"
     diagnosis_result="GOOD"
     local inspection_summary="관리자 그룹에 불필요한 계정이 없습니다."
-    local command_executed="grep -E '^root:|^wheel:' /etc/group"
+    local command_executed="grep -E '^root:|^wheel:' /etc/group; awk -F: '\$4 == 0 && \$1 != \"root\" {print \$1}' /etc/passwd"
 
-    # 1. 데이터 추출
-    local root_members=$(grep "^root:" /etc/group | cut -d: -f4)
-    local wheel_members=$(grep "^wheel:" /etc/group | cut -d: -f4)
+    # 1. 데이터 추출 (grep 실패가 local 선언에 가려지지 않도록 선언과 할당 분리)
+    local root_group_row=""
+    root_group_row=$(grep "^root:" /etc/group 2>/dev/null || true)
+    local root_members=""
+    root_members=$(printf '%s' "$root_group_row" | cut -d: -f4)
+    local wheel_members=""
+    wheel_members=$(grep "^wheel:" /etc/group 2>/dev/null | cut -d: -f4 || true)
+
+    # 1-1. /etc/passwd 에서 기본 GID(4번째 필드)가 0인 root 외 계정 점검
+    local gid0_users=""
+    gid0_users=$(awk -F: '$4 == 0 && $1 != "root" {print $1}' /etc/passwd 2>/dev/null | xargs || true)
 
     # 2. 판정 로직: root 그룹에 root 외 계정이 있거나, wheel 그룹에 계정이 있는 경우
     # 현업 가이드에서는 관리자 외 계정 존재 시 '취약'으로 간주하고 소명을 받습니다.
@@ -61,13 +69,20 @@ diagnose() {
         done
     fi
 
-    if [[ -n "$wheel_members" ]] || [[ "$has_extra_root_member" == true ]]; then
-        status="취약"  # 또는 "검토필요"
-        diagnosis_result="VULNERABLE"
-        inspection_summary="관리자 그룹에 등록된 계정이 식별되었습니다. 인가된 사용자인지 수동 점검이 필요합니다. (발견: ${root_members:-root}, ${wheel_members:-wheel없음})"
+    # root 그룹 행을 확인할 수 없으면 수동진단 (취약 판정이 우선)
+    if [ -z "$root_group_row" ]; then
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="root 그룹 설정을 확인할 수 없음 (/etc/group)"
     fi
 
-    local command_result="[root: ${root_members:-root}] [wheel: ${wheel_members:-none}]"
+    if [[ -n "$wheel_members" ]] || [[ "$has_extra_root_member" == true ]] || [[ -n "$gid0_users" ]]; then
+        status="취약"  # 또는 "검토필요"
+        diagnosis_result="VULNERABLE"
+        inspection_summary="관리자 그룹에 등록된 계정이 식별되었습니다. 인가된 사용자인지 수동 점검이 필요합니다. (발견: ${root_members:-root}, ${wheel_members:-wheel없음}, 기본 GID 0 계정: ${gid0_users:-없음})"
+    fi
+
+    local command_result="[root: ${root_members:-root}] [wheel: ${wheel_members:-none}] [passwd GID0: ${gid0_users:-none}]"
 
     save_dual_result \
         "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \

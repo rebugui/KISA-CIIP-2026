@@ -43,9 +43,68 @@ diagnose() {
     local command_executed="cat /etc/ftpusers 2>/dev/null; cat /etc/vsftpd/ftpusers 2>/dev/null"
 
     # ==========================================================================
-    # 1. ftpusers 파일 위치 확인
+    # 1. FTP 서비스 설치 여부 확인 (효력 있는 파일 선택을 위해 먼저 수행)
+    # ==========================================================================
+    local ftp_installed=false
+    local vsftpd_detected=false
+    if rpm -qa 2>/dev/null | grep -q "vsftpd\|proftpd\|pure-ftpd"; then
+        ftp_installed=true
+    fi
+    if rpm -qa 2>/dev/null | grep -q "vsftpd"; then
+        vsftpd_detected=true
+    fi
+
+    # ==========================================================================
+    # 2. ProFTPD 설정 확인 (UseFtpUsers / RootLogin)
+    # ==========================================================================
+    local proftpd_conf=""
+    local proftpd_root_login=""
+    local proftpd_use_ftpusers=""
+    for pconf in /etc/proftpd.conf /etc/proftpd/proftpd.conf; do
+        if [ -f "$pconf" ]; then
+            proftpd_conf="$pconf"
+            proftpd_root_login=$(grep -iE '^[[:space:]]*RootLogin[[:space:]]' "$pconf" 2>/dev/null | tail -1 | awk '{print tolower($2)}') || true
+            proftpd_use_ftpusers=$(grep -iE '^[[:space:]]*UseFtpUsers[[:space:]]' "$pconf" 2>/dev/null | tail -1 | awk '{print tolower($2)}') || true
+            break
+        fi
+    done || true
+
+    if [ -n "$proftpd_conf" ] && { [ "$proftpd_root_login" = "on" ] || [ "$proftpd_use_ftpusers" = "off" ]; }; then
+        if [ "$proftpd_root_login" = "on" ]; then
+            # RootLogin on이면 ftpusers와 무관하게 root 접속 허용 상태
+            status="취약"
+            diagnosis_result="VULNERABLE"
+            inspection_summary="proftpd 설정에서 RootLogin on으로 root FTP 접속이 허용되어 있습니다(${proftpd_conf})."
+        elif [ "$proftpd_root_login" = "off" ]; then
+            status="양호"
+            diagnosis_result="GOOD"
+            inspection_summary="proftpd UseFtpUsers off 설정이나 RootLogin off로 root FTP 접속이 차단되어 있습니다(${proftpd_conf})."
+        else
+            # UseFtpUsers off + RootLogin 미설정 → ftpusers 미적용, 다른 차단 수단 없음
+            status="취약"
+            diagnosis_result="VULNERABLE"
+            inspection_summary="proftpd UseFtpUsers off 설정으로 ftpusers 파일이 적용되지 않으며, RootLogin 차단 설정이 없습니다(${proftpd_conf})."
+        fi
+        command_result="proftpd_conf: ${proftpd_conf}, RootLogin: ${proftpd_root_login:-unset}, UseFtpUsers: ${proftpd_use_ftpusers:-on(default)}"
+        command_executed="grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}"
+
+        save_dual_result \
+            "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \
+            "${inspection_summary}" "${command_result}" "${command_executed}" \
+            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" \
+            "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
+
+    # ==========================================================================
+    # 3. ftpusers 파일 위치 확인 (vsftpd 사용 시 PAM 적용 파일을 우선 선택)
     # ==========================================================================
     local ftpusers_files=("/etc/ftpusers" "/etc/vsftpd/ftpusers" "/etc/proftpd/ftpusers")
+    if [ "$vsftpd_detected" = true ]; then
+        ftpusers_files=("/etc/vsftpd/ftpusers" "/etc/vsftpd/user_list" "/etc/ftpusers" "/etc/proftpd/ftpusers")
+    fi
     local found_file=""
     local file_content=""
 
@@ -58,15 +117,7 @@ diagnose() {
     done || true
 
     # ==========================================================================
-    # 2. FTP 서비스 설치 여부 확인
-    # ==========================================================================
-    local ftp_installed=false
-    if rpm -qa 2>/dev/null | grep -q "vsftpd\|proftpd\|pure-ftpd"; then
-        ftp_installed=true
-    fi
-
-    # ==========================================================================
-    # 3. ftpusers 파일 부재 시 처리
+    # 4. ftpusers 파일 부재 시 처리
     # ==========================================================================
     if [ -z "$found_file" ]; then
         if [ "$ftp_installed" = true ]; then
@@ -92,11 +143,42 @@ diagnose() {
     fi
 
     # ==========================================================================
-    # 4. 파일 내용 분석
+    # 5. 파일 내용 분석
     # ==========================================================================
     local active_lines=$(echo "$file_content" | grep -v "^#" | grep -v "^$" || true)
 
-    if [ -z "$active_lines" ]; then
+    # vsftpd user_list 의미 판별: userlist_deny=NO이면 허용 목록(allow-list)으로 동작
+    local list_semantics="deny"
+    if [ "$found_file" = "/etc/vsftpd/user_list" ]; then
+        local vsftpd_conf=""
+        local vc
+        for vc in /etc/vsftpd/vsftpd.conf /etc/vsftpd.conf; do
+            if [ -f "$vc" ]; then
+                vsftpd_conf="$vc"
+                break
+            fi
+        done
+        local userlist_deny=""
+        if [ -n "$vsftpd_conf" ]; then
+            userlist_deny=$(grep -iE '^userlist_deny=' "$vsftpd_conf" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]') || true
+        fi
+        [ "$userlist_deny" = "NO" ] && list_semantics="allow"
+    fi
+
+    if [ "$list_semantics" = "allow" ]; then
+        # 허용 목록: root가 목록에 있으면 root FTP 접속이 허용됨 → 취약
+        if [ -n "$active_lines" ] && echo "$active_lines" | grep -qx "root"; then
+            status="취약"
+            diagnosis_result="VULNERABLE"
+            inspection_summary="vsftpd userlist_deny=NO 환경에서 user_list에 root가 등록되어 root FTP 접속이 허용됩니다 (${found_file})."
+            command_result="File: ${found_file} (allow-list, userlist_deny=NO), root: [ALLOWED]"
+        else
+            status="양호"
+            diagnosis_result="GOOD"
+            inspection_summary="vsftpd userlist_deny=NO 환경에서 user_list에 root가 등록되어 있지 않아 root FTP 접속이 차단됩니다 (${found_file})."
+            command_result="File: ${found_file} (allow-list, userlist_deny=NO), root: [blocked]"
+        fi
+    elif [ -z "$active_lines" ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
         inspection_summary="ftpusers 파일이 비어있습니다 (${found_file}). root 등 시스템 계정을 등록해야 합니다."

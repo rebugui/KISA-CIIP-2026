@@ -40,19 +40,44 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="DoS 공격에 취약한 불필요 서비스들이 모두 비활성화되어 있습니다."
     local command_result=""
-    local command_executed="grep -r 'disable' /etc/xinetd.d/"
+    local command_executed="grep -r 'disable' /etc/xinetd.d/; systemctl is-active <svc>.socket; ss -tuln"
 
-    # 1. 실제 데이터 추출
+    # 1. 실제 데이터 추출 (xinetd 기반)
     local dos_list=("echo" "discard" "daytime" "chargen")
     local active_services=""
-    
+
     for svc in "${dos_list[@]}"; do
-        if [ -f "/etc/xinetd.d/$svc" ]; then
-            if grep -qi "disable" "/etc/xinetd.d/$svc" | grep -qi "no"; then
-                active_services+="$svc "
+        local f="/etc/xinetd.d/$svc"
+        if [ -f "$f" ]; then
+            # disable 설정값 추출 (마지막 설정값 기준)
+            local disable_val
+            disable_val=$(grep -E '^[[:space:]]*disable' "$f" 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || true)
+            disable_val=$(echo "$disable_val" | tr '[:upper:]' '[:lower:]')
+            # disable 설정이 없거나 yes가 아니면 서비스 활성화 상태 (xinetd 기본값: 활성)
+            if [ "$disable_val" != "yes" ]; then
+                active_services+="$svc(xinetd) "
             fi
         fi
     done
+
+    # 1-2. systemd 소켓/서비스 유닛 점검 (RHEL7+ xinetd 미사용 환경)
+    if command -v systemctl >/dev/null 2>&1; then
+        for svc in "${dos_list[@]}"; do
+            local unit
+            for unit in "${svc}.socket" "${svc}.service" "${svc}-dgram.socket" "${svc}-stream.socket"; do
+                if systemctl is-active --quiet "$unit" 2>/dev/null; then
+                    active_services+="${svc}(systemd:${unit}) "
+                fi
+            done
+        done
+    fi
+
+    # 1-3. 리스닝 포트 백스톱 점검 (echo:7, discard:9, daytime:13, chargen:19)
+    local listen_ports
+    listen_ports=$(ss -tuln 2>/dev/null | awk 'NR>1 {print $5}' | grep -oE ':(7|9|13|19)$' | tr -d ':' | sort -u | tr '\n' ' ' || true)
+    if [ -n "${listen_ports// /}" ]; then
+        active_services+="listening-port(${listen_ports% }) "
+    fi
 
     # 2. 판정 로직
     if [ -n "$active_services" ]; then

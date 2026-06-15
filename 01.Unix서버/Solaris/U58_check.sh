@@ -61,41 +61,62 @@ diagnose() {
 
     local snmp_running=false
     local service_details=""
+    local probe_available=false
+    local probe_evidence=""
 
-    # Solaris SMF로 SNMP 서비스 확인
-    local snmp_service_list=("svc:/application/management/snmpd" "svc:/network/snmpd" "snmpd")
-
-    for svc in "${snmp_service_list[@]}"; do
-        # 서비스 상태 확인 (SMF)
-        if svcs "$svc" 2>/dev/null | grep -q "online"; then
+    # Solaris SMF(svcs)로 SNMP/SMA 관련 서비스 상태 확인
+    if command -v svcs >/dev/null 2>&1; then
+        probe_available=true
+        local svcs_out
+        svcs_out="$(svcs -H -o state,fmri 2>/dev/null | grep -E 'sma|snmp' || true)"
+        if echo "$svcs_out" | grep -q '^online'; then
             snmp_running=true
-            local is_enabled=$(svcs "$svc" 2>/dev/null | head -1 | grep -q "enabled" && echo "enabled" || echo "disabled")
-            service_details="${service_details}$svc: online ($is_enabled), "
+            service_details="SMF online: $(echo "$svcs_out" | grep '^online' | awk '{print $2}' | tr '\n' ' ')"
         fi
-    done || true
-
-    command_executed="svcs -a | grep -i snmp"
-
-    # 프로세스 확인 (백업 방법)
-    if ! $snmp_running && command -v pgrep >/dev/null 2>&1; then
-        if pgrep -x "snmpd" >/dev/null 2>&1; then
-            snmp_running=true
-            service_details="${service_details}snmpd 프로세스 실행 중"
-            command_executed="${command_executed}; pgrep -x snmpd"
-        fi
+        command_executed="svcs -H -o state,fmri | grep -E 'sma|snmp'"
+        probe_evidence="[svcs -H -o state,fmri | grep -E 'sma|snmp']${newline}${svcs_out:-SNMP/SMA 관련 SMF 서비스 없음}"
     fi
+
+    # 프로세스 확인 (백업 방법): snmpd, snmpdx, sma
+    if ! $snmp_running && command -v ps >/dev/null 2>&1; then
+        probe_available=true
+        local ps_out
+        ps_out="$(ps -ef 2>/dev/null | grep -E 'snmpd|snmpdx|sma' | grep -v grep || true)"
+        if [ -n "$ps_out" ]; then
+            snmp_running=true
+            service_details="${service_details}SNMP 프로세스(snmpd/snmpdx/sma) 실행 중"
+        fi
+        command_executed="${command_executed:+${command_executed}; }ps -ef | grep -E 'snmpd|snmpdx|sma' | grep -v grep"
+        probe_evidence="${probe_evidence}${probe_evidence:+${newline}}[ps -ef | grep -E 'snmpd|snmpdx|sma' | grep -v grep]${newline}${ps_out:-SNMP 프로세스 없음}"
+    fi
+
+    # 레거시 init 스크립트 확인 (보조 증거, Solaris 5.9 이하)
+    local legacy_script
+    for legacy_script in /etc/init.d/init.sma /etc/init.d/init.snmpdx; do
+        if [ -f "$legacy_script" ]; then
+            probe_evidence="${probe_evidence}${probe_evidence:+${newline}}[레거시 init 스크립트 존재함] ${legacy_script}"
+            command_executed="${command_executed:+${command_executed}; }ls ${legacy_script}"
+        fi
+    done
 
     # 최종 판정
     if [ "$snmp_running" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="SNMP 서비스가 활성화되어 있습니다 (${service_details%, }). 불필요한 경우 서비스를 중지하고 비활성화해야 합니다: svcadm disable snmpd"
-        command_result="${service_details%, }"
-    else
+        inspection_summary="SNMP 서비스가 활성화되어 있습니다 (${service_details%, }). 불필요한 경우 서비스를 중지하고 비활성화해야 합니다: svcadm disable <해당 SNMP/SMA FMRI> (예: svcadm disable svc:/application/management/sma:default)"
+        command_result="${probe_evidence}"
+    elif [ "$probe_available" = true ]; then
+        # 점검 명령이 실제로 수행되었고 SNMP 구동 흔적이 없는 경우에만 양호
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="SNMP 서비스가 비활성화되어 있습니다."
-        command_result="SNMP service not running"
+        command_result="${probe_evidence:-SNMP service not running}"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="SNMP 서비스 상태를 확인할 수 없어 수동 점검이 필요합니다 (svcs, ps 명령 사용 불가)"
+        command_result="[Cannot determine]${newline}svcs 및 ps 명령을 사용할 수 없어 SNMP 서비스(snmpd/snmpdx/sma) 구동 여부를 확인하지 못했습니다."
+        command_executed="${command_executed:-command -v svcs; command -v ps}"
     fi
 
     # echo ""

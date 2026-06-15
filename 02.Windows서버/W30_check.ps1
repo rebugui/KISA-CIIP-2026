@@ -69,10 +69,24 @@ try {
             $status = "양호"
         }
     } else {
-        $finalResult = "GOOD"
-        $summary = "SNMP Community String이 설정되지 않음 (서비스 미사용)"
-        $status = "양호"
-        $commandOutput = "레지스트리 키 없음"
+        # ValidCommunities 키가 없거나 읽을 수 없음.
+        # SNMP 서비스가 실제로 구동 중이면 Community String을 GPO/SNMPv3 등으로
+        # 설정했거나 키가 삭제되었을 수 있으므로 '안전'으로 단정할 수 없음 → 수동진단.
+        # SNMP 서비스가 구동 중이 아니면 서비스 미사용으로 양호.
+        $snmpServices = Get-Service -Name 'SNMP*' -ErrorAction SilentlyContinue
+        $runningSnmp = $snmpServices | Where-Object { $_.Status -eq 'Running' }
+
+        if ($runningSnmp) {
+            $finalResult = "MANUAL"
+            $summary = "SNMP 서비스가 구동 중이나 ValidCommunities 레지스트리 키가 없거나 읽을 수 없어 Community String 안전 여부를 확인할 수 없음 (GPO/SNMPv3 설정 가능성) - 수동 확인 필요"
+            $status = "수동진단"
+            $commandOutput = "ValidCommunities 레지스트리 키 없음 / SNMP 서비스 구동 중"
+        } else {
+            $finalResult = "GOOD"
+            $summary = "SNMP Community String이 설정되지 않음 (서비스 미사용)"
+            $status = "양호"
+            $commandOutput = "레지스트리 키 없음 / SNMP 서비스 미구동"
+        }
     }
 } catch {
     $finalResult = "MANUAL"
@@ -81,7 +95,7 @@ try {
     $commandOutput = $_.Exception.Message
 }
 
-$commandExecuted = "Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\ValidCommunities'"
+$commandExecuted = "Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\ValidCommunities' (+ ValidCommunities 부재 시 Get-Service 'SNMP*' 구동 여부 확인)"
 
 # 2. lib를 통한 결과 저장
 $purpose = "SNMP에서 일종의 비밀번호로 사용하는 Community String을 유추할 수 없는 복잡한 값으로 변경하여 불필요한 시스템 정보 노출을 차단하기 위함"

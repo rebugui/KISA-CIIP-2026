@@ -10,7 +10,7 @@
 # @Platform    : IIS_Windows
 # @Severity    : 상
 # @Title       : 비밀번호 파일 권한 관리
-# @Description : 비밀번호 파일의 접근 권한 설정 여부 점검
+# @Description : IIS 환경의 비밀번호 파일(%systemroot%\system32\config\SAM)에 대한 접근 권한을 점검합니다. SAM 파일은 Administrators, SYSTEM 계정 외의 사용자/그룹에 권한이 부여되지 않아야 합니다. 그 외 일반 사용자/그룹에 Allow 권한이 존재하면 취약합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -26,18 +26,62 @@ $SEVERITY = "상"
 Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
-    # IIS는 이 항목이 해당하지 않음 (Tomcat, JEUS 대상)
-    $finalResult = "N/A"
-    $summary = "이 진단 항목은 Tomcat, JEUS에 적용됩니다. IIS의 경우 Windows 서버 파일 권한 정책(W-10)을 참고하세요."
-    $status = "N/A"
-    $commandExecuted = "N/A"
-    $commandOutput = "N/A"
+    # IIS 대상: SAM 파일(%systemroot%\system32\config\SAM) ACL 점검
+    # 허용 원칙: Administrators, SYSTEM 만 권한 보유. 그 외 일반 사용자/그룹 Allow 권한 존재 시 취약.
+    $samFile = Join-Path $env:SystemRoot "system32\config\SAM"
+    $commandExecuted = "Get-Acl -Path '$samFile'"
+
+    if (-not (Test-Path $samFile)) {
+        $finalResult = "MANUAL"
+        $summary = "SAM 파일을 찾을 수 없습니다($samFile). 경로 및 권한을 수동으로 확인하세요."
+        $status = "수동진단"
+        $commandOutput = "SAM 파일 미존재: $samFile"
+    } else {
+        # 허용된 식별자(부분 일치): Administrators, SYSTEM
+        $allowedPatterns = @('Administrators', 'SYSTEM', 'TrustedInstaller')
+        $acl = Get-Acl -Path $samFile
+        $violations = @()
+        $aclDetails = @()
+
+        foreach ($rule in $acl.Access) {
+            $identity = $rule.IdentityReference.Value
+            $rights = $rule.FileSystemRights
+            $type = $rule.AccessControlType
+            $aclDetails += "ID: $identity, 권한: $rights, 타입: $type, 상속: $($rule.IsInherited)"
+
+            if ($type -eq "Allow") {
+                $isAllowed = $false
+                foreach ($pat in $allowedPatterns) {
+                    if ($identity -like "*$pat*") {
+                        $isAllowed = $true
+                        break
+                    }
+                }
+                if (-not $isAllowed) {
+                    $violations += "ID: $identity, 권한: $rights, 타입: $type"
+                }
+            }
+        }
+
+        $commandOutput = "SAM 파일: $samFile`nACL:`n" + ($aclDetails -join "`n")
+
+        if ($violations.Count -gt 0) {
+            $finalResult = "VULNERABLE"
+            $summary = "SAM 파일에 Administrators/SYSTEM 외 계정의 Allow 권한이 존재합니다: " + ($violations -join "; ")
+            $status = "취약"
+            $commandOutput = $commandOutput + "`n`n불필요 권한:`n" + ($violations -join "`n")
+        } else {
+            $finalResult = "GOOD"
+            $summary = "SAM 파일 권한이 Administrators, SYSTEM 으로 제한되어 있습니다. (보안 권고사항 준수)"
+            $status = "양호"
+        }
+    }
 
 } catch {
     $finalResult = "MANUAL"
-    $summary = "진단 실패: 수동 확인 필요"
+    $summary = "진단 실패: 수동 확인 필요 (SAM 파일 접근에는 관리자 권한이 필요합니다)"
     $status = "수동진단"
-    $commandExecuted = "N/A"
+    $commandExecuted = "Get-Acl -Path '%systemroot%\system32\config\SAM'"
     $commandOutput = "진단 실패: $_"
 }
 

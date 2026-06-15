@@ -11,7 +11,7 @@
 # @Platform    : Nginx_Linux
 # @Severity    : 중
 # @Title       : LDAP 알고리즘 적절하게 구성
-# @Description : 웹 서비스 디렉터리 내의 웹 쉘(shell) 파일 삭제 여부 점검
+# @Description : LDAP 연결 시 안전한 비밀번호 다이제스트 알고리즘 사용 여부 점검. 점검 대상: Tomcat (Nginx 비대상)
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 
@@ -42,103 +42,14 @@ GUIDELINE_REMEDIATION="LDAP 연결 인증 시 SHA-256 이상의 알고리즘을 
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="MANUAL"
-    local status="수동진단"
-    local inspection_summary=""
-    local command_result=""
-    local command_executed=""
-
-    # Process check
-    if command -v pgrep >/dev/null; then
-    if ! pgrep -x "nginx" > /dev/null; then
-        diagnosis_result="N/A"
-        status="N/A"
-        inspection_summary="Nginx 웹 서버가 실행 중이 아닙니다."
-        command_result="Nginx process not found"
-        command_executed="pgrep -x nginx"
-        # Run-all 모드 확인
-        save_dual_result \
-            "${ITEM_ID}" \
-            "${ITEM_NAME}" \
-            "${status}" \
-            "${diagnosis_result}" \
-            "${inspection_summary}" \
-            "${command_result}" \
-            "${command_executed}" \
-            "${GUIDELINE_PURPOSE}" \
-            "${GUIDELINE_THREAT}" \
-            "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" \
-            "${GUIDELINE_REMEDIATION}"
-    
-        # 결과 저장 확인
-        verify_result_saved "${ITEM_ID}"
-
-        return 0
-    fi
-    else
-        echo "[INFO] pgrep command missing, skipping process check."
-    fi
-
-    # 웹 루트 디렉토리 찾기
-    local web_roots=()
-    local nginx_conf_locations=(
-        "/etc/nginx/nginx.conf"
-        "/etc/nginx/conf.d/*.conf"
-        "/etc/nginx/sites-enabled/*.conf"
-    )
-
-    for conf_pattern in "${nginx_conf_locations[@]}"; do
-        for conf_file in $conf_pattern; do
-            if [ -f "${conf_file}" ]; then
-                local found_root=$(grep -E "^\s*root\s+" "${conf_file}" 2>/dev/null | grep -v "^\s*#" | awk '{print $2}' | sed 's/;$//' | head -1 || true)
-                if [ -n "${found_root}" ] && [ -d "${found_root}" ]; then
-                    web_roots+=("${found_root}")
-                fi
-            fi
-        done
-    done
-
-    # 중복 제거
-    local unique_roots=($(echo "${web_roots[@]}" | tr ' ' '\n' | sort -u | tr '\n' ' '))
-
-    if [ ${#unique_roots[@]} -eq 0 ]; then
-        # 기본 웹 루트 사용
-        unique_roots=("/var/www/html" "/usr/share/nginx/html" "/var/www")
-    fi
-
-    local suspicious_files=""
-    local suspicious_count=0
-    local webshell_patterns=(
-        "r57*\.php" "c99*\.php" "webshell*\.php" "shell*\.php"
-        "cmd*\.php" "eval*\.php" "hack*\.php" "backdoor*\.php"
-        "\.php\..*" ".*\.php\.jpg" ".*\.php\.png"
-    )
-
-    for web_root in "${unique_roots[@]}"; do
-        if [ -d "${web_root}" ]; then
-            for pattern in "${webshell_patterns[@]}"; do
-                local found=$(find "${web_root}" -type f -iname "${pattern}" 2>/dev/null | head -3 || true)
-                if [ -n "${found}" ]; then
-                    suspicious_files="${suspicious_files}"$'\n'"${found}"
-                    suspicious_count=$((suspicious_count + 1))
-                fi
-            done
-        fi
-    done
-
-    command_executed="find /var/www/html /usr/share/nginx/html -type f \( -iname '*shell*.php' -o -iname '*r57*.php' -o -iname '*c99*.php' -o -iname '*cmd*.php' \) 2>/dev/null | head -5"
-    command_result="${suspicious_files:-No suspicious files found}"
-
-    if [ ${suspicious_count} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="웹쉘 의심 파일이 발견되지 않았습니다. 정기적인 검사 권장."
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="${suspicious_count}개의 웹쉘 의심 파일이 발견되었습니다. 즉시 삭제하고 출처를 추적하세요. 파일 목록: ${suspicious_files}"
-    fi
+    # WEB-23(LDAP 알고리즘 적절하게 구성) 점검 대상은 Tomcat 이며 Nginx는 비대상(out-of-target)이다.
+    # (docs/guideline_metadata.json WEB-23 target: "Tomcat")
+    # 따라서 Nginx_Linux에서는 N/A로 고정한다. (기존 웹쉘 파일 스캔 로직은 WEB-23 항목과 무관하여 제거함)
+    local diagnosis_result="N/A"
+    local status="N/A"
+    local inspection_summary="WEB-23(LDAP 다이제스트 알고리즘 점검)은 Tomcat을 점검 대상으로 하며 Nginx는 비대상입니다(docs/guideline_metadata.json WEB-23 target). LDAP 연결 알고리즘 점검은 Nginx에 적용되지 않습니다."
+    local command_result="WEB-23 target: Tomcat. Nginx is out of scope."
+    local command_executed="docs/guideline_metadata.json WEB-23 target platform review"
 
     # Run-all 모드 확인
     # 결과 저장 (run_all 모드는 라이브러리에서 판단)

@@ -40,56 +40,65 @@ try {
     $service = Get-Service -Name 'SNMP' -ErrorAction SilentlyContinue
 
     if (-not $service) {
+        # SNMP 서비스 미설치/미사용 = 양호 (가이드라인 양호 기준 1).
         $finalResult = "GOOD"
         $status = "양호"
-        $summary = "SNMP 서비스가 비활성화되거나 특정 호스트로부터의 SNMP 패킷만 수락하도록 설정됨"
+        $summary = "SNMP 서비스를 사용하지 않음"
         $commandExecuted = "Get-Service -Name 'SNMP'"
         $commandOutput = "SNMP service not found"
     } else {
-        $regPath = 'HKLM:\SYSTEM\CurrentControlSet\services\SNMP\Parameters\TrapConfiguration'
+        # 가이드라인: 양호 = SNMP 미사용 또는 '특정 호스트로부터 SNMP 패킷 받아들이기'가 설정된 경우.
+        #             취약 = 모든 호스트로부터 SNMP 패킷 받아들이기가 설정된 경우.
+        # PermittedManagers는 KEY이며 허용 호스트는 그 아래 번호값(1='host1', 2='host2')으로 저장된다.
+        # 따라서 'PermittedManagers'라는 값(value)이 아니라 KEY의 항목(entries)을 열거해야 한다.
         $permittedPath = 'HKLM:\SYSTEM\CurrentControlSet\services\SNMP\Parameters\PermittedManagers'
-        $validHosts = @('127.0.0.1', 'localhost')
-        $hasValidConfig = $false
-
-        if (Test-Path $regPath) {
-            $subKeys = Get-ChildItem $regPath -ErrorAction SilentlyContinue
-            if ($subKeys.Count -gt 0) {
-                $hasValidConfig = $true
-            }
-        }
-
-        # PermittedManagers 확인 (SNMP 접근 제어의 핵심 설정)
-        $hasPermittedManagers = $false
-        if (Test-Path $permittedPath) {
-            $permitted = (Get-ItemProperty -Path $permittedPath -Name 'PermittedManagers' -ErrorAction SilentlyContinue).PermittedManagers
-            if ($permitted) {
-                $hasPermittedManagers = $true
-            }
-        }
-
         $communityPath = 'HKLM:\SYSTEM\CurrentControlSet\services\SNMP\Parameters\ValidCommunities'
-        $hasCommunityRestriction = $false
 
-        if (Test-Path $communityPath) {
-            $communities = Get-Item $communityPath -ErrorAction SilentlyContinue
-            if ($communities) {
-                $hasCommunityRestriction = $true
+        # --- PermittedManagers 호스트 제한 항목 열거 ---
+        $permittedHosts = @()
+        if (Test-Path $permittedPath) {
+            $props = Get-ItemProperty -Path $permittedPath -ErrorAction SilentlyContinue
+            if ($props) {
+                foreach ($p in $props.PSObject.Properties) {
+                    # 레지스트리 메타데이터(PS*) 속성 제외, 숫자 이름의 호스트 항목만 수집.
+                    if ($p.Name -match '^\d+$' -and -not [string]::IsNullOrWhiteSpace([string]$p.Value)) {
+                        $permittedHosts += [string]$p.Value
+                    }
+                }
             }
         }
+        $hasHostRestriction = ($permittedHosts.Count -gt 0)
 
-        if ($hasValidConfig -or $hasCommunityRestriction -or $hasPermittedManagers) {
+        # --- ValidCommunities 커뮤니티 항목 열거 ---
+        $communityNames = @()
+        if (Test-Path $communityPath) {
+            $cprops = Get-ItemProperty -Path $communityPath -ErrorAction SilentlyContinue
+            if ($cprops) {
+                foreach ($c in $cprops.PSObject.Properties) {
+                    if ($c.Name -notmatch '^PS' -and $c.Name -ne 'PSPath' -and $c.Name -ne 'PSParentPath' -and $c.Name -ne 'PSChildName' -and $c.Name -ne 'PSDrive' -and $c.Name -ne 'PSProvider') {
+                        $communityNames += $c.Name
+                    }
+                }
+            }
+        }
+        $hasCommunity = ($communityNames.Count -gt 0)
+
+        # 이 항목(W-31)의 핵심 판단 기준은 호스트 접근 제한(PermittedManagers) 여부이다.
+        # 호스트 제한이 설정되어 있으면 양호. 설정되어 있지 않으면(= 모든 호스트 허용) 취약.
+        $communityLabel = if ($hasCommunity) { ($communityNames -join ', ') } else { '(none)' }
+        if ($hasHostRestriction) {
             $finalResult = "GOOD"
             $status = "양호"
-            $summary = "SNMP 서비스가 비활성화되거나 특정 호스트로부터의 SNMP 패킷만 수락하도록 설정됨"
-            $commandOutput = "SNMP service configured with access restrictions"
+            $summary = "특정 호스트로부터만 SNMP 패킷을 받아들이도록 설정됨 (PermittedManagers 지정됨)"
+            $commandOutput = "PermittedManagers: " + ($permittedHosts -join ', ') + "; Communities: " + $communityLabel
         } else {
             $finalResult = "VULNERABLE"
             $status = "취약"
-            $summary = "SNMP 서비스가 활성화되어 있고 접근 제한 설정이 안 되어 있음"
-            $commandOutput = "SNMP service running without access restrictions"
+            $summary = "SNMP 서비스가 활성화되어 있으나 SNMP 패킷 수령 호스트 제한(PermittedManagers)이 설정되지 않아 모든 호스트로부터 패킷을 수락함"
+            $commandOutput = "No PermittedManagers host restriction. Communities: " + $communityLabel
         }
 
-        $commandExecuted = "Get-Service -Name 'SNMP'; Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\services\SNMP\Parameters'"
+        $commandExecuted = "Get-Service -Name 'SNMP'; Get-ItemProperty 'HKLM:\...\SNMP\Parameters\PermittedManagers'; Get-ItemProperty 'HKLM:\...\SNMP\Parameters\ValidCommunities'"
     }
 
 } catch {

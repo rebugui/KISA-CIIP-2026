@@ -83,15 +83,12 @@ diagnose() {
         fi
     fi
 
-    # 2) Postfix: mail_owner 확인
+    # 2) Postfix: 제출 제한 확인
     if command -v postconf &>/dev/null; then
+        # mail_owner는 Postfix 데몬의 표준 소유자(기본값 postfix)일 뿐
+        # 일반 사용자의 메일 큐/제출 제한 여부를 증명하지 못하므로 참고 정보로만 표시
         local mail_owner=$(postconf mail_owner 2>/dev/null | grep "mail_owner" | awk '{print $3}')
-        restriction_info="${restriction_info}Postfix mail_owner: ${mail_owner}\\n"
-
-        if [ "$mail_owner" = "postfix" ] || [ "$mail_owner" = "mail" ]; then
-            mail_restricted=true
-            restriction_info="${restriction_info}mail_owner가 특정 사용자로 설정됨\\n"
-        fi
+        restriction_info="${restriction_info}Postfix mail_owner: ${mail_owner} (데몬 소유자 - 제한 근거 아님)\\n"
 
         # authorized_mail_users 확인
         local auth_users=$(postconf authorized_mail_users 2>/dev/null | grep "authorized_mail_users" | awk '{print $3}')
@@ -100,10 +97,20 @@ diagnose() {
         fi
 
         # authorized_submit_users 확인
+        # 기본값은 비어있음(= 모든 사용자 제출 허용)이며, static:anyone/static:all/all 도 전체 허용을 의미함.
+        # 위 전체 허용 값이 아닌 실제 제한 값이 설정된 경우에만 제출 제한으로 인정함.
         local submit_users=$(postconf authorized_submit_users 2>/dev/null | grep "authorized_submit_users" | awk '{print $3}')
         if [ -n "$submit_users" ]; then
             restriction_info="${restriction_info}authorized_submit_users: ${submit_users}\\n"
-            mail_restricted=true
+            case "$submit_users" in
+                static:anyone|static:all|all)
+                    restriction_info="${restriction_info}authorized_submit_users가 전체 허용(${submit_users}) - 제출 제한 아님\\n"
+                    ;;
+                *)
+                    mail_restricted=true
+                    restriction_info="${restriction_info}authorized_submit_users로 제출 사용자 제한됨\\n"
+                    ;;
+            esac
         fi
     fi
 

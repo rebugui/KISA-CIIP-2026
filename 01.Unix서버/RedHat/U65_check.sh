@@ -57,8 +57,10 @@ diagnose() {
         status="취약"
         diagnosis_result="VULNERABLE"
         inspection_summary="NTP 데몬이 응답하지 않습니다. 서비스 상태를 확인하십시오."
-    elif ! echo "$cmd_out" | grep -qE '^\*|^o'; then
-        # 동기화 중임을 나타내는 기호(* 또는 o)가 개별 라인에 없는 경우
+    elif ! echo "$cmd_out" | grep -qE '^\^[*+]|^[*o]'; then
+        # 동기화 기호가 없는 경우 취약
+        # - chronyc sources: 라인이 '^* '(동기화) 또는 '^+ '(결합) 로 시작 (첫 문자는 리터럴 '^')
+        # - ntpq -p: 라인이 '*'(syspeer) 또는 'o'(PPS) 로 시작
         status="취약"
         diagnosis_result="VULNERABLE"
         inspection_summary="NTP 서버와 동기화가 이루어지지 않고 있습니다."

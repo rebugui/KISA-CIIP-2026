@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="웹 서비스 링크 사용 제한 설정"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -82,23 +82,28 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
-    local web_xml_locations=(
-        "/etc/tomcat*/web.xml"
-        "/var/lib/tomcat*/conf/web.xml"
-        "/usr/share/tomcat*/conf/web.xml"
+    local context_locations=(
+        "${CATALINA_HOME:-/usr/local/tomcat}/conf/context.xml"
+        "/usr/local/tomcat/conf/context.xml"
+        "${CATALINA_HOME:-/usr/local/tomcat}/conf/server.xml"
+        "/usr/local/tomcat/conf/server.xml"
+        "/etc/tomcat*/context.xml"
+        "/var/lib/tomcat*/conf/context.xml"
+        "/usr/share/tomcat*/conf/context.xml"
     )
 
-    local security_constraints=""
+    local found_conf=""
+    local allow_linking_hits=""
 
-    for xml_pattern in "${web_xml_locations[@]}"; do
-        for xml_file in $xml_pattern; do
-            if [ -f "${xml_file}" ]; then
-                local found_constraint=$(grep -E "security-constraint|web-resource-collection" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
-                if [ -n "${found_constraint}" ]; then
-                    security_constraints="${security_constraints}"$'\n'"${found_constraint}"
-                    has_security_constraint=true
+    for conf_pattern in "${context_locations[@]}"; do
+        for conf_file in $conf_pattern; do
+            if [ -f "${conf_file}" ]; then
+                found_conf="${found_conf} ${conf_file}"
+                # allowLinking="true"는 심볼릭 링크 추적을 허용 (웹루트 외부 노출 위험)
+                local hit=$(grep -iE "allowLinking[[:space:]]*=[[:space:]]*\"?true" "${conf_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                if [ -n "${hit}" ]; then
+                    allow_linking_hits="${allow_linking_hits}"$'\n'"${conf_file}: ${hit}"
                 fi
-                break 2
             fi
         done
     done
@@ -106,9 +111,25 @@ diagnose() {
     command_executed="grep -E 'security-constraint|web-resource-collection' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -3"
     command_result="${security_constraints:-No security constraints found}"
 
-    diagnosis_result="MANUAL"
-    status="수동진단"
-    inspection_summary="Tomcat 링크 사용 제한은 web.xml security-constraint 존재만으로 양호/취약을 확정할 수 없습니다. 웹 루트의 심볼릭 링크, alias, 바로가기 및 배포 경로를 수동 확인하세요."
+    if [ -z "${found_conf}" ]; then
+        # 설정 파일 미발견 → 자동 판정 불가 (증거 기반 MANUAL)
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat context.xml/server.xml을 표준 경로 및 CATALINA_HOME에서 찾을 수 없어 자동 판정이 불가합니다. allowLinking 설정 및 웹 루트 심볼릭 링크 사용을 수동 확인하세요."
+        command_result="context.xml/server.xml not found"
+    elif [ -n "${allow_linking_hits}" ]; then
+        # docs WEB-12 criteria_bad: 링크를 제한 없이 사용하는 경우 취약
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="allowLinking=\"true\" 설정이 발견되었습니다. 심볼릭 링크를 통해 웹 루트 외부 파일이 노출될 수 있어 취약합니다. allowLinking을 제거하거나 false로 설정하세요."
+        command_result="${allow_linking_hits}"
+    else
+        # allowLinking=true 부재 → Tomcat 기본값(심볼릭 링크 미허용)으로 링크 사용 제한
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="allowLinking=\"true\" 설정이 없어 Tomcat 기본값(심볼릭 링크 미추적)으로 링크 사용이 제한되어 있습니다. (보안 권고사항 준수)"
+        command_result="No allowLinking=true found in:${found_conf}"
+    fi
 
     # Run-all 모드 확인
     # 결과 저장 (run_all 모드는 라이브러리에서 판단)

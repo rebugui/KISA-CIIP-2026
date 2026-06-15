@@ -87,15 +87,16 @@ diagnose() {
                 local owner=$(perl -le 'print +(getpwuid((stat shift)[4]))[0]' "$sudoers_file" 2>/dev/null || echo "unknown")
                 local group=$(perl -le 'print +(getgrgid((stat shift)[5]))[0]' "$sudoers_file" 2>/dev/null || echo "unknown")
 
-                # 권한이 440, 400 또는 640이 아니거나 소유자가 root가 아닌 경우
-                if [ "$perms" != "0440" ] && [ "$perms" != "0400" ] && [ "$perms" != "0640" ]; then
+                # 640 이내 권한(600, 440, 400 등 포함)만 양호. stat 실패(0000 폴백)는 취약으로 안전 처리
+                if [ "$perms" = "0000" ] || [ $(( 8#${perms} & ~(8#640) & 8#7777 )) -ne 0 ]; then
                     sudoers_issues=true
-                    issue_details="${issue_details}${sudoers_file} 권한 ${perms} (0440/0640 권장), "
+                    issue_details="${issue_details}${sudoers_file} 권한 ${perms} (640 이내 권장), "
                 fi
 
-                if [ "$owner" != "root" ] || [ "$group" != "system" ] && [ "$group" != "root" ]; then
+                # 판단 기준은 소유자 root (그룹은 증적용으로만 표기)
+                if [ "$owner" != "root" ]; then
                     sudoers_issues=true
-                    issue_details="${issue_details}${sudoers_file} 소유자 ${owner}:${group} (root:system 권장), "
+                    issue_details="${issue_details}${sudoers_file} 소유자 ${owner}:${group} (root 권장), "
                 fi
             fi
         done || true
@@ -125,7 +126,7 @@ diagnose() {
             if [ -n "$sudoers_d_files" ]; then
                 for file in $sudoers_d_files; do
                     local file_perms=$(perl -le 'printf "%04o\n", (stat shift)[2] & 07777' "$file" 2>/dev/null || echo "0000")
-                    if [ "$file_perms" != "0440" ] && [ "$file_perms" != "0400" ] && [ "$file_perms" != "0640" ]; then
+                    if [ "$file_perms" = "0000" ] || [ $(( 8#${file_perms} & ~(8#640) & 8#7777 )) -ne 0 ]; then
                         sudoers_issues=true
                         issue_details="${issue_details}${file} 권한 ${file_perms}, "
                     fi
@@ -148,7 +149,9 @@ diagnose() {
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="sudoers 설정이 안전하게 구성됨 (권한 440, root:root)"
+            local good_perms=$(perl -le 'printf "%04o\n", (stat shift)[2] & 07777' /etc/sudoers 2>/dev/null || echo "unknown")
+            local good_owner=$(perl -le 'print +(getpwuid((stat shift)[4]))[0]' /etc/sudoers 2>/dev/null || echo "unknown")
+            inspection_summary="sudoers 설정이 안전하게 구성됨 (권한 ${good_perms}, 소유자 ${good_owner})"
             local grep_sudoers=$(grep -v '^#' /etc/sudoers | grep -v '^$' 2>/dev/null | head -20 || echo "sudoers not readable")
             command_result="[Command: grep -v '^#' /etc/sudoers]${newline}${grep_sudoers}"
             command_executed="stat -c '%a:%U:%G' /etc/sudoers 2>/dev/null"

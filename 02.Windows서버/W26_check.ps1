@@ -7,7 +7,7 @@
 # [점검 항목 상세]
 # @ID          : W-26
 # @Category    : Windows Server
-# @Platform    : Windows Server 2008, 2012, 2016, 2019, 2022
+# @Platform    : Windows Server
 # @Severity    : 상
 # @Title       : RDS(Remote Data Services)제거
 # @Description : RDS(Remote Data Services) 서비스/기능 제거로 레거시 데이터 접속 취약점 방지

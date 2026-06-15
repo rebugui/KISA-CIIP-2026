@@ -40,20 +40,54 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="r 계열 서비스가 비활성화되어 있습니다."
     local command_result=""
-    local command_executed="ps -ef | grep -E 'rlogin|rsh|rexec'"
+    local command_executed="ps -ef | grep -E 'rshd|rlogind|rexecd'; grep -i disable /etc/xinetd.d/rsh /etc/xinetd.d/rlogin /etc/xinetd.d/rexec 2>/dev/null; systemctl is-active rsh.socket rlogin.socket rexec.socket 2>/dev/null"
 
-    # 1. 실제 데이터 추출
-    local r_services=$(ps -ef | grep -Ei "rlogin|rsh|rexec" | grep -v grep || echo "")
+    local findings=""
+    local evidence=""
 
-    # 2. 판정 로직
+    # 1. 프로세스 스냅샷 확인 (r 계열 데몬)
+    local r_services=$(ps -ef | grep -Ei "rshd|rlogind|rexecd" | grep -v grep || echo "")
     if [ -n "$r_services" ]; then
+        findings="${findings}r 계열 데몬 프로세스 실행 중. "
+        evidence="${evidence}실행 중인 프로세스: [ $(echo $r_services | awk '{print $8}' | xargs) ]. "
+    fi
+
+    # 2. xinetd 설정 확인 (/etc/xinetd.d/rsh·rlogin·rexec: disable=yes가 아니면 활성)
+    local xsvc=""
+    for xsvc in rsh rlogin rexec; do
+        local xfile="/etc/xinetd.d/${xsvc}"
+        if [ -f "$xfile" ]; then
+            local disable_val=$(grep -i "disable" "$xfile" 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
+            disable_val=$(echo "$disable_val" | tr '[:upper:]' '[:lower:]')
+            if [ "$disable_val" != "yes" ]; then
+                findings="${findings}${xfile} 활성(disable=${disable_val:-미설정}). "
+            fi
+            evidence="${evidence}${xfile}: disable=${disable_val:-미설정}. "
+        fi
+    done
+
+    # 3. systemd 소켓 활성화 확인 (systemctl 존재 시에만)
+    if command -v systemctl >/dev/null 2>&1; then
+        local rsock=""
+        for rsock in rsh.socket rlogin.socket rexec.socket; do
+            if systemctl is-active "$rsock" >/dev/null 2>&1; then
+                findings="${findings}${rsock} 활성. "
+                evidence="${evidence}${rsock}: active. "
+            fi
+        done
+    fi
+
+    # 4. 판정 로직
+    if [ -n "$findings" ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
-        inspection_summary="보안에 취약한 r 계열 서비스가 활성화되어 있습니다."
-        command_result="실행 중인 서비스: [ $(echo $r_services | awk '{print $8}' | xargs) ]"
+        inspection_summary="보안에 취약한 r 계열 서비스가 활성화되어 있습니다: ${findings}"
+        command_result="${evidence}"
     else
-        command_result="r 계열 서비스가 발견되지 않았습니다."
+        command_result="${evidence:-r 계열 서비스가 발견되지 않았습니다.}"
     fi
+
+    command_result=$(echo "$command_result" | tr -d '\n\r')
 
     save_dual_result \
         "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \

@@ -58,90 +58,49 @@ diagnose() {
 
     # 진단 로직 구현
     # 주기적 보안 패치 및 벤더 권고 사항 적용 확인
+    # 패치 정책 수립/최신성 여부는 벤더 공지 대비 수동 판단이 필요하므로 항상 수동진단으로 판정
 
     local kernel_version=""
-    local package_updates=0
-    local security_updates=0
+    local os_version=""
+    local upgradable_list=""
     local last_update_info=""
     local details=""
     local raw_output=""
 
-    # 1) 커널 버전 확인
-    kernel_version=$(uname -r 2>/dev/null)
+    # 1) 커널/OS 버전 확인
+    kernel_version=$(uname -r 2>/dev/null || true)
+    if command -v lsb_release >/dev/null 2>&1; then
+        os_version=$(lsb_release -d 2>/dev/null | cut -f2- || true)
+    fi
+    if [ -z "$os_version" ] && [ -r /etc/os-release ]; then
+        os_version=$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d'"' -f2 || true)
+    fi
+    [ -z "$os_version" ] && os_version="알 수 없음"
 
-    # 2) 업데이트 가능한 패키지 확인 (Debian/Ubuntu)
+    # 2) 업그레이드 가능 패키지 목록 수집 (apt 캐시 기준 — 최신성 보장 안 됨)
     if command -v apt >/dev/null 2>&1; then
-        # apt list --upgradable로 업데이트 가능한 패키지 확인
-        local update_list=$(apt list --upgradable 2>/dev/null | grep -v "^Listing")
-
-        if [ -n "$update_list" ]; then
-            package_updates=$(echo "$update_list" | wc -l)
-
-            # 보안 업데이트만 필터링
-            security_updates=$(echo "$update_list" | grep -i "security" | wc -l)
-        fi
-
-        # Capture raw output for apt
-        raw_output=$(echo "=== Kernel Version ===" && uname -r && echo -e "\n=== Upgradable Packages ===" && apt list --upgradable 2>/dev/null | head -20)
-
-        # 마지막 업데이트 시간 확인 (/var/cache/apt/archives/의 최신 파일)
-        if [ -d /var/cache/apt/archives/ ]; then
-            local last_update_file=$(ls -lt /var/cache/apt/archives/*.deb 2>/dev/null | head -1 | awk '{print $NF}')
-            if [ -n "$last_update_file" ]; then
-                last_update_info=$(stat -c "%y" "$last_update_file" 2>/dev/null | cut -d'.' -f1)
-            fi
-        fi
-
-        details="커널: ${kernel_version}, 업데이트 가능한 패키지: ${package_updates}개"
-        [ "$security_updates" -gt 0 ] && details="${details} (보안: ${security_updates}개)"
-        [ -n "$last_update_info" ] && details="${details}, 마지막 업데이트: ${last_update_info}"
-
-    elif command -v yum >/dev/null 2>&1; then
-        # RHEL/CentOS의 경우
-        local update_list=$(yum check-update 2>/dev/null | grep -v "^$" | grep -v "Loaded plugins" | grep -v "^$" | tail -n +2)
-
-        if [ -n "$update_list" ]; then
-            package_updates=$(echo "$update_list" | wc -l)
-            security_updates=$(echo "$update_list" | grep -i "security" | wc -l)
-        fi
-
-        # Capture raw output for yum
-        raw_output=$(echo "=== Kernel Version ===" && uname -r && echo -e "\n=== Yum Check Update ===" && yum check-update 2>/dev/null | head -20)
-
-        # 마지막 yum history 확인
-        local last_yum=$(yum history list 2>/dev/null | head -5 | tail -1 | awk '{print $1" "$3" "$4" "$5" "$6" "$7}')
-        [ -n "$last_yum" ] && last_update_info="$last_yum"
-
-        details="커널: ${kernel_version}, 업데이트 가능: ${package_updates}개"
-        [ "$security_updates" -gt 0 ] && details="${details} (보안: ${security_updates}개)"
-        [ -n "$last_update_info" ] && details="${details}, 마지막 업데이트: ${last_update_info}"
-
-    else
-        # 다른 배포판의 경우 커널 버전만 확인
-        raw_output=$(echo "=== Kernel Version ===" && uname -r)
-        details="커널: ${kernel_version}, 패키지 매니저: 확인 불가"
+        upgradable_list=$(apt list --upgradable 2>/dev/null | head -20 || true)
     fi
+    [ -z "$upgradable_list" ] && upgradable_list="확인 불가 (apt 미존재 또는 캐시 비어 있음)"
 
-    # 3) 판정
-    if [ "$security_updates" -gt 0 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="보안 업데이트 ${security_updates}개 적용 필요: ${details}"
-        command_result="${raw_output}"
-        command_executed="uname -r; apt list --upgradable 2>/dev/null | head -20"
-    elif [ "$package_updates" -gt 10 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="일반 업데이트 ${package_updates}개 미적용 (시스템 업데이트 권장): ${details}"
-        command_result="${raw_output}"
-        command_executed="uname -r; apt list --upgradable 2>/dev/null | wc -l"
-    else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="시스템이 최신 상태임: ${details}"
-        command_result="${raw_output}"
-        command_executed="uname -r; apt list --upgradable 2>/dev/null | wc -l"
+    # 3) 마지막 apt-get update 시점 확인 (가능한 경우)
+    if [ -f /var/lib/apt/periodic/update-success-stamp ]; then
+        last_update_info=$(stat -c "%y" /var/lib/apt/periodic/update-success-stamp 2>/dev/null | cut -d'.' -f1 || true)
+    elif [ -f /var/cache/apt/pkgcache.bin ]; then
+        last_update_info=$(stat -c "%y" /var/cache/apt/pkgcache.bin 2>/dev/null | cut -d'.' -f1 || true)
     fi
+    [ -z "$last_update_info" ] && last_update_info="확인 불가"
+
+    raw_output="=== OS Version ===${newline}${os_version}${newline}=== Kernel Version ===${newline}${kernel_version}${newline}=== Upgradable Packages (apt 캐시 기준 — 최신성 보장 안 됨) ===${newline}${upgradable_list}${newline}=== Last apt-get update ===${newline}${last_update_info}"
+
+    details="OS: ${os_version}, 커널: ${kernel_version}, 마지막 apt-get update: ${last_update_info}"
+
+    # 4) 판정 (Debian): 패치 정책/최신성은 자동 판정 불가 — 항상 수동진단
+    diagnosis_result="MANUAL"
+    status="수동진단"
+    inspection_summary="패치 적용 현황 수동 확인 필요 (최신 보안패치 적용 여부는 벤더 공지 대비 수동 판단). ${details}. 업그레이드 가능 목록은 apt 캐시 기준 — 최신성 보장 안 됨."
+    command_result="${raw_output}"
+    command_executed="lsb_release -d; uname -r; apt list --upgradable 2>/dev/null | head -20; stat -c %y /var/lib/apt/periodic/update-success-stamp"
 
     # echo ""
     # echo "진단 결과: ${status}"

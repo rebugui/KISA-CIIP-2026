@@ -10,7 +10,7 @@
 # @Platform    : IIS_Windows
 # @Severity    : 중
 # @Title       : 별도의 업로드 경로 사용 및 권한 설정
-# @Description : X-Frame-Options HTTP 헤더를 설정하여 Clickjacking 공격을 방지합니다. X-Frame-Options 헤더 미설정 시 공격자가 피해자 사이트를 iframe으로 로드하여 Clickjacking 공격이 가능합니다.
+# @Description : 파일 업로드 경로가 웹 루트 디렉터리와 분리되어 있고 일반 사용자의 접근 권한이 부여되지 않았는지 점검합니다. 각 사이트의 실제 경로(PhysicalPath) 하위에 업로드 디렉터리가 존재하면 웹 루트 내부 업로드로 취약 신호이며, 업로드 경로의 위치 및 권한 분리 여부는 정적으로 단정하기 어려우므로 증거와 함께 수동진단으로 보고합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -27,66 +27,80 @@ $ITEM_NAME = "별도의 업로드 경로 사용 및 권한 설정"
 Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
-    # IIS X-Frame-Options 헤더 확인
+    # IIS 대상: 업로드 경로 분리 및 일반 사용자 접근 권한 점검
+    # 웹 루트(PhysicalPath) 하위에 업로드성 디렉터리가 존재하는지, 존재 시 일반 사용자 쓰기 권한 여부를 확인.
+    # 업로드 경로의 외부 분리 여부는 정적으로 단정 곤란 -> 증거와 함께 수동진단.
     $sites = Get-Website
-    $sitesWithoutHeader = @()
-    $sitesWithHeader = @()
+    $commandExecuted = "Get-Website; Get-ChildItem (PhysicalPath); Get-Acl (업로드 디렉터리)"
+    $uploadCandidates = @()
+    $aclWarnings = @()
+    $details = @()
+    $uploadKeywords = @("upload", "uploads", "files", "data", "temp", "attach")
 
     foreach ($site in $sites) {
         $siteName = $site.Name
         $path = $site.PhysicalPath
+        if ($path) {
+            $path = [System.Environment]::ExpandEnvironmentVariables($path)
+        }
 
-        # web.config에서 customHeaders 확인
-        $webConfig = Join-Path $path "web.config"
-        $headerFound = $false
+        if (-not $path -or -not (Test-Path $path)) {
+            $details += "Site: $siteName, Path: $path (경로 접근 불가)"
+            continue
+        }
 
-        if (Test-Path $webConfig) {
-            [xml]$config = Get-Content $webConfig
-            $httpProtocol = $config.configuration.'system.webServer'.httpProtocol
-            if ($httpProtocol) {
-                foreach ($header in $httpProtocol.customHeaders.Collection) {
-                    if ($header.name -eq "X-Frame-Options") {
-                        $headerFound = $true
-                        $sitesWithHeader += "Site: $siteName, X-Frame-Options: $($header.value)"
-                        break
+        # 웹 루트 하위 업로드성 디렉터리 탐색
+        $subDirs = Get-ChildItem -Path $path -Directory -ErrorAction SilentlyContinue
+        foreach ($dir in $subDirs) {
+            $dirNameLower = $dir.Name.ToLower()
+            foreach ($kw in $uploadKeywords) {
+                if ($dirNameLower -eq $kw -or $dirNameLower -like "*$kw*") {
+                    $uploadCandidates += "Site: $siteName, 웹루트 내 업로드 추정 디렉터리: $($dir.FullName)"
+
+                    # ACL 점검: 일반 사용자(Everyone/Users/Authenticated Users) Allow 권한
+                    try {
+                        $acl = Get-Acl -Path $dir.FullName
+                        foreach ($rule in $acl.Access) {
+                            $identity = "$($rule.IdentityReference.Value)"
+                            if ($rule.AccessControlType -eq "Allow" -and
+                                ($identity -like "*Everyone*" -or $identity -like "*\Users" -or $identity -like "*Authenticated Users*" -or $identity -like "*BUILTIN\Users*")) {
+                                $aclWarnings += "Site: $siteName, $($dir.FullName) -> $identity ($($rule.FileSystemRights))"
+                            }
+                        }
+                    } catch {
+                        $details += "ACL 확인 실패: $($dir.FullName) ($($_.Exception.Message))"
                     }
+                    break
                 }
             }
         }
-
-        # IIS 전체 설정 확인
-        if (-not $headerFound) {
-            $iisConfig = Get-WebConfiguration -Filter "/system.webServer/httpProtocol/customHeaders/add[@name='X-Frame-Options']" -Location $siteName -ErrorAction SilentlyContinue
-            if ($iisConfig) {
-                $headerFound = $true
-                $sitesWithHeader += "Site: $siteName, X-Frame-Options: $($iisConfig.value)"
-            }
-        }
-
-        if (-not $headerFound) {
-            $sitesWithoutHeader += "Site: $siteName, X-Frame-Options: Not configured"
-        }
+        $details += "Site: $siteName, Path: $path 점검 완료"
     }
 
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/httpProtocol/customHeaders'"
+    $commandOutput = $details -join "`n"
+    if ($uploadCandidates.Count -gt 0) {
+        $commandOutput = $commandOutput + "`n`n업로드 추정 디렉터리:`n" + ($uploadCandidates -join "`n")
+    }
+    if ($aclWarnings.Count -gt 0) {
+        $commandOutput = $commandOutput + "`n`n일반 사용자 접근 권한:`n" + ($aclWarnings -join "`n")
+    }
 
-    if ($sitesWithoutHeader.Count -gt 0) {
-        $finalResult = "VULNERABLE"
-        $summary = "X-Frame-Options 헤더가 설정되지 않은 사이트가 있습니다: " + ($sitesWithoutHeader[0] + " 외 " + ($sitesWithoutHeader.Count - 1) + "개")
-        $status = "취약"
-        $commandOutput = (($sitesWithHeader + $sitesWithoutHeader) -join "`n")
+    # 업로드 경로의 외부 분리 여부 및 의도된 업로드 디렉터리 식별은 정적 판단 한계 -> 수동진단
+    $finalResult = "MANUAL"
+    $status = "수동진단"
+    if ($uploadCandidates.Count -gt 0 -and $aclWarnings.Count -gt 0) {
+        $summary = "웹 루트 내부에 업로드 추정 디렉터리가 존재하고 일반 사용자 접근 권한이 확인되었습니다. 업로드 경로 분리 및 권한 제한을 수동 확인하세요: " + ($aclWarnings -join "; ")
+    } elseif ($uploadCandidates.Count -gt 0) {
+        $summary = "웹 루트 내부에 업로드 추정 디렉터리가 존재합니다. 별도 경로 사용 여부 및 접근 권한을 수동 확인하세요: " + ($uploadCandidates -join "; ")
     } else {
-        $finalResult = "GOOD"
-        $summary = "모든 웹사이트에 X-Frame-Options 헤더가 설정되어 있습니다. (보안 권고사항 준수)"
-        $status = "양호"
-        $commandOutput = $sitesWithHeader -join "`n"
+        $summary = "업로드 경로의 위치 및 권한 분리 여부는 정적으로 단정할 수 없어 수동 확인이 필요합니다."
     }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/httpProtocol/customHeaders'"
+    $commandExecuted = "Get-Website; Get-ChildItem (PhysicalPath); Get-Acl"
     $commandOutput = "진단 실패: $_"
 }
 

@@ -42,10 +42,11 @@ try {
 
     $vulnerable = $false
     $problemShares = @()
+    $inaccessibleShares = @()
 
     foreach ($share in $shares) {
         try {
-            $security = Get-WmiObject -Class Win32_LogicalShareSecuritySetting -Filter "Name='$($share.Name)'" -ErrorAction SilentlyContinue
+            $security = Get-WmiObject -Class Win32_LogicalShareSecuritySetting -Filter "Name='$($share.Name)'" -ErrorAction Stop
             if ($security) {
                 $descriptor = $security.GetSecurityDescriptor()
                 $everyoneAccess = $false
@@ -61,10 +62,13 @@ try {
                     $vulnerable = $true
                     $problemShares += $share.Name
                 }
+            } else {
+                # 보안 설정 객체를 얻지 못함 -> 권한 판단 불가 공유로 기록
+                $inaccessibleShares += $share.Name
             }
         } catch {
-            # Skip shares where security cannot be checked
-            continue
+            # GetSecurityDescriptor() 접근 거부/오류 등으로 ACL을 읽지 못한 공유는 누락하지 않고 기록 (조용한 GOOD 처리 금지)
+            $inaccessibleShares += $share.Name
         }
     }
 
@@ -73,6 +77,12 @@ try {
         $summary = "일반 공유 디렉터리의 접근 권한에 Everyone 권한이 존재: $($problemShares -join ', ')"
         $status = "취약"
         $commandOutput = "Shares with Everyone access: $($problemShares -join ', ')"
+    } elseif ($inaccessibleShares.Count -gt 0) {
+        # Everyone 권한 공유는 발견되지 않았으나 ACL을 읽지 못한 공유가 존재 -> 수동진단 (false-good 방지)
+        $finalResult = "MANUAL"
+        $summary = "일부 공유의 접근 권한(ACL)을 읽을 수 없어 Everyone 권한 존재 여부를 확정할 수 없음. 해당 공유를 수동으로 확인 필요: $($inaccessibleShares -join ', ')"
+        $status = "수동진단"
+        $commandOutput = "Inaccessible share ACLs: $($inaccessibleShares -join ', ')"
     } else {
         $finalResult = "GOOD"
         $summary = "일반 공유 디렉터리가 없거나 공유 권한에 Everyone 권한이 없음"

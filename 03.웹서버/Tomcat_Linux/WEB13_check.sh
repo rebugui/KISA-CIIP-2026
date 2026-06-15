@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="DB 연결 파일에 대한 접근 권한 제한 또는 �
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""

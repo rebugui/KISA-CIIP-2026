@@ -73,8 +73,9 @@ diagnose() {
 
     # in.tftpd (inetd/xinetd 기반) 확인
     if [ -f /etc/xinetd.d/tftp ]; then
-        local disabled=$(grep -i "disable" /etc/xinetd.d/tftp | grep -v "^#" | awk '{print $2}')
-        service_info="${service_info}xinetd tftp: disable=${disabled}\\n"
+        local disabled=$(grep -E '^[[:space:]]*disable' /etc/xinetd.d/tftp 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
+        service_info="${service_info}xinetd tftp: disable=${disabled:-없음}\\n"
+        # xinetd 기본값: disable 항목이 없으면 서비스 활성화 상태
         if [ "$disabled" != "yes" ]; then
             services_running=true
             running_services+=("tftp(xinetd)")
@@ -93,8 +94,14 @@ diagnose() {
         fi
     done || true
 
-    # talkd/ntalkd (inetd 기반) 확인
+    # tftpd/talkd/ntalkd (inetd 기반) 확인
     if [ -f /etc/inetd.conf ]; then
+        local tftp_inetd=$(grep -E "^tftp" /etc/inetd.conf | grep -v "^#" || echo "")
+        if [ -n "$tftp_inetd" ]; then
+            services_running=true
+            running_services+=("tftp(inetd)")
+            service_info="${service_info}inetd tftp 활성화됨\\n"
+        fi
         local talk_services=$(grep -E "^talk|^ntalk" /etc/inetd.conf | grep -v "^#" || echo "")
         if [ -n "$talk_services" ]; then
             services_running=true
@@ -126,13 +133,13 @@ diagnose() {
         inspection_summary="tftp, talk 서비스 비활성화됨"
         local service_check=$(/sbin/init.d/tftp status 2>/dev/null | head -2; /sbin/init.d/talk status 2>/dev/null | head -2; /sbin/init.d/ntalk status 2>/dev/null | head -2; ss -tuln 2>/dev/null | grep -E ':69|:517|:518' || echo "Services not running")
         command_result="${service_check}"
-        command_executed="/sbin/init.d/tftp status 2>/dev/null | grep -q "running" talk ntalk; ss -tuln | grep -E ':69|:517|:518'"
+        command_executed="/sbin/init.d/tftp status; /sbin/init.d/talk status; /sbin/init.d/ntalk status; ss -tuln | grep -E ':69|:517|:518'"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="불필요한 서비스 활성화됨: ${running_services[*]}"
         command_result="${service_info}"
-        command_executed="/sbin/init.d/tftp status 2>/dev/null | grep -q "running" talk ntalk; grep -E '^talk|^ntalk' /etc/inetd.conf"
+        command_executed="/sbin/init.d/tftp status; /sbin/init.d/talk status; /sbin/init.d/ntalk status; grep -E '^tftp|^talk|^ntalk' /etc/inetd.conf"
     fi
 
     # echo ""

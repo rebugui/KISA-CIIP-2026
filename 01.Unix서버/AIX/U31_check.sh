@@ -70,7 +70,9 @@ diagnose() {
         ((total_users++)) || true
 
         # 시스템 계정 제외 (UID >= 200인 일반 사용자만 확인)
-        if [ "$uid" -lt "$system_gid_threshold" ]; then
+        # 단, root(UID 0)의 홈 디렉토리는 기준 대상이므로 제외하지 않음
+        # (root 홈이 타사용자 쓰기 가능일 때 미탐(false-good) 방지)
+        if [ "$uid" -ne 0 ] && [ "$uid" -lt "$system_gid_threshold" ]; then
             continue
         fi
 
@@ -88,14 +90,15 @@ diagnose() {
 
         # 홈 디렉토리 소유자 확인 (AIX uses ls -ld for stat info)
         local owner=$(ls -ld "$home" 2>/dev/null | awk '{print $3}' || echo "unknown")
-        local perms=$(ls -ld "$home" 2>/dev/null | awk '{print $1}' | cut -c2-10 | sed 's/rwx/7/g; s/rw-/6/g; s/r-x/5/g; s/r--/4/g; s/-wx/3/g; s/-w-/2/g; s/--x/1/g; s/---/0/g' || echo "000")
+        # setuid/setgid/sticky 표기(s/S/t/T)를 실행 비트 기준으로 정규화한 뒤 숫자로 변환
+        local perms=$(ls -ld "$home" 2>/dev/null | awk '{print $1}' | cut -c2-10 | sed 's/[st]/x/g; s/[ST]/-/g' | sed 's/rwx/7/g; s/rw-/6/g; s/r-x/5/g; s/r--/4/g; s/-wx/3/g; s/-w-/2/g; s/--x/1/g; s/---/0/g' || echo "000")
 
         # stat 결과 누적
         raw_stat_output="${raw_stat_output}${home}: owner=${owner}, perms=${perms}${newline}"
 
         # 타사용자 쓰기 권한 확인 (others의 write 권한)
         local has_others_write=false
-        if [[ "$perms" =~ [0-9][0-9][1357]$ ]]; then
+        if [[ "$perms" =~ [0-9][0-9][2367]$ ]]; then
             has_others_write=true
         fi
 

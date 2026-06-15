@@ -51,7 +51,7 @@ diagnose() {
         [ -f "$f" ] && all_sources="$all_sources $f"
     done
     for src in $all_sources; do
-        local found=$(grep -iE "^(export\s+)?TMOUT=" "$src" 2>/dev/null | head -1 | sed -E 's/^(export\s+)?TMOUT=//i' | tr -d '[:space:]' || true)
+        local found=$(grep -iE "^(export\s+)?TMOUT=" "$src" 2>/dev/null | head -1 | sed -E 's/^(export\s+)?TMOUT=//i' | tr -d "[:space:]'\"" | sed -E 's/;.*$//' || true)
         if [ -n "$found" ]; then
             tmout_val="$found"
             break
@@ -59,10 +59,10 @@ diagnose() {
     done
 
     # 2. 판정 로직
-    if [ "$tmout_val" = "미설정" ] || [ "$tmout_val" -gt 600 ]; then
+    if [ "$tmout_val" = "미설정" ] || ! [[ "$tmout_val" =~ ^[0-9]+$ ]] || [ "$tmout_val" -lt 1 ] || [ "$tmout_val" -gt 600 ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
-        inspection_summary="세션 종료 시간이 설정되지 않았거나 600초를 초과합니다."
+        inspection_summary="세션 종료 시간이 설정되지 않았거나 값이 숫자가 아니거나 1~600초 범위를 벗어납니다 (0은 자동 종료 비활성화)."
     fi
 
     # 3. command_result에 실제 TMOUT 설정값 기록

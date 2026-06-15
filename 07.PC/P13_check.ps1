@@ -41,14 +41,11 @@ try {
     $thirdParty = Get-WmiObject -Namespace "root\SecurityCenter2" -Class "AntiVirusProduct" -ErrorAction SilentlyContinue
 
     $hasDefender = $false
-    $defenderEnabled = $false
     $defenderUpToDate = $false
+    $defenderUpdateUnknown = $false
 
     if ($defender -ne $null) {
         $hasDefender = $true
-        if ($defender.RealTimeProtectionEnabled -eq $true) {
-            $defenderEnabled = $true
-        }
         if ($defender.AntivirusSignatureLastUpdated -ne $null) {
             $now = Get-Date
             $daysSinceUpdate = ($now - $defender.AntivirusSignatureLastUpdated).Days
@@ -58,39 +55,33 @@ try {
             if ($daysSinceUpdate -le 7) {
                 $defenderUpToDate = $true
             }
+        } else {
+            # 서명 업데이트 시점을 알 수 없음 → 최신성 증명 불가
+            $defenderUpdateUnknown = $true
         }
     }
 
+    # PC-13 점검 범위: 백신 "설치" 여부 + "최신 업데이트" 적용 여부
+    # (실시간 감시 활성화 여부는 PC-14의 점검 범위이므로 여기서는 판정에 사용하지 않음)
     $hasThirdParty = $false
-    $thirdPartyRunning = $false
     if ($thirdParty -ne $null) {
         $hasThirdParty = $true
-        # Check if third-party antivirus is actually running (real-time protection enabled)
-        foreach ($av in $thirdParty) {
-            # productState bit 0 = 1 means real-time protection is enabled
-            if ($av.productState -ne $null -and ($av.productState -band 1) -eq 1) {
-                $thirdPartyRunning = $true
-                break
-            }
-        }
     }
 
-    if ($hasDefender -and $defenderEnabled -and $defenderUpToDate) {
+    if ($hasDefender -and $defenderUpToDate) {
         $finalResult = "GOOD"
-        $summary = "Windows Defender 백신 설치, 실시간 감시 및 업데이트 정상"
+        $summary = "Windows Defender 백신 설치 및 업데이트 정상"
         $status = "양호"
-    } elseif ($hasThirdParty -and $thirdPartyRunning) {
-        # 제3자 백신 실시간 감시 확인
-        # SecurityCenter2의 productState에서 실시간 보호 상태 확인
-        # productState 하위 워드의 비트 0x10 = 실시간 보호 활성화
+    } elseif ($hasThirdParty) {
+        # 제3자 백신: 설치는 확인됨. 업데이트 최신 여부를 SecurityCenter2 timestamp로 판정.
+        # timestamp가 없으면 업데이트 적용 시점을 증명할 수 없으므로 GOOD이 아니라 MANUAL.
         $thirdPartyUpToDate = $false
+        $thirdPartyUnknown = $false
         $thirdPartyDetails = @()
         foreach ($av in $thirdParty) {
             $avName = $av.displayName
-            $avState = $av.productState
             $avTimestamp = $av.timestamp
 
-            # 제3자 백신 업데이트 날짜 확인 (timestamp가 있는 경우)
             if ($null -ne $avTimestamp -and $avTimestamp -ne "") {
                 try {
                     $updateDate = [Management.ManagementDateTimeConverter]::ToDateTime($avTimestamp)
@@ -100,27 +91,42 @@ try {
                     }
                     $thirdPartyDetails += "$avName (업데이트: $($updateDate.ToString('yyyy-MM-dd')), ${daysSince}일 전)"
                 } catch {
-                    $thirdPartyDetails += "$avName (업데이트 날짜 확인 불가)"
+                    $thirdPartyUnknown = $true
+                    $thirdPartyDetails += "$avName (업데이트 날짜 파싱 불가)"
                 }
             } else {
-                # timestamp가 없으면 실시간 감시만으로 양호 처리
-                $thirdPartyUpToDate = $true
-                $thirdPartyDetails += "$avName (상태: 활성)"
+                # timestamp 미제공 → 업데이트 최신성 증명 불가 → 수동진단 (양호로 단정 금지)
+                $thirdPartyUnknown = $true
+                $thirdPartyDetails += "$avName (업데이트 timestamp 미제공: 최신성 확인 불가)"
             }
         }
 
         if ($thirdPartyUpToDate) {
             $finalResult = "GOOD"
-            $summary = "제3자 백신 설치 및 실시간 감시 정상: $($thirdPartyDetails -join ', ')"
+            $summary = "제3자 백신 설치 및 최신 업데이트 적용됨: $($thirdPartyDetails -join ', ')"
             $status = "양호"
+        } elseif ($thirdPartyUnknown) {
+            $finalResult = "MANUAL"
+            $summary = "제3자 백신 설치 확인됨. 업데이트 최신 여부를 자동 확인 불가하여 수동 확인 필요: $($thirdPartyDetails -join ', ')"
+            $status = "수동진단"
         } else {
             $finalResult = "VULNERABLE"
             $summary = "제3자 백신 설치되었으나 업데이트가 오래됨: $($thirdPartyDetails -join ', ')"
             $status = "취약"
         }
+    } elseif ($hasDefender -and $defenderUpdateUnknown) {
+        # Defender 설치되어 있으나 서명 업데이트 시점 확인 불가 → 수동진단
+        $finalResult = "MANUAL"
+        $summary = "Windows Defender 설치 확인됨. 서명 업데이트 시점 확인 불가하여 수동 확인 필요"
+        $status = "수동진단"
+    } elseif ($hasDefender) {
+        # Defender 설치되어 있고 서명 업데이트 시점은 확인되나 7일 초과 → 취약
+        $finalResult = "VULNERABLE"
+        $summary = "Windows Defender 설치되었으나 최신 업데이트 미적용 (마지막 서명 업데이트 ${daysSinceUpdate}일 전)"
+        $status = "취약"
     } else {
         $finalResult = "VULNERABLE"
-        $summary = "백신 프로그램 미설치 또는 실시간 감시/업데이트 미설정"
+        $summary = "백신 프로그램 미설치"
         $status = "취약"
     }
 

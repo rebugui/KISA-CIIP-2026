@@ -36,12 +36,14 @@ if (-not (Test-RunallMode)) {
 }
 
 # 1. Check for unnecessary accounts
-# 참고: KISA 가이드라인에 구체적 기준이 없어, 업계 표준(90일) 적용
+# 불필요/의심 계정 존재 여부는 운영상 필요성(human judgment)에 따라 결정되므로,
+# 빌트인 외 모든 계정(활성/비활성 포함)을 열거하여 수동 검토 대상으로 제시한다.
+# 활성 계정을 점검 범위에서 제외(비활성+90일 한정)하면 불필요한 활성 계정이 GOOD으로 누락되는 false-good이 발생함.
 try {
     $builtinAccounts = @('Administrator', 'Guest', 'DefaultAccount', 'WDAGUtilityAccount')
     $currentDate = Get-Date
-    $daysThreshold = 90  # 업계 표준: 90일 이상 미사용 계정을 불필요한 계정으로 간주
-    $unnecessaryAccounts = @()
+    $daysThreshold = 90  # 참고용: 90일 이상 미로그온 비활성 계정은 명백히 의심 계정으로 표시
+    $reviewAccounts = @()
 
     # Get all local users
     $allUsers = Get-LocalUser
@@ -52,46 +54,49 @@ try {
             continue
         }
 
-        # Check if account is disabled
-        if ($user.Enabled -eq $false) {
-            # Get last logon time using WMI (locale-independent)
-            try {
-                $lastLogonWmi = Get-WmiObject -Class Win32_NetworkLoginProfile -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -eq $user.Name } |
-                    Sort-Object LastLogon -Descending |
-                    Select-Object -First 1 -ExpandProperty LastLogon
+        $state = if ($user.Enabled) { "활성" } else { "비활성" }
+        $logonNote = ""
 
-                if ($lastLogonWmi) {
-                    $lastLogonDate = [Management.ManagementDateTimeConverter]::ToDateTime($lastLogonWmi)
-                    $daysSinceLogon = ($currentDate - $lastLogonDate).Days
+        # Get last logon time using WMI (locale-independent) for additional context
+        try {
+            $lastLogonWmi = Get-WmiObject -Class Win32_NetworkLoginProfile -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -eq $user.Name } |
+                Sort-Object LastLogon -Descending |
+                Select-Object -First 1 -ExpandProperty LastLogon
 
-                    if ($daysSinceLogon -gt $daysThreshold) {
-                        $unnecessaryAccounts += "$($user.Name) (비활성화, $($daysSinceLogon)일 미로그온)"
-                    }
+            if ($lastLogonWmi) {
+                $lastLogonDate = [Management.ManagementDateTimeConverter]::ToDateTime($lastLogonWmi)
+                $daysSinceLogon = ($currentDate - $lastLogonDate).Days
+                if ($daysSinceLogon -gt $daysThreshold) {
+                    $logonNote = ", $($daysSinceLogon)일 미로그온"
                 } else {
-                    # Cannot determine last logon, include disabled account for review
-                    $unnecessaryAccounts += "$($user.Name) (비활성화, 로그온 기록 없음)"
+                    $logonNote = ", $($daysSinceLogon)일 전 로그온"
                 }
-            } catch {
-                # If last logon cannot be determined, mark for manual review
-                $unnecessaryAccounts += "$($user.Name) (비활성화, 확인 필요)"
+            } else {
+                $logonNote = ", 로그온 기록 없음"
             }
+        } catch {
+            $logonNote = ", 로그온 확인 필요"
         }
+
+        # 빌트인 외 모든 계정을 검토 대상으로 수집 (활성/비활성 무관)
+        $reviewAccounts += "$($user.Name) ($state$logonNote)"
     }
 
-    $commandExecuted = "Get-LocalUser; Get-WmiObject -Class Win32_NetworkLoginProfile | Where-Object { $_.Name -eq $user.Name } | Select-Object -First 1 -ExpandProperty LastLogon"
+    $commandExecuted = "Get-LocalUser; Get-WmiObject -Class Win32_NetworkLoginProfile | Where-Object { `$_.Name -eq `$user.Name } | Select-Object -First 1 -ExpandProperty LastLogon"
 
-    if ($unnecessaryAccounts.Count -gt 0) {
-        $accountList = $unnecessaryAccounts -join ', '
-        $finalResult = "VULNERABLE"
-        $summary = "불필요한 계정 발견 ($($unnecessaryAccounts.Count)개): $accountList`n`n기준: 90일 이상 로그온 없는 비활성화 계정"
-        $status = "취약"
+    if ($reviewAccounts.Count -gt 0) {
+        $accountList = $reviewAccounts -join ', '
+        # 불필요 계정 여부는 운영 필요성 판단이 요구되므로 수동진단 (활성 계정을 건너뛰고 GOOD 처리 금지)
+        $finalResult = "MANUAL"
+        $summary = "빌트인 외 로컬 계정 $($reviewAccounts.Count)개 존재. 각 계정의 업무상 필요성을 확인하여 불필요/의심 계정(퇴직·전직·휴직자 등) 여부를 수동 점검 필요: $accountList"
+        $status = "수동진단"
         $commandOutput = $accountList
     } else {
         $finalResult = "GOOD"
-        $summary = "시스템에 불필요한 계정이 존재하지 않음 (90일 이상 미로그온 비활성화 계정 기준)"
+        $summary = "빌트인 계정 외 추가 로컬 계정이 존재하지 않음 (불필요한 계정 없음)"
         $status = "양호"
-        $commandOutput = "No unnecessary accounts found (90-day threshold applied)"
+        $commandOutput = "No non-builtin local accounts found"
     }
 
 } catch {

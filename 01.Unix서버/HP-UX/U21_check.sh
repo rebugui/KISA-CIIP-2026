@@ -83,23 +83,16 @@ diagnose() {
         local file_perms=$(perl -e '@stat=stat("'"$target_file"'"); printf "%04o\n", $stat[2] & 07777' 2>/dev/null)
         local file_owner=$(perl -e '@stat=lstat("'"$target_file"'"); $uid=$stat[4]; $gid=$stat[5]; $user=getpwuid($uid); $group=getgrgid($gid); print "$user:$group"' 2>/dev/null)
 
-        # 소유자 및 권한 확인 (보수적 검사: 가이드라인 기준 엄격 적용)
-        # 허용 소유자: root:root, root:bin, root:sys
-        # 허용 권한: 640 이하
+        # 소유자 확인 (가이드라인 판단기준: 소유자가 root(또는 bin, sys) - 그룹은 기준에 없음)
+        # HP-UX 기본 bin:bin syslog.conf도 소유자 bin이므로 양호
+        local file_owner_user="${file_owner%%:*}"
         local is_valid_owner=false
-        local valid_owners=("root:root" "root:bin" "root:sys")
+        case "$file_owner_user" in
+            root|bin|sys) is_valid_owner=true ;;
+        esac
 
-        for valid_owner in "${valid_owners[@]}"; do
-            if [ "$file_owner" = "$valid_owner" ]; then
-                is_valid_owner=true
-                break
-            fi
-        done
-
-        # 권한 확인 (640 이하인 경우 양호)
-        local perms_num=$(echo "$file_perms" | sed 's/^0*//')
-
-        if [ "$is_valid_owner" = true ] && [ "$perms_num" -le 640 ]; then
+        # 권한 확인 (비트 검사: 640 초과 권한 비트가 없어야 양호 - 622 등 group/other 쓰기 차단, 4자리 %04o 처리)
+        if [ "$is_valid_owner" = true ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#640 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="파일: $target_file, 권한: $file_perms, 소유자: $file_owner"
         else

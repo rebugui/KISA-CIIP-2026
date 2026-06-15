@@ -88,8 +88,11 @@ diagnose() {
         local uid=$(echo "$user_line" | cut -d: -f3)
         local home_dir=$(echo "$user_line" | cut -d: -f6)
 
-        # 홈 디렉터리가 존재하고, UID가 200 이상인 일반 사용자 확인 (AIX system UID: < 200)
-        if [ -d "$home_dir" ] && [ "$uid" -ge 200 ] 2>/dev/null; then
+        # UID가 숫자가 아니면 건너뜀
+        case "$uid" in ''|*[!0-9]*) continue ;; esac
+
+        # 실제 홈 디렉터리를 보유한 모든 계정 점검 (UID 1-199 시스템 계정도 실홈 보유 시 포함)
+        if [ -d "$home_dir" ]; then
             local rhosts_path="${home_dir}/.rhosts"
 
             if [ -f "$rhosts_path" ]; then

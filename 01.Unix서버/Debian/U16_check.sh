@@ -79,8 +79,9 @@ diagnose() {
         local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null)
         local file_owner=$(stat -c "%U:%G" "$target_file" 2>/dev/null)
 
-        # 소유자 및 권한 확인 (644 이하)
-        if [ "$file_owner" = "root:root" ] && [ "$file_perms" -le 644 ]; then
+        # 소유자 및 권한 확인 (644 초과 비트 없음: 644보다 강한 600/400 등은 양호, 추가 비트는 취약)
+        # 07777 마스크로 setuid/setgid/sticky 특수 비트(4644, 2644, 1644 등)도 초과 비트로 검출
+        if [ "$file_owner" = "root:root" ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#644 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $file_perms, 소유자: $file_owner"
         else

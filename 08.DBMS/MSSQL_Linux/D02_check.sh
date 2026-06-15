@@ -64,9 +64,9 @@ diagnose() {
         local mssql_running=$(powershell.exe -Command "Get-Service | Where-Object {\$_.Name -like '*SQL*' -and \$_.Status -eq 'Running'} | Measure-Object | Select-Object -ExpandProperty Count" 2>/dev/null || echo "0")
 
         if [ "$mssql_running" = "0" ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="MSSQL 서비스 미실행"
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="MSSQL 서비스 미실행으로 불필요 계정 존재 여부를 자동 점검할 수 없습니다. 서비스 시작 후 불필요한 계정의 제거 또는 잠금 설정 여부를 수동으로 확인하세요."
             save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
             verify_result_saved "${ITEM_ID}"
             return 0

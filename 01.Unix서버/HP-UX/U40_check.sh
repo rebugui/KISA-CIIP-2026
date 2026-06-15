@@ -114,7 +114,34 @@ diagnose() {
         fi
     fi
 
-    # 2) NFS 서비스 실행 확인 (HP-UX: /sbin/init.d/nfs.server 사용)
+    # 2) HP-UX 주 설정 파일 /etc/dfs/dfstab 공유 설정 확인
+    if [ -f /etc/dfs/dfstab ]; then
+        local dfstab_entries
+        dfstab_entries=$(grep -v '^[[:space:]]*#' /etc/dfs/dfstab 2>/dev/null | grep -v '^[[:space:]]*$' || true)
+        if [ -n "$dfstab_entries" ]; then
+            nfs_installed=true
+            exports_info="${exports_info}/etc/dfs/dfstab 공유(share) 설정 존재\\n${dfstab_entries}\\n\\n"
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                # 호스트 접근 제한 옵션(rw=호스트, ro=호스트, access=호스트) 존재 시 접근 통제 설정으로 인정
+                if echo "$line" | grep -Eq '(rw|ro|access)=[^[:space:],]'; then
+                    continue
+                fi
+                # 접근 제한 없는 공유: 명시적 rw 또는 옵션 없음(기본 rw) → 전체 공개
+                if echo "$line" | grep -Eq '(^|[[:space:],])rw($|[[:space:],])'; then
+                    is_secure=false
+                    issues+=("dfstab 전체 공개 쓰기(rw) 공유: $line")
+                else
+                    is_secure=false
+                    issues+=("dfstab 호스트 접근 제한 없는 공유: $line")
+                fi
+            done <<< "$dfstab_entries"
+        else
+            exports_info="${exports_info}/etc/dfs/dfstab 공유(share) 설정 없음\\n"
+        fi
+    fi
+
+    # 2-1) NFS 서비스 실행 확인 (HP-UX: /sbin/init.d/nfs.server 사용)
     if /sbin/init.d/nfs.server status 2>/dev/null | grep -q "running" &>/dev/null; then
         nfs_installed=true
         exports_info="${exports_info}NFS 서비스 실행 중\\n"
@@ -129,6 +156,28 @@ diagnose() {
         fi
     fi
 
+    # 4) NFS 설정 파일 접근 권한 확인 (가이드 기준: 644 이하, group/other 쓰기 금지)
+    #    NFS 사용 중일 때만 검사 (HP-UX: /etc/dfs/dfstab, 호환: /etc/exports)
+    if [ "$nfs_installed" = true ]; then
+        local nfs_conf
+        for nfs_conf in /etc/dfs/dfstab /etc/exports; do
+            [ -f "$nfs_conf" ] || continue
+            local conf_perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$nfs_conf" 2>/dev/null || true)
+            if [[ ! "$conf_perms" =~ ^[0-7]{3,4}$ ]]; then
+                # 권한 확인 불가 → 증거 미확보, 보수적으로 issue 기록(수동 확인 유도)
+                issues+=("${nfs_conf} 권한 확인 불가 (perl stat 실패)")
+                exports_info="${exports_info}${nfs_conf} 권한 확인 불가\\n"
+                continue
+            fi
+            exports_info="${exports_info}${nfs_conf} 권한: ${conf_perms}\\n"
+            # 644 초과(=group/other 쓰기 비트 포함 등 644에 없는 비트) → 취약
+            if [ "$(( 8#$conf_perms & ~8#644 & 07777 ))" -ne 0 ]; then
+                is_secure=false
+                issues+=("${nfs_conf} 권한 644 초과 (${conf_perms})")
+            fi
+        done
+    fi
+
     # 최종 판정
     if [ "$nfs_installed" = false ]; then
         diagnosis_result="GOOD"
@@ -136,19 +185,19 @@ diagnose() {
         inspection_summary="NFS 서비스 미사용"
         local nfs_check=$(/sbin/init.d/nfs.server status 2>/dev/null | head -3; ss -tuln 2>/dev/null | grep -E ':2049|:20048' || echo "NFS not running")
         command_result="${nfs_check}"
-        command_executed="/sbin/init.d/nfs.server status 2>/dev/null; ss -tuln | grep -E ':2049|:20048'"
+        command_executed="cat /etc/dfs/dfstab /etc/exports 2>/dev/null; /sbin/init.d/nfs.server status 2>/dev/null; ss -tuln | grep -E ':2049|:20048'"
     elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="NFS 접근 통제 적절히 설정됨"
         command_result="${exports_info}"
-        command_executed="cat /etc/exports; /sbin/init.d/nfs.server status 2>/dev/null"
+        command_executed="cat /etc/dfs/dfstab /etc/exports 2>/dev/null; /sbin/init.d/nfs.server status 2>/dev/null"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="NFS 접근 통제 미흡: ${issues[*]}"
         command_result="${exports_info}"
-        command_executed="cat /etc/exports; exportfs -v 2>/dev/null"
+        command_executed="cat /etc/dfs/dfstab /etc/exports 2>/dev/null; exportfs -v 2>/dev/null"
     fi
 
     # echo ""

@@ -46,8 +46,9 @@ diagnose() {
     # 1. 실제 데이터 추출: /etc/group에서 사용자가 배정되지 않은 그룹 확인
     local ghost_groups=""
     while IFS=: read -r gname gpass gid gmembers; do
+        [[ "$gid" =~ ^[0-9]+$ ]] || continue # 비정상/공백 GID 행은 건너뜀 (set -e 하 산술 비교 중단 방지)
         if [ "$gid" -ge 1000 ]; then # 일반 사용자 그룹 범위 대상
-            if ! grep -q ":${gid}:" /etc/passwd && [ -z "$gmembers" ]; then
+            if ! awk -F: -v g="$gid" '$4 == g {found=1} END {exit !found}' /etc/passwd && [ -z "$gmembers" ]; then
                 ghost_groups+="${gname}(${gid}) "
             fi
         fi

@@ -10,7 +10,7 @@
 # @Platform    : IIS_Windows
 # @Severity    : 중
 # @Title       : 웹 서비스 링크 사용 금지
-# @Description : 심볼릭 링크(Symbolic Links) 사용을 제한하여 디렉터리 트래버설 공격을 방지합니다. IIS는 기본적으로 심볼릭 링크를 지원하지 않지만 추가 모듈 설치 시 확인이 필요합니다.
+# @Description : 각 웹 사이트의 실제 경로(PhysicalPath)를 탐색하여 바로가기(.lnk) 파일 및 재분석 지점(ReparsePoint, 정션/심볼릭 링크) 존재 여부를 점검합니다. 링크가 발견되면 취약, 없으면 양호, 경로 탐색이 불가능하면 수동진단으로 판단합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -28,18 +28,74 @@ $SEVERITY = "중"
 Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
-    # IIS symbolic links 확인 (기본적으로 비활성화)
-    $finalResult = "GOOD"
-    $summary = "IIS는 기본적으로 symbolic link 사용이 비활성화되어 있습니다. 별도 설정이 없으면 링크 사용이 제한됩니다. (보안 권고사항 준수)"
-    $status = "양호"
-    $commandExecuted = "IIS does not support symbolic links by default"
-    $commandOutput = "Symbolic Links: Not supported by default in IIS"
+    # IIS 대상: 각 사이트 PhysicalPath 내 바로가기(.lnk) 및 ReparsePoint(정션/심볼릭 링크) 탐색
+    $sites = Get-Website
+    $commandExecuted = "Get-Website; Get-ChildItem -Recurse (PhysicalPath) -> .lnk / ReparsePoint 탐색"
+    $linkFindings = @()
+    $unreadable = @()
+    $scannedDetails = @()
+
+    foreach ($site in $sites) {
+        $siteName = $site.Name
+        $path = $site.PhysicalPath
+
+        # 환경변수 확장 (%SystemDrive% 등)
+        if ($path) {
+            $path = [System.Environment]::ExpandEnvironmentVariables($path)
+        }
+
+        if (-not $path -or -not (Test-Path $path)) {
+            $unreadable += "Site: $siteName, Path: $path (경로 접근 불가)"
+            continue
+        }
+
+        try {
+            $items = Get-ChildItem -Path $path -Recurse -Force -ErrorAction Stop
+            $scannedDetails += "Site: $siteName, Path: $path (탐색 완료)"
+
+            foreach ($item in $items) {
+                # 바로가기 파일
+                if ($item.Extension -eq ".lnk") {
+                    $linkFindings += "Site: $siteName, 바로가기 파일: $($item.FullName)"
+                }
+                # 재분석 지점 (정션/심볼릭 링크)
+                if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                    $linkFindings += "Site: $siteName, ReparsePoint(링크/정션): $($item.FullName)"
+                }
+            }
+        } catch {
+            $unreadable += "Site: $siteName, Path: $path (탐색 실패: $($_.Exception.Message))"
+        }
+    }
+
+    if ($linkFindings.Count -gt 0) {
+        $finalResult = "VULNERABLE"
+        $summary = "웹 사이트 실제 경로에서 링크(바로가기/ReparsePoint)가 발견되었습니다: " + ($linkFindings -join "; ")
+        $status = "취약"
+        $commandOutput = ($linkFindings -join "`n")
+    } elseif ($unreadable.Count -gt 0) {
+        # 일부 사이트라도 경로 접근/탐색이 불가능하면(누락된 사이트에 링크가 숨어 있을 수 있으므로)
+        # 전수 탐색이 보장되지 않은 것이므로 양호로 단정하지 않고 수동진단 처리한다.
+        # (전수 탐색이 모두 성공한 경우에만 아래 else 분기에서 양호로 판단)
+        $finalResult = "MANUAL"
+        $summary = "일부 웹 사이트 실제 경로를 탐색할 수 없어 링크 부재를 전수 확인하지 못했습니다. 수동 확인이 필요합니다: " + ($unreadable -join "; ")
+        $status = "수동진단"
+        $commandOutput = "탐색 불가 경로:`n" + ($unreadable -join "`n")
+        if ($scannedDetails.Count -gt 0) {
+            $commandOutput = $commandOutput + "`n`n탐색 완료 경로:`n" + ($scannedDetails -join "`n")
+        }
+    } else {
+        $finalResult = "GOOD"
+        $summary = "웹 사이트 실제 경로에서 바로가기/링크가 발견되지 않았습니다. (보안 권고사항 준수)"
+        $status = "양호"
+        $commandOutput = ($scannedDetails -join "`n")
+    }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "N/A"
+    $commandExecuted = "Get-Website; Get-ChildItem -Recurse (PhysicalPath)"
     $commandOutput = "진단 실패: $_"
 }
 

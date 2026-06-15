@@ -10,7 +10,7 @@
 # @Platform    : IIS_Windows
 # @Severity    : 중
 # @Title       : 웹 서비스 SSI(Server Side Includes)사용 제한
-# @Description : SSI(Server-Side Includes) 사용을 제한하여 악의적인 명령 실행 공격을 방지합니다. SSI 활성화 시 공격자가 악의적인 스크립트를 삽입하여 시스템 명령을 실행할 수 있는 보안 위협이 있습니다.
+# @Description : IIS 처리기 매핑(Handler Mappings)에서 SSI 관련 확장자(.shtml, .shtm, .stm) 매핑 존재 여부를 점검합니다. 가이드라인에 따라 해당 확장자 매핑이 존재하면 SSI가 활성화된 것으로 보아 취약으로 판단합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -27,53 +27,48 @@ $ITEM_NAME = "웹 서비스 SSI(Server Side Includes)사용 제한"
 Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
-    # IIS SSI (Server-Side Includes) 확인
+    # IIS 대상: 처리기 매핑에서 SSI 확장자(.shtml/.shtm/.stm) 매핑 존재 여부 점검
     $sites = Get-Website
-    $ssiEnabled = $false
-    $siteInfo = @()
+    $commandExecuted = "Get-WebConfiguration -Filter '/system.webServer/handlers'"
+    $ssiExtensions = @(".shtml", ".shtm", ".stm")
+    $ssiMappings = @()
+    $details = @()
 
     foreach ($site in $sites) {
         $siteName = $site.Name
-        $path = $site.PhysicalPath
 
-        # web.config에서 SSI 확인
-        $webConfig = Join-Path $path "web.config"
-        if (Test-Path $webConfig) {
-            [xml]$config = Get-Content $webConfig
-            $ssi = $config.configuration.'system.webServer'.serverSideInclude
-            if ($ssi -and $ssi.enabled -eq "true") {
-                $ssiEnabled = $true
-                $siteInfo += "Site: $siteName, SSI: Enabled in web.config"
+        $handlers = Get-WebConfiguration -Filter "/system.webServer/handlers" -Location $siteName -ErrorAction SilentlyContinue
+        if ($handlers) {
+            foreach ($handler in $handlers.Collection) {
+                $hPath = "$($handler.path)".ToLower()
+                foreach ($ext in $ssiExtensions) {
+                    if ($hPath -like "*$ext") {
+                        $ssiMappings += "Site: $siteName, 매핑: $($handler.path) -> $($handler.name)"
+                    }
+                }
             }
         }
-
-        # IIS 설정에서 SSI 확인
-        $iisConfig = Get-WebConfiguration -Filter "/system.webServer/serverSideInclude" -Location $siteName -ErrorAction SilentlyContinue
-        if ($iisConfig -and $iisConfig.Attributes.value.enabled -eq "true") {
-            $ssiEnabled = $true
-            $siteInfo += "Site: $siteName, SSI: Enabled in IIS config"
-        }
+        $details += "Site: $siteName 처리기 매핑 점검 완료"
     }
 
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/serverSideInclude'"
+    $commandOutput = $details -join "`n"
 
-    if ($ssiEnabled) {
-        $finalResult = "MANUAL"
-        $summary = "SSI가 활성화되어 있습니다: " + ($siteInfo -join ", ") + " - 필요 여부 수동 확인 필요."
-        $status = "수동진단"
-        $commandOutput = $siteInfo -join "`n"
+    if ($ssiMappings.Count -gt 0) {
+        $finalResult = "VULNERABLE"
+        $summary = "SSI 확장자(.shtml/.shtm/.stm) 처리기 매핑이 존재합니다: " + ($ssiMappings -join "; ")
+        $status = "취약"
+        $commandOutput = ($ssiMappings -join "`n")
     } else {
         $finalResult = "GOOD"
-        $summary = "SSI가 비활성화되어 있습니다. (보안 권고사항 준수)"
+        $summary = "SSI 확장자(.shtml/.shtm/.stm) 처리기 매핑이 존재하지 않습니다. (보안 권고사항 준수)"
         $status = "양호"
-        $commandOutput = "SSI: Disabled on all sites"
     }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/serverSideInclude'"
+    $commandExecuted = "Get-WebConfiguration -Filter '/system.webServer/handlers'"
     $commandOutput = "진단 실패: $_"
 }
 

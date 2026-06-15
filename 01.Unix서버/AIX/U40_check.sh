@@ -67,6 +67,17 @@ diagnose() {
         nfs_installed=true
         exports_info="NFS exports 파일 존재\\n\\n"
 
+        # /etc/exports 파일 권한 확인 (644 이하 요구)
+        # perl 미가용/실패 시 권한 확인 불가 → 정규식 가드에서 탈락하여 안전 측(취약) 판정
+        local exports_perms=$(perl -e '@s=stat(shift); printf "%04o", $s[2] & 07777' /etc/exports 2>/dev/null || true)
+        exports_info="${exports_info}/etc/exports 권한: ${exports_perms:-확인불가}\\n"
+        if [[ "$exports_perms" =~ ^[0-7]{3,4}$ ]] && [ $(( 8#${exports_perms} & ~(8#644) & 8#7777 )) -eq 0 ]; then
+            :
+        else
+            is_secure=false
+            issues+=("/etc/exports 권한 ${exports_perms:-확인불가} (644 초과 또는 확인불가)")
+        fi
+
         # exports 파일 내용 확인
         if [ -s /etc/exports ]; then
             exports_info="${exports_info}$(cat /etc/exports)\\n\\n"
@@ -77,34 +88,39 @@ diagnose() {
                 [[ "$line" =~ ^#.*$ ]] && continue
                 [[ -z "$line" ]] && continue
 
-                # 취약한 옵션 확인
-                if ! echo "$line" | grep -q "ro"; then
-                    if echo "$line" | grep -q "rw"; then
+                # 옵션 부분만 추출 (첫 필드는 공유 경로 - 경로 문자열 'ro' 오탐 방지)
+                local opts_part=$(echo "$line" | awk '{$1=""; print $0}')
+
+                # 모든 호스트('*') 공유 확인
+                if echo "$opts_part" | grep -Eq '(^|[[:space:]])\*|=\*' ; then
+                    is_secure=false
+                    issues+=("모든 호스트(*)에 공유 허용: $line")
+                fi
+
+                # 취약한 옵션 확인 (정확한 토큰 매칭: no_root_squash 내 'ro' 오탐 방지)
+                if ! echo "$opts_part" | grep -Eq '(^|[(,[:space:]])-?ro($|[),[:space:]])'; then
+                    if echo "$opts_part" | grep -Eq '(^|[(,[:space:]])-?rw($|[),=[:space:]])'; then
                         is_secure=false
                         issues+=("쓰기 권한(rw) 허용됨: $line")
                     fi
                 fi
 
-                # root_squash 확인 (없으면 취약)
-                if ! echo "$line" | grep -q "root_squash"; then
-                    if echo "$line" | grep -q "no_root_squash"; then
-                        is_secure=false
-                        issues+=("root 권한 승급 가능(no_root_squash): $line")
-                    else
-                        # 기본값은 root_squash지만 명시적인 것이 좋음
-                        issues+=("root_squash 옵션 미명시: $line")
-                    fi
+                # root_squash 확인 (no_root_squash 정확 토큰 매칭 우선)
+                if echo "$opts_part" | grep -Eq '(^|[(,[:space:]])no_root_squash($|[),[:space:]])'; then
+                    is_secure=false
+                    issues+=("root 권한 승급 가능(no_root_squash): $line")
+                elif ! echo "$opts_part" | grep -Eq '(^|[(,[:space:]])root_squash($|[),[:space:]])'; then
+                    # 기본값은 root_squash지만 명시적인 것이 좋음
+                    issues+=("root_squash 옵션 미명시: $line")
                 fi
 
-                # sync 확인
-                if ! echo "$line" | grep -q "sync"; then
-                    if echo "$line" | grep -q "async"; then
-                        issues+=("비동기 모드(async) 사용: $line")
-                    fi
+                # sync 확인 (async 정확 토큰 매칭)
+                if echo "$opts_part" | grep -Eq '(^|[(,[:space:]])async($|[),[:space:]])'; then
+                    issues+=("비동기 모드(async) 사용: $line")
                 fi
 
                 # insecure 옵션 확인 (1024 이상 포트 허용)
-                if echo "$line" | grep -q "insecure"; then
+                if echo "$opts_part" | grep -Eq '(^|[(,[:space:]])insecure($|[),[:space:]])'; then
                     is_secure=false
                     issues+=("insecure 옵션 사용: $line")
                 fi
@@ -114,8 +130,9 @@ diagnose() {
         fi
     fi
 
-    # 2) NFS 서비스 실행 확인
-    if lssrc -s nfs-server 2>/dev/null | grep -q "active" &>/dev/null || lssrc -s nfs-kernel-server 2>/dev/null | grep -q "active" &>/dev/null; then
+    # 2) NFS 서비스 실행 확인 (AIX: nfsd)
+    local nfsd_lssrc=$(lssrc -s nfsd 2>/dev/null || echo "")
+    if echo "$nfsd_lssrc" | grep -q "active"; then
         nfs_installed=true
         exports_info="${exports_info}NFS 서비스 실행 중\\n"
     fi
@@ -134,16 +151,16 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="NFS 서비스 미사용"
-        local lssrc_out=$(lssrc -s nfs-server nfs-kernel-server 2>/dev/null || echo "NFS services not found")
+        local lssrc_out=$(lssrc -s nfsd 2>/dev/null || echo "NFS services not found")
         local ss_out=$(ss -tuln | grep -E ':2049|:20048' 2>/dev/null || echo "NFS ports not listening")
-        command_result="[Command: lssrc -s nfs-server]${newline}${lssrc_out}${newline}${newline}[Command: ss -tuln | grep NFS ports]${newline}${ss_out}"
-        command_executed="lssrc -s nfs-server 2>/dev/null | grep -q "active" nfs-kernel-server; ss -tuln | grep -E ':2049|:20048'"
+        command_result="[Command: lssrc -s nfsd]${newline}${lssrc_out}${newline}${newline}[Command: ss -tuln | grep NFS ports]${newline}${ss_out}"
+        command_executed="lssrc -s nfsd; ss -tuln | grep -E ':2049|:20048'"
     elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="NFS 접근 통제 적절히 설정됨"
         command_result="${exports_info}"
-        command_executed="cat /etc/exports; lssrc -s nfs-server" 2>/dev/null | grep -q "active"
+        command_executed="cat /etc/exports; lssrc -s nfsd 2>/dev/null | grep -q 'active'"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

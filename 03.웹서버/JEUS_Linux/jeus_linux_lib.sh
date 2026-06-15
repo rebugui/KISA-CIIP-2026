@@ -126,21 +126,40 @@ jeus_acl_check() {
     local bad=""
     local checked=""
     local mode
+    local octal
+    local group_digit
+    local other_digit
     local target
     for target in "${targets[@]}"; do
         [ -e "${target}" ] || continue
         checked+="${target}"$'\n'
         if command -v stat >/dev/null 2>&1; then
             mode="$(stat -c '%a %U:%G %n' "${target}" 2>/dev/null || true)"
-            case "${mode%% *}" in
-                *2|*3|*6|*7) bad+="${mode}"$'\n' ;;
+            octal="${mode%% *}"
+            # Normalize to last 3 octal digits (drop setuid/setgid/sticky leading digit).
+            # Index 0 = owner, 1 = group, 2 = other.
+            octal="${octal: -3}"
+            group_digit="${octal:1:1}"
+            other_digit="${octal:2:1}"
+            # criteria_bad: any general-user access (read/write/exec) on password,
+            # config or log paths. "Other" digit non-zero => world-accessible (read=4,
+            # exec=1, write=2 all flagged). Group-WRITE (2/3/6/7) is also broad access per
+            # guideline remediation (chmod 600 / chmod -R 750 -> group r-x is acceptable,
+            # group write is not). Group read/exec only (4,5) stays clean per 750/640.
+            case "${other_digit}" in
+                1|2|3|4|5|6|7) bad+="${mode}"$'\n' ;;
             esac
+            if [ -z "${other_digit}" ] || [ "${other_digit}" = "0" ]; then
+                case "${group_digit}" in
+                    2|3|6|7) bad+="${mode}"$'\n' ;;
+                esac
+            fi
         fi
     done
     if [ -n "${bad}" ]; then
-        jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "Broad write permission evidence was found on JEUS ${role} paths." "${bad}" "stat JEUS ${role} paths"
+        jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "Broad general-user access (read/write/exec) permission evidence was found on JEUS ${role} paths." "${bad}" "stat JEUS ${role} paths"
     elif [ -n "${checked}" ]; then
-        jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No broad write permission evidence was found on assessed JEUS ${role} paths." "${checked}" "stat JEUS ${role} paths"
+        jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No broad general-user access permission evidence was found on assessed JEUS ${role} paths." "${checked}" "stat JEUS ${role} paths"
     else
         jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS ${role} paths were not found for permission assessment." "$(jeus_evidence)" "stat JEUS ${role} paths"
     fi
@@ -190,15 +209,27 @@ invoke_jeus_linux_check() {
             jeus_set_result "N/A" "N/A" "Upper-directory access restriction item is not targeted to JEUS in the guideline metadata." "WEB-06 target excludes JEUS." "Map web service upper-directory guideline applicability"
             ;;
         WEB-07)
-            sample_paths=""
-            if [ -n "${JEUS_HOME_FOUND}" ]; then
+            if [ -z "${JEUS_HOME_FOUND}" ]; then
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS is installed (process evidence) but JEUS_HOME could not be resolved, so the unnecessary-file search space is empty. Confirm sample/manual/default files manually." "$(jeus_evidence)" "Search JEUS samples/docs/manuals"
+            else
                 sample_paths="$(find "${JEUS_HOME_FOUND}" -maxdepth 6 -type d \( -iname '*sample*' -o -iname '*example*' -o -path '*/docs/manuals*' -o -iname 'web-manager' \) 2>/dev/null | head -50 || true)"
+                [ -n "${sample_paths}" ] && jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS sample/manual/default management directories were found." "${sample_paths}" "Search JEUS samples/docs/manuals" || jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS sample/manual/default management directories were found in inspected homes." "$(jeus_evidence)" "Search JEUS samples/docs/manuals"
             fi
-            [ -n "${sample_paths}" ] && jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS sample/manual/default management directories were found." "${sample_paths}" "Search JEUS samples/docs/manuals" || jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS sample/manual/default management directories were found in inspected homes." "$(jeus_evidence)" "Search JEUS samples/docs/manuals"
             ;;
         WEB-08)
             lines="$(jeus_config_grep 'max-file-size|max-request-size|maxPostSize|multipart-config' || true)"
-            [ -n "${lines}" ] && jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS upload/request size limit evidence was found." "${lines}" "Inspect web.xml multipart upload limits" || jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS upload/request size limit evidence was not found." "$(jeus_evidence)" "Inspect web.xml multipart upload limits"
+            # Strip XML/inline comments so commented-out directives do not count, then
+            # require a real positive numeric limit (a size directive followed by a
+            # non-zero integer). A lone <multipart-config> tag or <...>0<...> is not a limit.
+            local web08_effective
+            web08_effective="$(printf '%s\n' "${lines}" | sed -e 's/<!--.*-->//g' | grep -Ev '<!--|-->' || true)"
+            if printf '%s\n' "${web08_effective}" | grep -Eiq '(max-file-size|max-request-size|maxPostSize)[^0-9]*[1-9][0-9]*'; then
+                jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS upload/request size limit evidence (non-zero numeric value) was found." "${web08_effective}" "Inspect web.xml multipart upload limits"
+            elif [ -n "${lines}" ]; then
+                jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS multipart/upload configuration was present but had no real non-zero size limit (commented out, empty, or zero value)." "${lines}" "Inspect web.xml multipart upload limits"
+            else
+                jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS upload/request size limit evidence was not found." "$(jeus_evidence)" "Inspect web.xml multipart upload limits"
+            fi
             ;;
         WEB-09)
             lines="${JEUS_PROCESS_EVIDENCE}"
@@ -224,7 +255,38 @@ invoke_jeus_linux_check() {
             ;;
         WEB-13)
             lines="$(jeus_config_grep 'DataSource|db|jdbc|password' || true)"
-            [ -n "${lines}" ] && jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS DB/resource configuration evidence was found; confirm unnecessary DB connection resources and exposed secrets are removed." "${lines}" "Inspect JEUS domain.xml/resource configs" || jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS DB/resource configuration evidence was found in inspected configs." "$(jeus_evidence)" "Inspect JEUS domain.xml/resource configs"
+            if [ -n "${lines}" ]; then
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS DB/resource configuration evidence was found; confirm unnecessary DB connection resources and exposed secrets are removed, and that the config file ACL is restricted (chmod 600)." "${lines}" "Inspect JEUS domain.xml/resource configs"
+            else
+                # Keyword miss does NOT imply GOOD: a DB datasource may use non-standard
+                # naming and escape the grep. The criteria_bad also covers the config-file
+                # ACL (chmod 600). Verify ACL of inspected config files; if any config is
+                # readable beyond owner -> VULNERABLE, otherwise undecidable -> MANUAL.
+                local web13_bad=""
+                local web13_mode
+                local web13_octal
+                local web13_file
+                for web13_file in "${JEUS_CONFIGS[@]}"; do
+                    [ -e "${web13_file}" ] || continue
+                    command -v stat >/dev/null 2>&1 || continue
+                    web13_mode="$(stat -c '%a %U:%G %n' "${web13_file}" 2>/dev/null || true)"
+                    web13_octal="${web13_mode%% *}"
+                    web13_octal="${web13_octal: -3}"
+                    # Index 1 = group, 2 = other. Flag any "other" access (1-7) or
+                    # group-write (2/3/6/7); group read/exec only (4/5) stays clean.
+                    case "${web13_octal:2:1}" in
+                        1|2|3|4|5|6|7) web13_bad+="${web13_mode}"$'\n' ;;
+                    esac
+                    case "${web13_octal:1:1}" in
+                        2|3|6|7) web13_bad+="${web13_mode}"$'\n' ;;
+                    esac
+                done
+                if [ -n "${web13_bad}" ]; then
+                    jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "No DB keyword matched, but JEUS configuration files carry general-user access permissions; DB connection files must be restricted (chmod 600)." "${web13_bad}" "stat JEUS config files for DB-file ACL"
+                else
+                    jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "No DB/resource keyword matched inspected configs; DB usage may rely on non-standard naming. Confirm no unnecessary DB connection file exists and that any DB config file ACL is restricted to owner (chmod 600)." "$(jeus_evidence)" "Inspect JEUS domain.xml/resource configs"
+                fi
+            fi
             ;;
         WEB-14)
             jeus_acl_check "config/root" "${JEUS_CONFIGS[@]}" "${JEUS_HOME_FOUND}"
@@ -232,9 +294,14 @@ invoke_jeus_linux_check() {
         WEB-15)
             lines="$(jeus_config_grep '<servlet-mapping>|<url-pattern>|cgi|admin|manager|invoker' || true)"
             if printf '%s' "${lines}" | grep -Eiq 'cgi|invoker|manager|admin'; then
-                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS servlet mapping evidence was found; confirm unnecessary mappings are removed." "${lines}" "Inspect JEUS servlet mappings"
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS servlet mapping evidence (high-risk keyword) was found; confirm unnecessary mappings are removed." "${lines}" "Inspect JEUS servlet mappings"
+            elif [ -n "${lines}" ]; then
+                # Servlet mappings exist but match no high-risk keyword. Necessity of a
+                # mapping (e.g. /welcome -> jsp) cannot be decided automatically per the
+                # guideline, so report MANUAL and list the mappings rather than GOOD.
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS servlet mappings were found; necessity cannot be determined automatically. Review the listed mappings and remove unnecessary ones." "${lines}" "Inspect JEUS servlet mappings"
             else
-                jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No obvious unnecessary JEUS servlet mapping evidence was found." "$(jeus_evidence)" "Inspect JEUS servlet mappings"
+                jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS servlet mapping evidence was found in inspected configs." "$(jeus_evidence)" "Inspect JEUS servlet mappings"
             fi
             ;;
         WEB-16)
@@ -258,17 +325,23 @@ invoke_jeus_linux_check() {
             ;;
         WEB-22)
             lines="$(jeus_config_grep '<error-page>|<error-code>|<location>' || true)"
-            printf '%s' "${lines}" | grep -Eiq '<error-page>' && jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS custom error-page evidence was found." "${lines}" "Inspect JEUS error-page settings" || jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS custom error-page evidence was not found." "$(jeus_evidence)" "Inspect JEUS error-page settings"
+            # Strip XML comments so commented-out <!-- <error-page> --> blocks do not count,
+            # and require a real <location> with a non-empty value to treat as configured.
+            local web22_effective
+            web22_effective="$(printf '%s\n' "${lines}" | sed -e 's/<!--.*-->//g' | grep -Ev '<!--|-->' || true)"
+            if printf '%s\n' "${web22_effective}" | grep -Eiq '<location>[[:space:]]*[^<[:space:]][^<]*</location>'; then
+                jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS custom error-page with a designated location value was found." "${web22_effective}" "Inspect JEUS error-page settings"
+            elif printf '%s\n' "${web22_effective}" | grep -Eiq '<error-page>'; then
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS error-page element was found but no functional <location> value was confirmed. Verify the error page is designated and functional." "${web22_effective}" "Inspect JEUS error-page settings"
+            else
+                jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS custom error-page evidence was not found (only commented-out or empty definitions)." "$(jeus_evidence)" "Inspect JEUS error-page settings"
+            fi
             ;;
         WEB-23)
-            lines="$(jeus_config_grep 'LDAP|digest|SHA-256|SHA256|SSHA|MD5|SHA-1' || true)"
-            if printf '%s' "${lines}" | grep -Eiq 'SHA-256|SHA256|SSHA512|SSHA-512'; then
-                jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS LDAP strong digest evidence was found." "${lines}" "Inspect JEUS LDAP digest settings"
-            elif printf '%s' "${lines}" | grep -Eiq 'LDAP|MD5|SHA-1'; then
-                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS LDAP evidence was found; confirm digest algorithm is SHA-256 or stronger." "${lines}" "Inspect JEUS LDAP digest settings"
-            else
-                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS LDAP configuration evidence was not found; confirm LDAP is unused or securely configured." "$(jeus_evidence)" "Inspect JEUS LDAP digest settings"
-            fi
+            # WEB-23 target is Tomcat only (oracle metadata). JEUS is out of scope, so the
+            # previous SHA-256-substring heuristic produced spurious GOOD results from
+            # accounts.xml password digests. Emit N/A for the JEUS branch.
+            jeus_set_result "N/A" "N/A" "LDAP digest algorithm item targets Tomcat only in the guideline metadata; JEUS is out of scope." "WEB-23 target excludes JEUS." "Map LDAP digest guideline applicability"
             ;;
         WEB-24)
             lines="$(jeus_config_grep 'uploadDir|multipart-config|file-upload|tempdir' || true)"

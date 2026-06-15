@@ -64,7 +64,11 @@ diagnose() {
     local service_status=""
 
     # 1) Telnet 서비스 실행 여부 확인 (AIX: lssrc)
-    local telnetd_status=$(lssrc -s telnetd 2>/dev/null | grep telnetd | awk '{print $2}' || echo "inoperative")
+    local telnetd_lssrc=$(lssrc -s telnetd 2>/dev/null || echo "")
+    local telnetd_status="inoperative"
+    if echo "$telnetd_lssrc" | grep -q "active"; then
+        telnetd_status="active"
+    fi
     if [ "$telnetd_status" = "active" ]; then
         telnet_running=true
         telnet_details="telnetd 서비스 상태: ${telnetd_status}"
@@ -79,17 +83,24 @@ diagnose() {
         fi
     fi
 
-    # 3) Telnet 포트Listening 확인
-    if command -v ss >/dev/null 2>&1; then
-        if ss -tuln 2>/dev/null | grep -q ":23 "; then
+    # 3) Telnet 포트 Listening 확인 (AIX netstat 점 표기 *.23 및 콜론 표기 모두 매칭)
+    local port_probe_cmd="netstat -an | grep -E '[.:]23[[:space:]].*LISTEN'"
+    local port_probe_out=""
+    local port_evidence=""
+    local port_cmd_note=""
+    if command -v netstat >/dev/null 2>&1; then
+        port_probe_out=$(netstat -an 2>/dev/null | grep -E '[.:]23[[:space:]].*LISTEN' || true)
+        port_cmd_note="${port_probe_cmd}"
+        if [ -n "$port_probe_out" ]; then
             telnet_running=true
             telnet_details="${telnet_details}, 포트 23 listening"
+            port_evidence="[Command: ${port_probe_cmd}]${newline}${port_probe_out}"
+        else
+            port_evidence="[Command: ${port_probe_cmd}]${newline}출력 없음 (포트 23 LISTEN 미검출)"
         fi
-    elif command -v netstat >/dev/null 2>&1; then
-        if netstat -tuln 2>/dev/null | grep -q ":23 "; then
-            telnet_running=true
-            telnet_details="${telnet_details}, 포트 23 listening"
-        fi
+    else
+        port_cmd_note="netstat 사용 불가 (포트 23 확인 생략)"
+        port_evidence="netstat 명령을 사용할 수 없어 포트 23 상태 확인 불가"
     fi
 
     # 4) Telnet 패키지 설치 여부 확인 (AIX: lslpp -L)
@@ -103,7 +114,7 @@ diagnose() {
         status="취약"
         inspection_summary="Telnet 서비스가 실행 중임: ${telnet_details#, }${telnet_installed:+ ($telnet_installed)}"
         command_result="${telnet_details#, }${telnet_installed:+, $telnet_installed}"
-        command_executed="lssrc -a telnetd 2>/dev/null; ss -tuln | grep ':23 '; grep -E '^disable' /etc/xinetd.d/telnet 2>/dev/null"
+        command_executed="lssrc -s telnetd 2>/dev/null; grep '^telnet' /etc/inetd.conf; ${port_cmd_note}"
     else
         diagnosis_result="GOOD"
         status="양호"
@@ -115,10 +126,9 @@ diagnose() {
         else
             inspection_summary="Telnet 서비스가 설치되어 있지 않거나 비활성화됨"
             local lssrc_out=$(lssrc -s telnet 2>/dev/null || echo "Telnet service not found")
-            local ss_out=$(ss -tuln | grep ":23 " 2>/dev/null || echo "Port 23 not listening")
-            command_result="[Command: lssrc -s telnet]${newline}${lssrc_out}${newline}${newline}[Command: ss -tuln | grep :23]${newline}${ss_out}"
+            command_result="[Command: lssrc -s telnet]${newline}${lssrc_out}${newline}${newline}${port_evidence}"
         fi
-        command_executed="lssrc -s telnetd 2>/dev/null | grep -q "active" 2>/dev/null; ss -tuln | grep ':23 '"
+        command_executed="lssrc -s telnetd 2>/dev/null; grep '^telnet' /etc/inetd.conf; ${port_cmd_note}"
     fi
 
     # echo ""

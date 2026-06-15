@@ -67,23 +67,28 @@ diagnose() {
     local raw_files_output=""
     for dir in $sys_dirs; do
         if [ -d "$dir" ]; then
-            local dir_output=$(find "$dir" -perm -2 -type f 2>/dev/null | head -30 || true)
+            # 판정용 목록은 절단 없이 전체 수집 (head 절단은 증적 표시에만 적용)
+            local dir_output=$(find "$dir" -perm -2 -type f 2>/dev/null || true)
             if [ -n "$dir_output" ]; then
-                raw_files_output="${raw_files_output}${dir_output}"$'\n'
+                raw_files_output="${raw_files_output}$(echo "$dir_output" | head -30)"$'\n'
             fi
             while IFS= read -r file; do
                 if [ -n "$file" ]; then
-                    ((ww_count++)) || true
-                    local perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$file" 2>/dev/null)
-                    local owner=$(perl -e '@s=lstat(shift); printf "%s:%s\n", getpwuid($s[4]), getgrgid($s[5])' "$file" 2>/dev/null)
-                    local filetype="file"
-
-                    if [ -d "$file" ]; then
-                        filetype="dir"
+                    # 특정 예외 디렉터리 (/tmp, /var/tmp, /var/mail 등) 하위만 제외 (경로 경계 고정)
+                    if [[ "$file" =~ ^/tmp/ ]] || [[ "$file" =~ ^/var/tmp/ ]] || [[ "$file" =~ ^/var/mail/ ]] || [[ "$file" =~ ^/dev/shm/ ]]; then
+                        continue
                     fi
+                    ((ww_count++)) || true
+                    # 증적 목록은 20개까지만 상세 기록 (판정 카운트는 전체 반영)
+                    if [ "$ww_count" -le 20 ]; then
+                        local perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$file" 2>/dev/null)
+                        local owner=$(perl -e '@s=lstat(shift); printf "%s:%s\n", getpwuid($s[4]), getgrgid($s[5])' "$file" 2>/dev/null)
+                        local filetype="file"
 
-                    # 특정 예외 디렉터리 (/tmp, /var/tmp, /var/mail 등)는 제외
-                    if [[ ! "$file" =~ ^/tmp ]] && [[ ! "$file" =~ ^/var/tmp ]] && [[ ! "$file" =~ ^/var/mail ]] && [[ ! "$file" =~ ^/dev/shm ]]; then
+                        if [ -d "$file" ]; then
+                            filetype="dir"
+                        fi
+
                         ww_files="${ww_files}${file} (${filetype}, 권한: ${perms}, 소유자: ${owner}), "
                     fi
                 fi
@@ -98,18 +103,27 @@ diagnose() {
 
     for dir in $sys_dirs; do
         if [ -d "$dir" ]; then
-            local dir_output=$(find "$dir" -perm -2 -type d 2>/dev/null | head -20 || true)
+            # 판정용 목록은 절단 없이 전체 수집 (head 절단은 증적 표시에만 적용)
+            local dir_output=$(find "$dir" -perm -2 -type d 2>/dev/null || true)
             if [ -n "$dir_output" ]; then
-                raw_dirs_output="${raw_dirs_output}${dir_output}"$'\n'
+                raw_dirs_output="${raw_dirs_output}$(echo "$dir_output" | head -20)"$'\n'
             fi
             while IFS= read -r dirpath; do
                 if [ -n "$dirpath" ]; then
+                    # 예외 디렉터리는 카운트 전에 제외
+                    if [[ "$dirpath" =~ ^/tmp$ ]] || [[ "$dirpath" =~ ^/var/tmp$ ]] || [[ "$dirpath" =~ ^/var/mail$ ]] || [[ "$dirpath" =~ ^/dev/shm$ ]]; then
+                        continue
+                    fi
+                    # sticky bit가 설정된 world-writable 디렉터리는 표준 권한 패턴이므로 예외 처리
+                    if [ -k "$dirpath" ]; then
+                        continue
+                    fi
                     ((ww_dir_count++)) || true
-                    local perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$dirpath" 2>/dev/null)
-                    local owner=$(perl -e '@s=lstat(shift); printf "%s:%s\n", getpwuid($s[4]), getgrgid($s[5])' "$dirpath" 2>/dev/null)
+                    # 증적 목록은 20개까지만 상세 기록 (판정 카운트는 전체 반영)
+                    if [ "$ww_dir_count" -le 20 ]; then
+                        local perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$dirpath" 2>/dev/null)
+                        local owner=$(perl -e '@s=lstat(shift); printf "%s:%s\n", getpwuid($s[4]), getgrgid($s[5])' "$dirpath" 2>/dev/null)
 
-                    # 예외 디렉터리 제외
-                    if [[ ! "$dirpath" =~ ^/tmp$ ]] && [[ ! "$dirpath" =~ ^/var/tmp$ ]] && [[ ! "$dirpath" =~ ^/var/mail$ ]] && [[ ! "$dirpath" =~ ^/dev/shm$ ]]; then
                         ww_dirs="${ww_dirs}${dirpath} (권한: ${perms}, 소유자: ${owner}), "
                     fi
                 fi

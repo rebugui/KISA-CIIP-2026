@@ -53,9 +53,9 @@ diagnose() {
         local file_perm=$(stat -c "%a" "$file_path")
         local ls_out=$(ls -l "$file_path")
 
-        # 2. 판정 로직: 소유자 root 및 권한 644 이하 체크
-        # 권한 체크는 각 자리수별로 비교 (644 이하: 100단위 <=6, 10단위 <=4, 1단위 <=4)
-        if [ "$owner_name" != "root" ] || [ "$file_perm" -gt 644 ]; then
+        # 2. 판정 로직: 소유자 root 및 권한 644 초과 비트 없음 체크
+        # 644보다 강한 권한(600/400 등)은 양호, 644에 없는 추가 비트(쓰기 등)는 취약
+        if [ "$owner_name" != "root" ] || ! [[ "$file_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$file_perm & ~8#644 & 07777 ))" -ne 0 ]; then
             status="취약"
             diagnosis_result="VULNERABLE"
             inspection_summary="/etc/passwd 파일의 소유자가 root가 아니거나 권한 설정(644)이 부적절합니다."
@@ -65,10 +65,10 @@ diagnose() {
         command_result="소유자: ${owner_name}, 권한: ${file_perm}, 상세: ${ls_out}"
         command_result=$(echo "$command_result" | tr -d '\n\r')
     else
-        status="N/A"
-        diagnosis_result="ERROR"
-        inspection_summary="/etc/passwd 파일을 찾을 수 없습니다."
-        command_result="파일 없음"
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="/etc/passwd 파일을 찾을 수 없어 자동 점검이 불가합니다. 수동 확인이 필요합니다."
+        command_result="파일 없음: /etc/passwd"
     fi
 
     # U-02와 동일하게 12개의 인자를 모두 전달

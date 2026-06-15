@@ -67,9 +67,11 @@ diagnose() {
     local is_secure=true
     local issues=()
     local file_info=""
+    local checked_any=false
 
     for file in "${crontab_files[@]}"; do
         if [ -f "$file" ]; then
+            checked_any=true
             local perms=$(perl -e 'if (-f $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$file" 2>/dev/null || echo "000")
             local owner=$(perl -e 'if (-f $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; print getpwuid($uid); }' "$file" 2>/dev/null || echo "unknown")
 
@@ -77,9 +79,9 @@ diagnose() {
 
             # cron.deny, at.deny는 600 이하 권장 (Solaris: /etc/crontab 없음)
             if [[ "$file" =~ (cron.deny|at.deny)$ ]]; then
-                if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
+                if [ $(( 8#$perms & ~8#640 & 8#7777 )) -ne 0 ]; then
                     is_secure=false
-                    issues+=("${file} 권한=${perms} (600 권장)")
+                    issues+=("${file} 권한=${perms} (640 이하 권장)")
                 fi
                 # root 소유여부 확인
                 if [ "$owner" != "root" ]; then
@@ -90,9 +92,9 @@ diagnose() {
 
             # cron.allow, at.allow는 600 권장
             if [[ "$file" =~ (cron.allow|at.allow)$ ]]; then
-                if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
+                if [ $(( 8#$perms & ~8#640 & 8#7777 )) -ne 0 ]; then
                     is_secure=false
-                    issues+=("${file} 권한=${perms} (600 권장)")
+                    issues+=("${file} 권한=${perms} (640 이하 권장)")
                 fi
                 if [ "$owner" != "root" ]; then
                     is_secure=false
@@ -109,10 +111,11 @@ diagnose() {
             local perms=$(perl -e 'if (-f $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$file" 2>/dev/null || echo "000")
             local owner=$(perl -e 'if (-f $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; print getpwuid($uid); }' "$file" 2>/dev/null || echo "unknown")
             file_info="${file_info}  $(basename "$file"): ${perms}, ${owner}\\n"
+            checked_any=true
 
-            if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
+            if [ $(( 8#$perms & ~8#640 & 8#7777 )) -ne 0 ]; then
                 is_secure=false
-                issues+=("cron.d/$(basename "$file") 권한=${perms}")
+                issues+=("cron.d/$(basename "$file") 권한=${perms} (640 이하 권장)")
             fi
         done < <(find /etc/cron.d -type f -print0 2>/dev/null) || true
     fi
@@ -124,16 +127,55 @@ diagnose() {
             local perms=$(perl -e 'if (-f $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$file" 2>/dev/null || echo "000")
             local owner=$(perl -e 'if (-f $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; print getpwuid($uid); }' "$file" 2>/dev/null || echo "unknown")
             file_info="${file_info}  $(basename "$file"): ${perms}, ${owner}\\n"
+            checked_any=true
 
-            if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
+            if [ $(( 8#$perms & ~8#640 & 8#7777 )) -ne 0 ]; then
                 is_secure=false
-                issues+=("crontabs/$(basename "$file") 권한=${perms}")
+                issues+=("crontabs/$(basename "$file") 권한=${perms} (640 이하 권장)")
             fi
         done < <(find /var/spool/cron/crontabs -type f -print0 2>/dev/null) || true
     fi
 
+    # Solaris: /var/spool/cron/atjobs (at 작업 파일) 확인
+    if [ -d /var/spool/cron/atjobs ]; then
+        file_info="${file_info}\\n/var/spool/cron/atjobs 디렉토리 파일:\\n"
+        while IFS= read -r -d '' file; do
+            local perms=$(perl -e 'if (-f $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$file" 2>/dev/null || echo "000")
+            local owner=$(perl -e 'if (-f $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; print getpwuid($uid); }' "$file" 2>/dev/null || echo "unknown")
+            file_info="${file_info}  $(basename "$file"): ${perms}, ${owner}\\n"
+            checked_any=true
+
+            if [ $(( 8#$perms & ~8#640 & 8#7777 )) -ne 0 ]; then
+                is_secure=false
+                issues+=("atjobs/$(basename "$file") 권한=${perms} (640 이하 권장)")
+            fi
+        done < <(find /var/spool/cron/atjobs -type f -print0 2>/dev/null) || true
+    fi
+
+    # crontab/at 명령어 일반 사용자 실행 권한 확인 (가이드: 750 이하)
+    local cmd_path
+    for cmd_path in /usr/bin/crontab /usr/bin/at; do
+        if [ -f "$cmd_path" ]; then
+            checked_any=true
+            local perms=$(perl -e 'if (-f $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$cmd_path" 2>/dev/null || echo "000")
+            local owner=$(perl -e 'if (-f $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; print getpwuid($uid); }' "$cmd_path" 2>/dev/null || echo "unknown")
+            file_info="${file_info}${cmd_path}: 권한=${perms}, 소유자=${owner}\\n"
+
+            if [ $(( 8#$perms & ~8#750 & 8#7777 )) -ne 0 ]; then
+                is_secure=false
+                issues+=("${cmd_path} 권한=${perms} (일반 사용자 실행 권한 제거, 750 이하 필요)")
+            fi
+        fi
+    done || true
+
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$checked_any" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="cron/at 관련 파일 및 명령어를 확인하지 못함 - 수동 점검 필요"
+        command_result="${file_info:-점검 대상 파일/명령어 없음}"
+        command_executed="ls -l /etc/cron.deny /etc/cron.allow /etc/at.deny /etc/at.allow /usr/bin/crontab /usr/bin/at 2>/dev/null"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="crontab 관련 파일 권한 적절함"

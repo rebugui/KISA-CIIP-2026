@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="웹 서비스 내 불필요한 SSI 사용 제한 설정"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -91,22 +91,25 @@ diagnose() {
     for xml_pattern in "${web_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                # SSI Servlet 확인 (주석 제외)
-                local found_ssi=$(grep -i "SSIServlet|ssi" "${xml_file}" 2>/dev/null | grep -E "servlet|servlet-mapping" | grep -v "^\s*<!--" || true)
+                # SSI Servlet 및 SSIFilter 확인 (주석 제외)
+                # 가이드라인 Step 1: SSIServlet(<servlet-name>SSIServlet</servlet-name>) 또는
+                # SSIFilter(<filter-name>SSIFilter</filter-name>) 모두 SSI 활성화 메커니즘
+                # 주의: -E(ERE) 사용. BRE에서 | 는 리터럴로 처리되어 alternation이 동작하지 않음
+                local found_ssi=$(grep -iE "SSIServlet|SSIFilter|<servlet-name>\s*ssi\s*</servlet-name>|<filter-name>\s*SSIFilter\s*</filter-name>" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 if [ -n "${found_ssi}" ]; then
-                    # 활성화된 Servlet인지 확인
-                    if ! echo "${found_ssi}" | grep -q "<!--"; then
-                        ssi_config="${found_ssi}"
-                        has_ssi=true
-                    fi
+                    # 줄 시작 주석(^\s*<!--)은 위 grep -v 에서 이미 제거됨.
+                    # 후행 인라인 주석이 붙은 활성 SSI 라인까지 억제하면 활성 SSI를
+                    # 놓쳐 GOOD으로 오판되므로 추가 <!-- 억제는 적용하지 않는다.
+                    ssi_config="${found_ssi}"
+                    has_ssi=true
                 fi
                 break 2
             fi
         done
     done
 
-    command_executed="grep -iE 'SSIServlet|ssi' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -3"
-    command_result="${ssi_config:-SSI Servlet not found or commented}"
+    command_executed="grep -iE 'SSIServlet|SSIFilter|<servlet-name>\\s*ssi\\s*</servlet-name>|<filter-name>\\s*SSIFilter\\s*</filter-name>' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -3"
+    command_result="${ssi_config:-SSI Servlet/Filter not found or commented}"
 
     if [ "${has_ssi}" = true ]; then
         diagnosis_result="VULNERABLE"

@@ -39,36 +39,60 @@ if (-not (Test-RunallMode)) {
 $commandExecuted = "Get-Volume"
 $commandOutput = ""
 try {
+    # 드라이브 문자 유무와 관계없이 모든 볼륨을 열거 (OEM 복구 파티션 등 문자 없는 FAT32 누락 방지)
     $allVolumes = Get-Volume -ErrorAction SilentlyContinue
     $nonNtfsVolumes = @()
+    $excludedVolumes = @()
     $volumeDetails = @()
 
     foreach ($vol in $allVolumes) {
-        if ($vol.DriveLetter) {
-            $driveInfo = $vol.DriveLetter + ":\"
-            $volObj = Get-Volume -DriveLetter $vol.DriveLetter -ErrorAction SilentlyContinue
-
-            if ($volObj -and $volObj.FileSystem) {
-                $fs = $volObj.FileSystem
-                $volumeDetails += "$($vol.DriveLetter): $fs"
-
-                if ($fs -ne "NTFS" -and $fs -ne "ReFS") {
-                    $nonNtfsVolumes += "$($vol.DriveLetter): ($fs)"
-                }
-            }
+        $fs = $vol.FileSystem
+        if ([string]::IsNullOrWhiteSpace($fs)) {
+            # 파일시스템 미인식(RAW/미포맷/광학 미디어 등)은 데이터 볼륨 판정 불가 → 건너뜀
+            continue
         }
+
+        $letter = if ($vol.DriveLetter) { "$($vol.DriveLetter):" } else { "(문자없음)" }
+        $dtype = $vol.DriveType
+        $sizeMB = if ($vol.Size) { [math]::Round($vol.Size / 1MB, 0) } else { 0 }
+        $volumeDetails += "$letter $fs [$dtype, ${sizeMB}MB]"
+
+        if ($fs -eq "NTFS" -or $fs -eq "ReFS") {
+            continue
+        }
+
+        # EFI System Partition은 사양상 FAT32여야 하며 사용자 데이터 볼륨이 아님 → 정당한 예외(제외)
+        #  - 드라이브 문자가 없고, FAT/FAT32이며, 용량이 작은(<=600MB) 시스템 파티션을 EFI로 간주
+        $isLetterless = -not $vol.DriveLetter
+        $isFatFamily = ($fs -eq "FAT32" -or $fs -eq "FAT" -or $fs -eq "FAT16")
+        $isEfiCandidate = $isLetterless -and $isFatFamily -and ($vol.Size -le 600MB)
+
+        if ($isEfiCandidate) {
+            $excludedVolumes += "$letter $fs (EFI 시스템 파티션 추정, 정당한 예외)"
+            continue
+        }
+
+        # 그 외 NTFS/ReFS가 아닌 실제 데이터 볼륨(문자 유무 무관) → 취약
+        $nonNtfsVolumes += "$letter ($fs)"
     }
 
-    $commandOutput = $volumeDetails -join "`n"
+    $commandOutput = ($volumeDetails -join "`n")
+    if ($excludedVolumes.Count -gt 0) {
+        $commandOutput += "`n[예외 처리됨]`n" + ($excludedVolumes -join "`n")
+    }
 
     if ($nonNtfsVolumes.Count -eq 0) {
         $finalResult = "GOOD"
-        $summary = "모든 볼륨이 NTFS(또는 ReFS) 포맷임 (총 $($volumeDetails.Count)개 볼륨 확인)"
+        $summary = "모든 데이터 볼륨이 NTFS(또는 ReFS) 포맷임 (확인 $($volumeDetails.Count)개"
+        if ($excludedVolumes.Count -gt 0) {
+            $summary += ", EFI 시스템 파티션 $($excludedVolumes.Count)개 예외"
+        }
+        $summary += ")"
         $status = "양호"
     } else {
         $finalResult = "VULNERABLE"
         $nonNtfsList = $nonNtfsVolumes -join ', '
-        $summary = "NTFS가 아닌 볼륨 발견: $nonNtfsList"
+        $summary = "NTFS가 아닌 데이터 볼륨 발견: $nonNtfsList"
         $status = "취약"
     }
 } catch {

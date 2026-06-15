@@ -84,7 +84,7 @@ diagnose() {
             config_files="${config_files}/etc/ntp.conf"
 
             # NTP 서버 설정 확인 (server 또는 pool 지시자)
-            local ntp_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/ntp.conf 2>/dev/null | grep -v "^#" | head -5)
+            local ntp_servers=$(grep -E "^[[:space:]]*(server|pool)[[:space:]]" /etc/ntp.conf 2>/dev/null | grep -v "^[[:space:]]*#" | head -5)
             if [ -n "$ntp_servers" ]; then
                 ntp_configured=true
                 ntp_details="NTP 서버 설정됨: $(echo "$ntp_servers" | head -3 | tr '\n' ' ')"
@@ -97,7 +97,7 @@ diagnose() {
             config_files="${config_files} /etc/chrony.conf"
 
             # Chrony 서버 설정 확인
-            local chrony_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/chrony.conf 2>/dev/null | grep -v "^#" | head -5)
+            local chrony_servers=$(grep -E "^[[:space:]]*(server|pool)[[:space:]]" /etc/chrony.conf 2>/dev/null | grep -v "^[[:space:]]*#" | head -5)
             if [ -n "$chrony_servers" ]; then
                 ntp_configured=true
                 ntp_details="${ntp_details}, Chrony 서버 설정됨"
@@ -108,7 +108,7 @@ diagnose() {
         if [ -f /etc/systemd/timesyncd.conf ]; then
             config_files="${config_files} /etc/systemd/timesyncd.conf"
 
-            local timesyncd_servers=$(grep "^[\s]*NTP=" /etc/systemd/timesyncd.conf 2>/dev/null | grep -v "^#" | grep -v "^NTP=$")
+            local timesyncd_servers=$(grep -E "^[[:space:]]*NTP=" /etc/systemd/timesyncd.conf 2>/dev/null | grep -v "^[[:space:]]*#" | grep -v "^NTP=$")
             if [ -n "$timesyncd_servers" ]; then
                 ntp_configured=true
                 ntp_details="${ntp_details}, systemd-timesyncd: ${timesyncd_servers}"
@@ -117,10 +117,25 @@ diagnose() {
 
         # 3) NTP 서비스 실행 여부 확인 (AIX: lssrc, xntpd daemon)
         local ntp_service_running=false
-        local xntpd_status=$(lssrc -s xntpd 2>/dev/null | grep xntpd | awk '{print $2}' || echo "inoperative")
-        if [ "$xntpd_status" = "active" ]; then
-            ntp_running=true
-            ntp_service_running=true
+        local probe_available=false
+        if command -v lssrc >/dev/null 2>&1; then
+            probe_available=true
+            local xntpd_lssrc=$(lssrc -s xntpd 2>/dev/null || echo "")
+            local xntpd_status="inoperative"
+            if echo "$xntpd_lssrc" | grep -q "active"; then
+                xntpd_status="active"
+            fi
+            if [ "$xntpd_status" = "active" ]; then
+                ntp_running=true
+                ntp_service_running=true
+            fi
+        fi
+        if [ "$ntp_running" = false ] && command -v ps >/dev/null 2>&1; then
+            probe_available=true
+            if ps -ef 2>/dev/null | grep -v grep | grep -qE 'xntpd|ntpd|chronyd'; then
+                ntp_running=true
+                ntp_service_running=true
+            fi
         fi
 
         # 4) NTP 패키지 설치 확인 (AIX: lslpp -L)
@@ -138,14 +153,21 @@ diagnose() {
             local ntpq_out=$(ntpq -p 2>/dev/null | head -10 || echo "ntpq failed")
             command_result="[Command: lssrc -s xntpd]${newline}${lssrc_out}${newline}${newline}[Command: ntpq -p]${newline}${ntpq_out}"
             command_executed="lssrc -a ntp chrony systemd-timesyncd 2>/dev/null; cat ${config_files}"
-        elif [ "$ntp_installed" = true ] && [ "$ntp_configured" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="NTP 설정됨 (서비스 상태: ${ntp_service_running:-실행 중}): ${ntp_details}"
+        elif [ "$ntp_configured" = true ] && [ "$probe_available" = false ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="NTP 서버 설정은 확인되었으나 데몬 동작 상태를 확인할 수 없음 (lssrc/ps 사용 불가): ${ntp_details}"
             local cat_ntp=$(cat /etc/ntp.conf 2>/dev/null | head -30 || echo "NTP config not readable")
-            local lslpp_out=$(lslpp -L | grep -i ntp 2>/dev/null || echo "No NTP packages")
-            command_result="[Command: cat /etc/ntp.conf]${newline}${cat_ntp}${newline}${newline}[Command: lslpp -L | grep ntp]${newline}${lslpp_out}"
-            command_executed="lssrc -s ntp 2>/dev/null | grep -q "active" chrony systemd-timesyncd 2>/dev/null"
+            command_result="[Command: cat /etc/ntp.conf]${newline}${cat_ntp}${newline}${newline}[Probe] lssrc/ps unavailable - daemon state unknown"
+            command_executed="command -v lssrc; command -v ps; cat /etc/ntp.conf"
+        elif [ "$ntp_configured" = true ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="NTP 서버 설정은 있으나 NTP 데몬이 중지되어 시간 동기화가 동작하지 않음: ${ntp_details}"
+            local lssrc_out=$(lssrc -s xntpd 2>/dev/null || echo "NTP service not found")
+            local cat_ntp=$(cat /etc/ntp.conf 2>/dev/null | head -30 || echo "NTP config not readable")
+            command_result="[Command: lssrc -s xntpd]${newline}${lssrc_out}${newline}${newline}[Command: cat /etc/ntp.conf]${newline}${cat_ntp}"
+            command_executed="lssrc -s xntpd 2>/dev/null; cat /etc/ntp.conf"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
@@ -159,7 +181,7 @@ diagnose() {
                 local cat_ntp=$(cat /etc/ntp.conf 2>/dev/null | head -20 || echo "Config not readable")
                 command_result="[Command: lssrc -s xntpd]${newline}${lssrc_out}${newline}${newline}[Command: cat /etc/ntp.conf]${newline}${cat_ntp}"
             fi
-            command_executed="lssrc -s ntp 2>/dev/null | grep -q "active" chrony systemd-timesyncd 2>/dev/null; grep '^server\|^pool' /etc/ntp.conf /etc/chrony.conf 2>/dev/null"
+            command_executed="lssrc -s xntpd; grep -E '^[[:space:]]*(server|pool)[[:space:]]' /etc/ntp.conf /etc/chrony.conf 2>/dev/null"
         fi
     fi
 

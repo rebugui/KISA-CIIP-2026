@@ -62,35 +62,34 @@ diagnose() {
     local dns_info=""
     local issues=()
 
-    # BIND 설정 파일 경로 확인
+    # BIND 설정 파일 경로 확인 (include 참조 파일 포함)
     local bind_conf="/etc/bind/named.conf"
     local bind_conf_local="/etc/bind/named.conf.local"
     local bind_conf_opts="/etc/bind/named.conf.options"
+    local bind_conf_defzones="/etc/bind/named.conf.default-zones"
 
-    for conf_file in "$bind_conf" "$bind_conf_local" "$bind_conf_opts"; do
+    for conf_file in "$bind_conf" "$bind_conf_local" "$bind_conf_opts" "$bind_conf_defzones"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
             dns_info="${dns_info}${conf_file} 확인:${newline}"
 
-            # allow-update 설정 확인
-            local allow_update=$(grep -i "allow-update" "$conf_file" | grep -v "^//" | grep -v "^#" || echo "")
-            if [ -n "$allow_update" ]; then
-                dns_info="${dns_info}${allow_update}${newline}"
+            # allow-update 설정 확인 (주석 제거 후 다중행 블록을 한 줄로 평탄화)
+            local au_flat=$(grep -vE '^[[:space:]]*(//|#)' "$conf_file" 2>/dev/null | sed -n '/allow-update/,/;/p' | tr '\n' ' ' || echo "")
+            local au_blocks=$(echo "$au_flat" | grep -oiE 'allow-update[[:space:]]*\{[^};]*' || echo "")
+            if [ -n "$au_blocks" ]; then
+                dns_info="${dns_info}${au_blocks}${newline}"
 
                 # "any" 확인
-                if echo "$allow_update" | grep -qi "allow-update.*{.*any.*;"; then
+                if echo "$au_blocks" | grep -qiw "any"; then
                     is_secure=false
-                    issues+=("allow-update가 'any'로 설정됨 (취약)")
-                elif echo "$allow_update" | grep -qi "allow-update.*{.*none.*;"; then
+                    issues+=("${conf_file}: allow-update가 'any'로 설정됨 (취약)")
+                elif echo "$au_blocks" | grep -qiw "none"; then
                     dns_info="${dns_info}allow-update가 'none'으로 설정됨 (안전)${newline}"
+                elif echo "$au_blocks" | grep -qi "key"; then
+                    dns_info="${dns_info}allow-update가 키 기반으로 제한됨 (안전)${newline}"
                 else
-                    # 키 기반 업데이트인 경우 확인
-                    if echo "$allow_update" | grep -qi "key"; then
-                        dns_info="${dns_info}allow-update가 키로 제한됨${newline}"
-                    else
-                        is_secure=false
-                        issues+=("allow-update가 IP로 제한됨 (키 기반 권장)")
-                    fi
+                    # 특정 IP 제한: 가이드 조치방법(allow-update { <허용 IP>; };)에 부합하는 양호 상태
+                    dns_info="${dns_info}allow-update가 특정 IP로 제한됨 (가이드 조치방법 부합, 안전)${newline}"
                 fi
             else
                 # 기본값은 none이므로 안전함
@@ -124,13 +123,13 @@ diagnose() {
         status="양호"
         inspection_summary="DNS 동적 업데이트 제한 적절히 설정됨"
         command_result="${dns_info}"
-        command_executed="grep -i 'allow-update|update-policy' /etc/bind/named.conf*"
+        command_executed="sed -n '/allow-update/,/;/p' /etc/bind/named.conf /etc/bind/named.conf.local /etc/bind/named.conf.options /etc/bind/named.conf.default-zones; grep -i 'update-policy' /etc/bind/named.conf*"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="DNS 동적 업데이트 제한 미흡: ${issues[*]}"
         command_result="${dns_info}${newline}[Issues: ${issues[*]}]"
-        command_executed="grep -i 'allow-update|update-policy' /etc/bind/named.conf*"
+        command_executed="sed -n '/allow-update/,/;/p' /etc/bind/named.conf /etc/bind/named.conf.local /etc/bind/named.conf.options /etc/bind/named.conf.default-zones; grep -i 'update-policy' /etc/bind/named.conf*"
     fi
 
     # echo ""

@@ -75,9 +75,9 @@ diagnose() {
         [ ! -f "$vsftpd_conf" ] && vsftpd_conf="/etc/vsftpd/vsftpd.conf"
 
         # vsftpd 접근 제어 확인
-        # 1) /etc/ftpusers 또는 /etc/vsftpd.ftpusers 확인
+        # 1) /etc/ftpusers 또는 /etc/vsftpd.ftpusers 확인 (주석/공백 라인 제외)
         if [ -f /etc/ftpusers ]; then
-            local blocked_users=$(wc -l < /etc/ftpusers 2>/dev/null)
+            local blocked_users=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/ftpusers 2>/dev/null | wc -l)
             if [ "$blocked_users" -gt 0 ]; then
                 access_configured=true
                 access_details="/etc/ftpusers에 ${blocked_users}개 차단된 사용자"
@@ -85,15 +85,27 @@ diagnose() {
             fi
         fi
 
-        # 2) vsftpd.conf에서 userlist_deny, userlist_file 확인
+        # 2) vsftpd.conf에서 userlist_enable, userlist_file 확인
+        # userlist_enable=YES만으로는 접근 제어로 인정하지 않고, 실제 리스트
+        # 파일에 유효 항목(주석/공백 제외)이 있어야 설정된 것으로 판정
         if grep -q "^userlist_enable=YES" "$vsftpd_conf" 2>/dev/null; then
-            access_configured=true
-            local userlist_file=$(grep "^userlist_file" "$vsftpd_conf" 2>/dev/null | awk '{print $2}' | head -1)
-            if [ -n "$userlist_file" ] && [ -f "$userlist_file" ]; then
-                local userlist_count=$(wc -l < "$userlist_file" 2>/dev/null)
-                access_details="${access_details}, ${userlist_file}에 ${userlist_count}개 사용자"
+            local userlist_file=$(grep "^userlist_file" "$vsftpd_conf" 2>/dev/null | awk -F= '{print $2}' | head -1 | tr -d '[:space:]')
+            if [ -z "$userlist_file" ]; then
+                # vsftpd 기본 리스트 파일 경로
+                if [ -f /etc/vsftpd.user_list ]; then
+                    userlist_file="/etc/vsftpd.user_list"
+                elif [ -f /etc/vsftpd/user_list ]; then
+                    userlist_file="/etc/vsftpd/user_list"
+                fi
             fi
-            config_files="${config_files}${vsftpd_conf} "
+            if [ -n "$userlist_file" ] && [ -f "$userlist_file" ]; then
+                local userlist_count=$(grep -vcE '^[[:space:]]*#|^[[:space:]]*$' "$userlist_file" 2>/dev/null || true)
+                if [ "$userlist_count" -gt 0 ] 2>/dev/null; then
+                    access_configured=true
+                    access_details="${access_details}, ${userlist_file}에 ${userlist_count}개 사용자"
+                    config_files="${config_files}${vsftpd_conf} "
+                fi
+            fi
         fi
     fi
 
@@ -111,7 +123,7 @@ diagnose() {
     for users_file in /etc/ftpusers /etc/ftpdusers; do
         if [ -f "$users_file" ]; then
             ftp_installed=true
-            local user_count=$(grep -v "^#" "$users_file" 2>/dev/null | grep -v "^$" | wc -l)
+            local user_count=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$users_file" 2>/dev/null | wc -l)
             if [ "$user_count" -gt 0 ]; then
                 access_configured=true
                 access_details="${access_details}, ${users_file}에 ${user_count}개 차단 사용자"
@@ -119,6 +131,20 @@ diagnose() {
             fi
         fi
     done || true
+
+    # 실행 중인 FTP 데몬 확인 (설정 파일이 없어도 서비스가 동작할 수 있음)
+    local ftp_running=false
+    local running_detail=""
+    if systemctl is-active vsftpd >/dev/null 2>&1 || systemctl is-active proftpd >/dev/null 2>&1 || systemctl is-active pure-ftpd >/dev/null 2>&1; then
+        ftp_running=true
+        running_detail="systemctl: vsftpd/proftpd/pure-ftpd active"
+    elif ps -ef 2>/dev/null | grep -v grep | grep -qE '(vsftpd|proftpd|pure-ftpd|in\.ftpd)'; then
+        ftp_running=true
+        running_detail="ps에서 FTP 데몬 프로세스 확인"
+    fi
+    if [ "$ftp_running" = true ]; then
+        ftp_installed=true
+    fi
 
     if [ "$ftp_installed" = false ]; then
         diagnosis_result="GOOD"
@@ -137,6 +163,9 @@ diagnose() {
         status="취약"
         inspection_summary="FTP 접근 제어가 설정되지 않음 (root 등 관리자 계정 접근 가능)"
         command_result="${raw_output}"
+        if [ -n "$running_detail" ]; then
+            command_result="${command_result}${newline}[FTP daemon: ${running_detail}]"
+        fi
         command_executed="cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} 2>/dev/null"
     fi
 

@@ -32,7 +32,7 @@ $remediation = "복잡 도 기준에 맞는 추측하기 어려운 비밀번호 
 
 try {
     $finalResult = "N/A"
-    $status = "not_applicable"
+    $status = "N/A"
     $summary = "Apache for Windows is not a target platform for WEB-02 according to docs/guideline_metadata.json."
     $commandOutput = "WEB-02 targets Tomcat, IIS, and JEUS administrator passwords. Apache authentication is configured through separate auth files/modules or OS policy and is not in scope for this guideline item."
     $commandExecuted = "guideline_metadata.json WEB-02 target platform review"

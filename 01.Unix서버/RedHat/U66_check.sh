@@ -116,6 +116,17 @@ diagnose() {
     local total_log_files=0
     local critical_logs=("/var/log/messages" "/var/log/secure" "/var/log/syslog" "/var/log/auth.log" "/var/log/kern.log")
 
+    # 설정 파일에 정의된 로그 파일 경로 추가 수집 (rsyslog '-' 접두 제거)
+    local configured_logs
+    configured_logs=$(grep -v "^#" "$config_file" 2>/dev/null | awk '{t=$NF; sub(/^-/,"",t); print t}' | grep "^/" | grep -v "^/dev/" | sort -u || true)
+    local configured_log
+    for configured_log in $configured_logs; do
+        case " ${critical_logs[*]} " in
+            *" ${configured_log} "*) ;;
+            *) critical_logs+=("$configured_log") ;;
+        esac
+    done
+
     for log_file in "${critical_logs[@]}"; do
         ((total_log_files++)) || true
         if [ -f "$log_file" ]; then
@@ -133,10 +144,11 @@ diagnose() {
     # ==========================================================================
     # 4. 판정
     # ==========================================================================
-    if [ "$service_active" = true ] && [ "$config_lines" -gt 0 ]; then
+    # 양호: 데몬 활성 + 설정 존재 + 실제 로그를 남기고 있는 경우 모두 충족
+    if [ "$service_active" = true ] && [ "$config_lines" -gt 0 ] && [ "$log_files_check" -ge 1 ]; then
         status="양호"
         diagnosis_result="GOOD"
-        inspection_summary="${syslog_service} 서비스가 활성화되어 있고, 로그 기록 정책이 설정되어 있습니다. (설정 파일: ${config_file}, 활성 로그 파일: ${log_files_check}/${total_log_files}개)"
+        inspection_summary="${syslog_service} 서비스가 활성화되어 있고, 로그 기록 정책이 설정되어 있으며, 로그를 남기고 있습니다. (설정 파일: ${config_file}, 최근 기록 로그 파일: ${log_files_check}/${total_log_files}개)"
         command_result="${raw_output}"
     else
         status="취약"
@@ -147,6 +159,9 @@ diagnose() {
         fi
         if [ "$config_lines" -eq 0 ]; then
             reason="${reason}${reason:+, }설정 파일 내용 없음"
+        fi
+        if [ "$log_files_check" -lt 1 ]; then
+            reason="${reason}${reason:+, }최근 기록된 로그 파일 없음 - 로그를 남기고 있지 않은 경우 (${log_files_check}/${total_log_files}개)"
         fi
         inspection_summary="시스템 로깅 설정이 부적절합니다: ${reason}. ${syslog_service} 서비스를 활성화하고 로그 기록 정책을 설정하세요."
         command_result="${raw_output}"

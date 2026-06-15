@@ -85,10 +85,10 @@ diagnose() {
         done 2>/dev/null || true
     fi
 
-    # 현재 환경변수 TMOUT도 확인 (우선순위 높음)
+    # 현재 환경변수 TMOUT은 참고 증거로만 기록 (판정은 영구 설정 파일 기준)
+    # 점검 셸에서 상속된 TMOUT이 파일 미설정/초과 설정을 가리는 false-good 방지
     if [ -n "${TMOUT:-}" ]; then
-        tmout_value="${TMOUT}"
-        raw_output="${raw_output}[환경변수] TMOUT=${TMOUT}${newline}"
+        raw_output="${raw_output}[환경변수] TMOUT=${TMOUT} (참고용, 판정 제외)${newline}"
     fi
 
     if [ -z "$raw_output" ]; then
@@ -100,14 +100,14 @@ diagnose() {
 
     # 최종 판정
     if [ -n "$tmout_value" ]; then
-        if [ "$tmout_value" -le 600 ] 2>/dev/null; then
+        if [ "$tmout_value" -ge 1 ] && [ "$tmout_value" -le 600 ] 2>/dev/null; then
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="세션 종료시간이 적절히 설정됨 (TMOUT=${tmout_value}초, 600초 이하)"
+            inspection_summary="세션 종료시간이 적절히 설정됨 (TMOUT=${tmout_value}초, 1~600초)"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="세션 종료시간이 너무 김 (TMOUT=${tmout_value}초, 600초 이하 권장)"
+            inspection_summary="세션 종료시간이 부적절함 (TMOUT=${tmout_value}초, 1~600초 권장; 0은 자동 종료 비활성화)"
         fi
     else
         diagnosis_result="VULNERABLE"

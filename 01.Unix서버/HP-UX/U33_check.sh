@@ -45,6 +45,18 @@ GUIDELINE_REMEDIATION="ls-al 명령어로 숨겨진 파일 존재 파악 후 불
 # 진단 함수
 # ============================================================================
 
+# 홈 디렉토리 1단계 숨김 항목 열거 (find -maxdepth 미지원 환경 대응: 쉘 글롭 사용)
+list_hidden_entries() {
+    local dir="$1"
+    local entry
+    for entry in "$dir"/.[!.]* "$dir"/..?*; do
+        if [ -e "$entry" ] || [ -L "$entry" ]; then
+            printf '%s\n' "$entry"
+        fi
+    done
+    return 0
+}
+
 # 진단 수행
 diagnose() {
 
@@ -64,6 +76,7 @@ diagnose() {
     local total_hidden=0
     local suspicious_count=0
     local checked_homedirs=0
+    local unreadable_homedirs=0
     local system_uid_threshold=1000
     local raw_find_output=""  # 원본 find 명령어 결과 누적
 
@@ -87,8 +100,9 @@ diagnose() {
 
     # 사용자 홈 디렉토리 확인
     while IFS=: read -r username password uid gid gecos home shell; do
-        # 시스템 계정 제외 (UID >= 100인 일반 사용자만 확인, HP-UX: 시스템 UID < 100)
-        if [ "$uid" -lt 100 ]; then
+        # 시스템 계정 제외 (root(UID 0) 및 UID >= 100인 일반 사용자 확인, HP-UX: 시스템 UID < 100)
+        # root 홈(/root)의 숨김 백도어 미탐(false-good) 방지를 위해 root 포함
+        if [ "$uid" -ne 0 ] && [ "$uid" -lt 100 ]; then
             continue
         fi
 
@@ -104,9 +118,15 @@ diagnose() {
 
         ((checked_homedirs++)) || true
 
+        # 읽을 수 없는 홈 디렉토리는 점검 불가로 건너뜀
+        if [ ! -r "$home" ] || [ ! -x "$home" ]; then
+            ((unreadable_homedirs++)) || true
+            continue
+        fi
+
         # 숨겨진 파일 및 디렉토리 검색 (.)
-        # 원본 find 명령어 실행 및 결과 저장
-        local find_result=$(find "$home" -maxdepth 1 -name ".*" 2>/dev/null)
+        # 쉘 글롭 기반 1단계 열거 실행 및 결과 저장
+        local find_result=$(list_hidden_entries "$home" 2>/dev/null)
 
         if [ -n "$find_result" ]; then
             raw_find_output="${raw_find_output}[Directory: $home]${newline}${find_result}${newline}${newline}"
@@ -125,7 +145,7 @@ diagnose() {
             # 정상적인 숨겨진 파일인지 확인
             local is_normal=false
             for pattern in "${normal_hidden_patterns[@]}"; do
-                if [[ "$filename" =~ $pattern ]]; then
+                if [[ "$filename" =~ ^${pattern}$ ]]; then
                     is_normal=true
                     break
                 fi
@@ -160,13 +180,18 @@ diagnose() {
                     ((suspicious_count++)) || true
                 fi
             fi
-        done < <(find "$home" -maxdepth 1 -name ".*" 2>/dev/null | head -50) || true
+        done < <(list_hidden_entries "$home" 2>/dev/null | head -50) || true
     done < /etc/passwd || true
 
-    command_executed="while IFS=: read -r user pw uid gid gecos home shell; do find \"\$home\" -maxdepth 1 -name \".*\" 2>/dev/null; done < /etc/passwd | grep -v -E '\.(bashrc|bash_profile|profile|ssh|gitconfig|gitignore|vimrc|viminfo)$'" || true
+    command_executed="while IFS=: read -r user pw uid gid gecos home shell; do for f in \"\$home\"/.[!.]* \"\$home\"/..?*; do [ -e \"\$f\" ] || [ -L \"\$f\" ] || continue; echo \"\$f\"; done; done < /etc/passwd | grep -v -E '\.(bashrc|bash_profile|profile|ssh|gitconfig|gitignore|vimrc|viminfo)$'" || true
 
     # 최종 판정
-    if [ "$suspicious_count" -eq 0 ]; then
+    if [ "$checked_homedirs" -gt 0 ] && [ "$unreadable_homedirs" -eq "$checked_homedirs" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="점검 대상 홈 디렉토리 ${checked_homedirs}개를 모두 읽을 수 없어 숨겨진 파일 점검을 수행하지 못했습니다. ls -al 명령어로 각 홈 디렉토리의 숨겨진 파일을 수동으로 확인하세요."
+        command_result="[Hidden files search results]${newline}[All ${checked_homedirs} home directories were unreadable; hidden file scan could not be performed]"
+    elif [ "$suspicious_count" -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="의심스러운 숨겨진 파일이 발견되지 않았습니다. (확인된 홈 디렉토리: ${checked_homedirs}개, 전체 숨겨진 파일: ${total_hidden}개)"

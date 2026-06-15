@@ -112,15 +112,56 @@ diagnose() {
         status="수동진단"
         inspection_summary="DocumentRoot 설정을 찾을 수 없습니다. 수동 확인이 필요합니다."
     else
-        # 기본 경로인지 확인
-        if [[ "${doc_root}" =~ ^/var/www/html?$ ]] || [[ "${doc_root}" =~ ^/srv/www/html?$ ]] || [[ "${doc_root}" =~ ^/usr/local/apache2/htdocs$ ]]; then
+        # 후행 슬래시 정규화
+        local norm_root="${doc_root%/}"
+        [ -z "${norm_root}" ] && norm_root="/"
+
+        # OS 기본 DocumentRoot 경로 목록 (정확히 일치할 때만 '분리되지 않은 경로' = 취약)
+        local exact_default_roots=(
+            "/var/www/html"
+            "/usr/local/apache2/htdocs"
+            "/srv/www/htdocs"
+            "/usr/share/apache2/default-site/htdocs"
+        )
+
+        # 기본 웹 트리 prefix 목록 (이 트리 하위이지만 기본 경로와 정확히 일치하지 않는
+        # 사용자 정의 하위 경로는 분리 여부를 자동 확정할 수 없어 수동진단으로 분류)
+        local web_tree_prefixes=(
+            "/var/www"
+            "/srv/www"
+            "/usr/local/apache2/htdocs"
+            "/usr/share/apache2"
+            "/usr/share/nginx"
+        )
+
+        local is_exact_default=false
+        for default_root in "${exact_default_roots[@]}"; do
+            if [ "${norm_root}" = "${default_root}" ]; then
+                is_exact_default=true
+                break
+            fi
+        done
+
+        local under_web_tree=false
+        for prefix in "${web_tree_prefixes[@]}"; do
+            if [ "${norm_root}" = "${prefix}" ] || [[ "${norm_root}" == "${prefix}/"* ]]; then
+                under_web_tree=true
+                break
+            fi
+        done
+
+        if [ "${is_exact_default}" = true ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="DocumentRoot가 기본 경로(${doc_root})로 설정되어 있습니다. 별도의 분리된 경로로 변경 권장."
+            inspection_summary="DocumentRoot(${doc_root})가 OS 기본 웹 경로로 설정되어 있습니다. 업무 영역과 분리된 별도 경로로 변경 권장."
+        elif [ "${under_web_tree}" = true ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="DocumentRoot(${doc_root})가 기본 웹 트리 하위의 사용자 정의 경로입니다. 업무 영역과의 분리 여부를 자동으로 확정할 수 없어 수동 확인이 필요합니다."
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="DocumentRoot가 별도 경로(${doc_root})로 설정되어 있습니다. (보안 권고사항 준수)"
+            inspection_summary="DocumentRoot가 기본 웹 트리와 분리된 별도 경로(${doc_root})로 설정되어 있습니다. (보안 권고사항 준수)"
         fi
     fi
 

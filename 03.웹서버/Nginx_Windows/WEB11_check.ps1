@@ -41,11 +41,39 @@ try {
     }
     else {
         $roots = @(Get-NginxRootPaths -State $state)
-        $defaultRoots = @($roots | Where-Object { $_ -match '(?i)\\nginx\\html$|\\html$|\\wwwroot$|^C:\\$|^C:\\Windows' })
-        $commandExecuted = "Parse active root directives from Nginx Windows configuration"
+
+        # 기본/시스템 웹 트리 prefix. 해당 경로 자체 또는 그 하위(예: C:\nginx\html\app)는
+        # '분리되지 않은 경로'로 간주하여 취약 판정한다. 단순 후위 일치(\html$)로는
+        # 기본 트리 하위 디렉터리를 놓치므로 prefix 비교를 사용한다.
+        $defaultPrefixes = @(
+            'C:\nginx\html',
+            "$env:ProgramFiles\nginx\html",
+            "${env:ProgramFiles(x86)}\nginx\html",
+            'C:\tools\nginx\html',
+            'C:\inetpub\wwwroot',
+            'C:\inetpub',
+            'C:\Windows',
+            'C:\Program Files',
+            'C:\Program Files (x86)',
+            'C:\Users'
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+        $defaultRoots = @($roots | Where-Object {
+            $r = $_.TrimEnd('\')
+            $isDefault = $false
+            # 드라이브 루트 자체 (예: C:\) 는 분리되지 않은 경로
+            if ($r -match '^[A-Za-z]:$') { $isDefault = $true }
+            foreach ($p in $defaultPrefixes) {
+                $pp = $p.TrimEnd('\')
+                if ($r -eq $pp -or $r -like ($pp + '\*')) { $isDefault = $true; break }
+            }
+            $isDefault
+        })
+
+        $commandExecuted = "Parse active root directives from Nginx Windows configuration and compare against default/system web tree prefixes"
         $commandOutput = if ($roots) { ($roots -join "`n") } else { "No active root directives found." }
         if ($roots.Count -eq 0) { $finalResult = "MANUAL"; $status = "수동진단"; $summary = "No Nginx root directives were found; inspect active server/location paths manually." }
-        elseif ($defaultRoots.Count -gt 0) { $finalResult = "VULNERABLE"; $status = "취약"; $summary = "Nginx uses default or system web root paths." }
+        elseif ($defaultRoots.Count -gt 0) { $finalResult = "VULNERABLE"; $status = "취약"; $summary = "Nginx root path is inside a default/system web tree: $($defaultRoots -join ', '). Configure a separated service-specific path." }
         else { $finalResult = "GOOD"; $status = "양호"; $summary = "Nginx root paths are separated from default/system paths." }
     }
 }

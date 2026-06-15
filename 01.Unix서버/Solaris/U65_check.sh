@@ -66,7 +66,7 @@ diagnose() {
     local config_files=""
 
     # 1) NTP 서비스 설치 여부 확인
-    if command -v ntpd >/dev/null 2>&1 || [ -f /etc/ntp.conf ] || command -v chronyd >/dev/null 2>&1 || [ -f /etc/chrony.conf ]; then
+    if command -v ntpd >/dev/null 2>&1 || [ -f /etc/ntp.conf ] || [ -f /etc/inet/ntp.conf ] || command -v chronyd >/dev/null 2>&1 || [ -f /etc/chrony.conf ]; then
         ntp_installed=true
     fi
 
@@ -75,7 +75,7 @@ diagnose() {
         status="취약"
         inspection_summary="NTP 서비스가 설치되지 않음 (시간 동기화 불가)"
         command_result="NTP: [not installed]"
-        command_executed="which ntpd chronyd; ls /etc/{ntp.conf,chrony.conf} 2>/dev/null"
+        command_executed="which ntpd chronyd; ls /etc/{ntp.conf,inet/ntp.conf,chrony.conf} 2>/dev/null"
     else
         # 2) NTP 설정 파일 확인
         if [ -f /etc/ntp.conf ]; then
@@ -88,6 +88,17 @@ diagnose() {
                 ntp_details="NTP 서버 설정됨: $(echo "$ntp_servers" | head -3 | tr '\n' ' ')"
             else
                 ntp_details="NTP 서버 설정 없음"
+            fi
+        fi
+
+        # Solaris 기본 경로 (/etc/inet/ntp.conf)
+        if [ -f /etc/inet/ntp.conf ]; then
+            config_files="${config_files} /etc/inet/ntp.conf"
+
+            local inet_ntp_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/inet/ntp.conf 2>/dev/null | grep -v "^#" | head -5)
+            if [ -n "$inet_ntp_servers" ]; then
+                ntp_configured=true
+                ntp_details="${ntp_details:+${ntp_details}, }NTP 서버 설정됨(/etc/inet/ntp.conf): $(echo "$inet_ntp_servers" | head -3 | tr '\n' ' ')"
             fi
         fi
 
@@ -115,14 +126,24 @@ diagnose() {
 
         # 3) NTP 서비스 실행 여부 확인 (Solaris SMF)
         local ntp_service_running=false
+        local probe_available=false
         if command -v svcs >/dev/null 2>&1; then
             # Solaris SMF (Service Management Facility)
+            probe_available=true
             if svcs network/ntp 2>/dev/null | grep -q "online"; then
                 ntp_running=true
                 ntp_service_running=true
             fi
         elif command -v systemctl >/dev/null 2>&1; then
+            probe_available=true
             if systemctl is-active ntp >/dev/null 2>&1 || systemctl is-active chrony >/dev/null 2>&1 || systemctl is-active systemd-timesyncd >/dev/null 2>&1; then
+                ntp_running=true
+                ntp_service_running=true
+            fi
+        fi
+        if [ "$ntp_running" = false ] && command -v ps >/dev/null 2>&1; then
+            probe_available=true
+            if ps -ef 2>/dev/null | grep -v grep | grep -qE 'xntpd|ntpd|chronyd'; then
                 ntp_running=true
                 ntp_service_running=true
             fi
@@ -132,7 +153,7 @@ diagnose() {
         local ntp_packages=""
         if command -v pkg >/dev/null 2>&1; then
             # Solaris IPS
-            if pkg list >/dev/null 2>&1 | grep -q "ntp"; then
+            if pkg list 2>/dev/null | grep -q "ntp"; then
                 ntp_packages="${ntp_packages}ntp "
             fi
         elif command -v dpkg >/dev/null 2>&1; then
@@ -158,12 +179,18 @@ diagnose() {
             inspection_summary="NTP 서비스 실행 중且 시간 동기화 설정됨: ${ntp_details}"
             command_result="${ntp_details}, service: running"
             command_executed="svcs network/ntp 2>/dev/null; cat ${config_files}"
-        elif [ "$ntp_installed" = true ] && [ "$ntp_configured" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="NTP 설정됨 (서비스 상태: ${ntp_service_running:-실행 중}): ${ntp_details}"
-            command_result="${ntp_details}, installed packages: ${ntp_packages:-[not found]}"
-            command_executed="svcs network/ntp 2>/dev/null"
+        elif [ "$ntp_configured" = true ] && [ "$probe_available" = false ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="NTP 서버 설정은 확인되었으나 데몬 동작 상태를 확인할 수 없음 (svcs/ps 사용 불가): ${ntp_details}"
+            command_result="${ntp_details}, probe: unavailable (daemon state unknown)"
+            command_executed="command -v svcs; command -v ps; grep '^server\|^pool' /etc/ntp.conf /etc/inet/ntp.conf 2>/dev/null"
+        elif [ "$ntp_configured" = true ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="NTP 서버 설정은 있으나 NTP 데몬이 중지되어 시간 동기화가 동작하지 않음: ${ntp_details}"
+            command_result="${ntp_details}, service: stopped"
+            command_executed="svcs network/ntp 2>/dev/null; ps -ef | grep ntpd; grep '^server\|^pool' /etc/ntp.conf /etc/inet/ntp.conf 2>/dev/null"
         else
             diagnosis_result="VULNERABLE"
             status="취약"

@@ -42,13 +42,14 @@ GUIDELINE_REMEDIATION="불필요한 스크립트 매핑 존재 여부 점검 및
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
     local mapping_count=0
     local unnecessary_mappings=0
+    local config_found=false
 
     # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -88,46 +89,51 @@ diagnose() {
         "/usr/share/tomcat*/conf/web.xml"
     )
 
+    # 불필요한 스크립트 매핑 점검
+    # 가이드라인 기준: 불필요한 스크립트 매핑(CGI/SSI/Invoker 등) 존재 여부 점검.
+    # DefaultServlet, JspServlet은 Tomcat 표준 필수 서블릿이므로 불필요 매핑으로 판단하지 않음.
+    # (criteria_bad: 불필요한 스크립트 매핑이 존재하는 경우)
     local servlet_mappings=""
+    local unnecessary_detail=""
 
     for xml_pattern in "${web_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                # Servlet-mapping 확인 (주석 제외)
-                local found_mappings=$(grep -E "servlet-mapping|servlet-name" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
-                if [ -n "${found_mappings}" ]; then
-                    servlet_mappings="${servlet_mappings}"$'\n'"${found_mappings}"
-                    mapping_count=$(echo "${found_mappings}" | grep -c "servlet-mapping" || true)
-
-                    # 불필요한 servlet 매핑 확인 (invoker, CGI, default)
-                    if echo "${found_mappings}" | grep -iqE "invoker|cgiservlet|defaultservlet|jsp"; then
-                        unnecessary_mappings=$((unnecessary_mappings + 1))
-                    fi
+                config_found=true
+                # 불필요 스크립트 매핑(CGI/SSI/Invoker)만 점검 (주석 제외)
+                local found_unnecessary=$(grep -iE "CGIServlet|SSIServlet|InvokerServlet|<servlet-name>\s*(cgi|ssi|invoker)\s*</servlet-name>" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                if [ -n "${found_unnecessary}" ]; then
+                    unnecessary_detail="${unnecessary_detail}"$'\n'"${found_unnecessary}"
+                    local hits=$(echo "${found_unnecessary}" | grep -c . || true)
+                    unnecessary_mappings=$((unnecessary_mappings + hits))
                 fi
+
+                # 전체 servlet-mapping 개수(참고용 evidence)
+                local found_mappings=$(grep -E "servlet-mapping" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                if [ -n "${found_mappings}" ]; then
+                    mapping_count=$(echo "${found_mappings}" | grep -c "servlet-mapping" || true)
+                fi
+                servlet_mappings="${unnecessary_detail}"
                 break 2
             fi
         done
     done
 
-    command_executed="grep -E 'servlet-mapping|servlet-name' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -10"
-    command_result="${servlet_mappings:-No servlet mappings found}"
+    command_executed="grep -iE 'CGIServlet|SSIServlet|InvokerServlet|<servlet-name>\\s*(cgi|ssi|invoker)\\s*</servlet-name>' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -10"
+    command_result="${servlet_mappings:-No unnecessary (CGI/SSI/Invoker) script mappings found}"
 
-    if [ ${mapping_count} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="스크립트 매핑이 발견되지 않았습니다. (보안 권고사항 준수)"
+    if [ "${config_found}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat web.xml을 찾을 수 없습니다. 불필요한 스크립트 매핑(CGI/SSI/Invoker)이 존재하는지 수동으로 확인하세요."
     elif [ ${unnecessary_mappings} -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="${unnecessary_mappings}개의 불필요한 스크립트 매핑이 발견되었습니다(invoke, CGI, default 등). 제거 권장."
-    elif [ ${mapping_count} -le 5 ]; then
+        inspection_summary="${unnecessary_mappings}개의 불필요한 스크립트 매핑(CGI/SSI/Invoker)이 발견되었습니다. 제거 권장."
+    else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="스크립트 매핑 ${mapping_count}개 발견. 필수 매핑만 사용 중인지 수동 확인 권장."
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="다수의 스크립트 매핑(${mapping_count}개)이 발견되었습니다. 불필요한 매핑 제거 권장."
+        inspection_summary="불필요한 스크립트 매핑(CGI/SSI/Invoker)이 발견되지 않았습니다(표준 서블릿 DefaultServlet/JspServlet은 제외). (보안 권고사항 준수)"
     fi
 
     # Run-all 모드 확인

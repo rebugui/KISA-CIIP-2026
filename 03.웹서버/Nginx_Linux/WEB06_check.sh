@@ -89,32 +89,45 @@ diagnose() {
         "/etc/nginx/sites-enabled/*.conf"
     )
 
+    local conf_files_read=0
+    local alias_directives=""
     for conf_pattern in "${nginx_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
             if [ -f "${conf_file}" ]; then
-                # Check for try_files directive (helps prevent directory traversal)
+                conf_files_read=$((conf_files_read + 1))
+                # try_files 지시어 (참고용 — traversal 방어의 충분조건이 아님)
                 local found_try_files=$(grep -E "^\s*try_files" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
                 if [ -n "${found_try_files}" ]; then
                     path_traversal_protection="${path_traversal_protection}"$'\n'"${conf_file}: ${found_try_files}"
                     has_try_files=true
                 fi
+                # alias 지시어 (off-by-slash traversal의 주요 원인) 수집
+                local found_alias=$(grep -E "^\s*alias\s+" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
+                if [ -n "${found_alias}" ]; then
+                    alias_directives="${alias_directives}"$'\n'"${conf_file}: ${found_alias}"
+                fi
             fi
         done
     done
 
-    command_executed="grep -E '^\\s*try_files' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null | grep -v '^\\s*#' | head -5"
-    command_result="${path_traversal_protection:-No try_files configuration found}"
+    command_executed="grep -E '^\\s*(try_files|alias)' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf /etc/nginx/sites-enabled/*.conf 2>/dev/null | grep -v '^\\s*#' | head -10"
+    command_result="try_files:${path_traversal_protection:-none}"$'\n'"alias:${alias_directives:-none}"
 
-    # Nginx by default does not allow directory traversal (../) in URLs
-    # However, improper alias or root configurations can bypass this
-    if [ "${has_try_files}" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="try_files 지시어가 사용되어 경로 검증이 강화되어 있습니다. Nginx는 기본적으로 상위 디렉터리 접근(..)을 차단합니다."
+    # 판단 원칙:
+    #  - try_files 존재만으로는 양호로 단정하지 않는다(alias off-by-slash traversal을 막지 못함).
+    #  - 설정 파일을 읽지 못한 경우/alias 존재 시 → 수동진단(경로 조작 테스트 필요).
+    if [ ${conf_files_read} -eq 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Nginx가 실행 중이나 설정 파일을 찾거나 읽을 수 없습니다. alias/root 설정 및 상위 디렉터리 접근(../) 차단 여부를 수동으로 확인하세요."
+    elif [ -n "${alias_directives}" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="alias 지시어가 발견되었습니다. alias는 경계(trailing slash) 설정 오류 시 상위 디렉터리 접근(off-by-slash) 우회가 가능하므로, location 경계와 traversal 차단 여부를 수동으로 점검하세요."
     else
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="Nginx는 기본적으로 상위 디렉터리 접근(../)을 차단하지만, alias나 root 설정이 적절한지 수동 검토가 필요합니다. 별도의 경로 조작 테스트 권장."
+        inspection_summary="Nginx는 기본적으로 상위 디렉터리 접근(../)을 차단하지만, try_files 존재만으로 traversal 차단을 단정할 수 없습니다. alias/root 설정의 적절성과 경로 조작 테스트를 통한 수동 검토가 필요합니다."
     fi
 
     # Run-all 모드 확인

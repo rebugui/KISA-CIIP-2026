@@ -115,7 +115,10 @@ diagnose() {
                 local found_disable=$(grep -E "^\s*disable_symlinks" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
                 if [ -n "${found_disable}" ]; then
                     symlink_settings="${symlink_settings}"$'\n'"${conf_file}: ${found_disable}"
-                    has_symlink_protection=true
+                    # disable_symlinks on|if_not_owner 인 경우에만 보호로 인정 (off는 보호 아님)
+                    if echo "${found_disable}" | grep -qiE "disable_symlinks\s+(on|if_not_owner)"; then
+                        has_symlink_protection=true
+                    fi
                 fi
             fi
         done
@@ -127,15 +130,19 @@ diagnose() {
     if [ "${has_symlink_protection}" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="disable_symlinks 지시어가 설정되어 있어 심볼릭 링크 사용이 제한됩니다."
+        inspection_summary="disable_symlinks on(또는 if_not_owner) 지시어가 설정되어 있어 심볼릭 링크 사용이 제한됩니다."
     elif [ "${symlink_count}" -gt 0 ]; then
+        # disable_symlinks 보호가 없는 상태에서 웹 루트 내 심볼릭 링크가 발견됨 → 취약
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="${symlink_count}개의 심볼릭 링크가 발견되었습니다. 불필요한 링크 제거 및 disable_symlinks 설정 권장."
+        inspection_summary="disable_symlinks on 지시어가 없고 웹 루트 내 ${symlink_count}개의 심볼릭 링크가 발견되었습니다. 불필요한 링크 제거 및 disable_symlinks on; 설정 권장."
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="심볼릭 링크가 발견되지 않았습니다. disable_symlinks on; 설정 추가로 강화 권장."
+        # disable_symlinks 미설정은 Nginx 기본값(설정값 없음)으로, 심볼릭 링크 추적을 허용하는 비보안 기본 상태이다.
+        # 웹 루트에서 심볼릭 링크가 즉시 발견되지 않았더라도 보호 설정 부재 자체를 GOOD로 단정할 수 없으므로
+        # 수동진단으로 분류한다(가이드라인: 기본값=설정값 없음, 조치=disable_symlinks on 추가).
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="disable_symlinks on 지시어가 설정되어 있지 않습니다(Nginx 기본값: 설정값 없음 → 심볼릭 링크 추적 허용). 현재 웹 루트에서 심볼릭 링크는 발견되지 않았으나, 보호 설정 부재로 인해 링크 사용 제한 여부를 수동으로 확인하고 disable_symlinks on; 설정을 권장합니다."
     fi
 
     # Run-all 모드 확인

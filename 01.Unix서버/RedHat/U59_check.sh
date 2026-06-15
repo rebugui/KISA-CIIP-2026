@@ -42,7 +42,28 @@ diagnose() {
     local command_result=""
     local command_executed="grep -Ei 'com2sec|community' /etc/snmp/snmpd.conf"
 
-    if [ -f "/etc/snmp/snmpd.conf" ]; then
+    # ==========================================================================
+    # 1. SNMP 서비스 실행 여부 확인 (실행 중이 아니면 점검 대상 아님 → 양호)
+    # ==========================================================================
+    local snmp_running=false
+    if systemctl is-active --quiet snmpd 2>/dev/null; then
+        snmp_running=true
+    elif ps aux 2>/dev/null | grep -E "snmpd" | grep -v grep >/dev/null 2>&1; then
+        snmp_running=true
+    fi
+
+    if [ "$snmp_running" = false ]; then
+        status="양호"
+        diagnosis_result="GOOD"
+        inspection_summary="SNMP 서비스가 비활성화되어 있습니다."
+        command_result="SNMP Service: [inactive]"
+    elif [ ! -f "/etc/snmp/snmpd.conf" ] || [ ! -r "/etc/snmp/snmpd.conf" ]; then
+        # snmpd 실행 중이나 표준 설정 파일이 없거나 읽을 수 없음 → 비표준 경로 설정 가능성, 수동진단
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="SNMP 서비스가 실행 중이나 표준 설정 파일(/etc/snmp/snmpd.conf)을 찾을 수 없거나 읽을 수 없습니다. SNMP 버전 설정을 수동으로 확인하십시오."
+        command_result="SNMP Service: [active], /etc/snmp/snmpd.conf: [not found or unreadable]"
+    else
         local v12_check=$(grep -Ei "com2sec|community" /etc/snmp/snmpd.conf | grep -v "^#" | xargs || echo "")
         if [ -n "$v12_check" ]; then
             status="취약"

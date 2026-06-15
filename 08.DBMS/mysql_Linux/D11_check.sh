@@ -93,12 +93,14 @@ diagnose() {
 
     # GRANT 권한 확인 (mysql.user 테이블의 Grant_priv는 MySQL 8.0에서 제거됨)
     # MySQL 5.7 또는 MariaDB에서만 체크
+    # 연결 가드 통과 후이므로, 두 조회(Grant_priv 컬럼 / 역할 폴백)가 모두 공백/오류면
+    # "0행(양호)"이 아니라 자동 판단 불가(MANUAL)로 처리해야 함.
     local grant_priv_query="SELECT user, host FROM mysql.user WHERE Grant_priv='Y' ORDER BY user, host;"
     command_executed="mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e \"${grant_priv_query}\""
     command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${grant_priv_query}" 2>/dev/null || echo "")
 
     if [ -z "$command_result" ]; then
-        # MySQL 8.0+의 경우 grants 테이블에서 GRANT OPTION 확인
+        # MySQL 8.0+의 경우 grants 테이블(역할 기반)에서 GRANT OPTION 확인 (폴백)
         command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "SELECT grantee, table_schema FROM information_schema.role_table_grants WHERE is_grantable='YES' LIMIT 20;" 2>/dev/null || echo "")
     fi
 
@@ -125,9 +127,11 @@ diagnose() {
             inspection_summary="GRANT 권한을 가진 계정 없음"
         fi
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="GRANT 권한 설정 양호"
+        # Grant_priv 컬럼 조회와 역할 기반 폴백이 모두 공백/오류임.
+        # 연결은 성공했으나 결과를 얻지 못했으므로 "양호"로 단정할 수 없음 → 자동 판단 불가.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="쿼리 결과 확인 불가 - 권한 부족 가능. Grant_priv 컬럼 및 역할 기반 GRANT OPTION 부여 계정을 수동으로 확인 필요"
     fi
 
     # Save results (only if library function exists)

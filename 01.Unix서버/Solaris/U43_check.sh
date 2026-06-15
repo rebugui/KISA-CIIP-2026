@@ -2,8 +2,8 @@
 # ============================================================================
 # @Project: KISA-CIIP-2026 Vulnerability Assessment Scripts
 # @Copyright: Copyright (c) 2026 Yang Uhyeok (양우혁). All rights reserved.
-# @Version: 1.0.1
-# @Last Updated: 2026-01-16
+# @Version: 1.0.2
+# @Last Updated: 2026-06-11
 # ============================================================================
 # [점검 항목 상세]
 # @ID          : U-43
@@ -11,7 +11,7 @@
 # @Platform    : Solaris
 # @Severity    : 상
 # @Title       : NIS, NIS +점검
-# @Description : rsh, rlogin, rexec 서비스 비활성화 확인
+# @Description : 계정 정보를 네트워크로 공유하는 NIS 서비스의 활성화 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -48,7 +48,6 @@ GUIDELINE_REMEDIATION="NIS 관련 서비스 비활성화 설정"
 # 진단 수행
 diagnose() {
 
-
     diagnosis_result="unknown"
     local status="미진단"
     local inspection_summary=""
@@ -56,84 +55,70 @@ diagnose() {
     local command_executed=""
     local newline=$'\n'
 
-    # 진단 로직 구현
-    # rsh, rlogin, rexec 서비스 상태 확인
-
+    # NIS(yp) 데몬 활성화 여부 점검
     local is_secure=true
+    local probe_available=false
     local service_status=""
-    local active_services=()
+    local active_items=()
 
-    # 확인할 r 계열 서비스 목록
-    local r_services=("rsh" "rlogin" "rexec")
+    # 확인 대상 NIS 데몬: ypserv, ypbind, ypxfrd, rpc.yppasswdd, rpc.ypupdated
+    local nis_pattern='ypserv|ypbind|ypxfrd|yppasswdd|ypupdated'
 
-    for service in "${r_services[@]}"; do
-        # Solaris SMF로 서비스 상태 확인
-        local svc_name="network/${service}"
-        if svcs "$svc_name" 2>/dev/null | grep -q "online"; then
-            is_secure=false
-            active_services+=("${service} (online)")
-            service_status="${service_status}${service}: online\\n"
-        else
-            service_status="${service_status}${service}: offline 또는 미설치\\n"
-        fi
-    done || true
-
-    # inetd 기반 서비스 확인 (rsh, rlogin, rexec)
-    if [ -f /etc/inetd.conf ]; then
-        for inetd_service in rsh rlogin rexec; do
-            if grep -q "^${inetd_service}" /etc/inetd.conf 2>/dev/null; then
+    # 1) SMF(svcs) 기반 NIS 서비스 상태 확인 (nis/server, nis/client)
+    if command -v svcs >/dev/null 2>&1; then
+        probe_available=true
+        local svcs_out=""
+        svcs_out=$(svcs -H -o state,fmri 2>/dev/null | grep -E 'nis/server|nis/client' || echo "")
+        if [ -n "$svcs_out" ]; then
+            local online_svcs=""
+            online_svcs=$(echo "$svcs_out" | grep -E '^online' || echo "")
+            if [ -n "$online_svcs" ]; then
                 is_secure=false
-                active_services+=("${inetd_service} (inetd)")
-                service_status="${service_status}${inetd_service}: inetd.conf에서 활성화됨\\n"
+                local online_fmris=""
+                online_fmris=$(echo "$online_svcs" | awk '{print $2}' | xargs || echo "")
+                active_items+=("SMF NIS 서비스 online: ${online_fmris}")
             fi
-        done || true
-    fi
-
-    # /etc/inetd.conf 확인 (레거시 시스템)
-    if [ -f /etc/inetd.conf ]; then
-        local inetd_r=$(grep -E "^(rsh|rlogin|rexec)" /etc/inetd.conf || echo "")
-        if [ -n "$inetd_r" ]; then
-            is_secure=false
-            active_services+=("r services in inetd.conf")
-            service_status="${service_status}r 계열 서비스: inetd.conf에서 활성화됨\\n"
+            service_status="${service_status}[svcs -H -o state,fmri | grep nis]${newline}${svcs_out}${newline}"
+        else
+            service_status="${service_status}[svcs] NIS 관련 SMF 서비스(nis/server, nis/client)가 등록되어 있지 않습니다.${newline}"
         fi
     fi
 
-    # 포트 확인 (rsh: 514, rlogin: 513, rexec: 512)
-    if command -v netstat &>/dev/null; then
-        local rsh_port=$(netstat -an | grep "\.514 " || echo "")
-        local rlogin_port=$(netstat -an | grep "\.513 " || echo "")
-        local rexec_port=$(netstat -an | grep "\.512 " || echo "")
-
-        if [ -n "$rsh_port" ] || [ -n "$rlogin_port" ] || [ -n "$rexec_port" ]; then
+    # 2) 프로세스 기반 확인 (svcs 미지원 레거시 시스템 포함)
+    local nis_procs=""
+    if command -v ps >/dev/null 2>&1; then
+        probe_available=true
+        nis_procs=$(ps -ef 2>/dev/null | grep -E "${nis_pattern}" | grep -v grep || echo "")
+        if [ -n "$nis_procs" ]; then
             is_secure=false
-            service_status="${service_status}r 계열 포트 활성화 감지\\n"
+            active_items+=("NIS 프로세스 실행 중")
+            service_status="${service_status}[ps -ef NIS 프로세스]${newline}${nis_procs}${newline}"
+        else
+            service_status="${service_status}[ps -ef NIS 프로세스] 실행 중인 NIS 데몬 없음${newline}"
         fi
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$probe_available" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="svcs/ps 명령을 사용할 수 없어 NIS 서비스 활성화 여부를 자동 확인할 수 없습니다. 수동 점검이 필요합니다."
+        command_result="NIS 서비스 상태 확인 명령(svcs, ps)을 모두 사용할 수 없습니다."
+        command_executed="command -v svcs; command -v ps"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="r 계열 서비스 비활성화됨"
+        inspection_summary="NIS 관련 서비스(ypserv, ypbind 등)가 비활성화되어 있습니다."
         command_result="${service_status}"
-        command_executed="svcs network/rsh network/rlogin network/rexec; cat /etc/inetd.conf 2>/dev/null | grep -E 'rsh|rlogin|rexec'"
+        command_executed="svcs -H -o state,fmri | grep -E 'nis/server|nis/client'; ps -ef | grep -E '${nis_pattern}' | grep -v grep"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="r 계열 서비스 활성화됨: ${active_services[*]}"
+        inspection_summary="계정 정보 유출 위험이 있는 NIS 서비스가 활성화되어 있습니다: ${active_items[*]}"
         command_result="${service_status}"
-        command_executed="svcs network/rsh network/rlogin network/rexec; cat /etc/inetd.conf 2>/dev/null | grep -E 'rsh|rlogin|rexec'"
+        command_executed="svcs -H -o state,fmri | grep -E 'nis/server|nis/client'; ps -ef | grep -E '${nis_pattern}' | grep -v grep"
     fi
 
-    # echo ""
-    # echo "진단 결과: ${status}"
-    # echo "판정: ${diagnosis_result}"
-    # echo "설명: ${inspection_summary}"
-    # echo ""
-
-    # 결과 생성 (PC 패턴: 스크립트에서 모드 확인 후 처리)
-    # Run-all 모드 확인
     save_dual_result \
         "${ITEM_ID}" \
         "${ITEM_NAME}" \

@@ -82,17 +82,79 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
-    # This is MANUAL diagnosis - application-level validation cannot be checked via config
-    inspection_summary="동적 페이지 입력값 검증은 웹 애플리케이션 소스 코드 수준에서 구현되어야 합니다. Apache 설정 파일만으로는 이 항목을 진단할 수 없습니다. 다음 사항을 수동으로 확인하세요:\n"
-    inspection_summary="${inspection_summary}\n1. 모든 사용자 입력(GET, POST, Cookie, Header 등)에 대한 검증 로직 구현 여부\n"
-    inspection_summary="${inspection_summary}2. 특수문자 및 메타문자(', \", <, >, ;, &, |, $, etc.) 필터링 여부\n"
-    inspection_summary="${inspection_summary}3. 입력값 길이 제한 구현 여부\n"
-    inspection_summary="${inspection_summary}4. SQL Injection 방지를 위한 Prepared Statement 또는 Parameterized Query 사용 여부\n"
-    inspection_summary="${inspection_summary}5. XSS 방지를 위한 출력값 이스케이프 처리 여부\n"
-    inspection_summary="${inspection_summary}6. 웹 방화벽(WAF) 또는 mod_security 등 입력값 필터링 모듈 사용 여부"
+    # WEB-21: HTTP -> HTTPS Redirection 활성화 여부 점검 (config 기반 자동 진단)
+    local apache_conf_locations=(
+        "/usr/local/apache2/conf/httpd.conf"
+        "/usr/local/apache2/conf/extra/"*.conf
+        "/etc/httpd/conf/httpd.conf"
+        "/etc/httpd/conf.d/"*.conf
+        "/etc/apache2/apache2.conf"
+        "/etc/apache2/sites-enabled/"*.conf
+        "/etc/apache2/conf-enabled/"*.conf
+    )
 
-    command_result="Application-level validation cannot be detected via Apache configuration"
-    command_executed="N/A - Manual review of application source code required"
+    local conf_seen=false
+    local has_redirect=false
+    local matched_line=""
+    local scanned_files=""
+    # RewriteRule 기반 리디렉션은 'RewriteEngine On'이 적용된 경우에만 유효하다.
+    # (Redirect/RedirectMatch 지시어는 RewriteEngine 없이도 동작하므로 별도 처리)
+    local rewrite_engine_on=false
+    for conf_pattern in "${apache_conf_locations[@]}"; do
+        for conf_file in $conf_pattern; do
+            if [ -f "${conf_file}" ]; then
+                if grep -niE '^[[:space:]]*RewriteEngine[[:space:]]+On' "${conf_file}" 2>/dev/null | grep -vqE '^[0-9]+:[[:space:]]*#'; then
+                    rewrite_engine_on=true
+                fi
+            fi
+        done
+    done
+
+    for conf_pattern in "${apache_conf_locations[@]}"; do
+        for conf_file in $conf_pattern; do
+            if [ -f "${conf_file}" ]; then
+                conf_seen=true
+                scanned_files="${scanned_files}${conf_file} "
+                # 주석(#)이 아닌 줄에서 https:// 로의 Redirect/RedirectMatch 탐지
+                # (이 지시어들은 RewriteEngine 활성화 여부와 무관하게 동작)
+                local hit
+                hit=$(grep -niE '^[[:space:]]*Redirect(Match)?([[:space:]]+(permanent|seeother|temp|301|302))?[[:space:]]+.*https://' "${conf_file}" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' | head -1 || true)
+                if [ -n "${hit}" ]; then
+                    has_redirect=true
+                    matched_line="${conf_file}: ${hit}"
+                    break 2
+                fi
+                # RewriteRule 기반 https 리디렉션은 RewriteEngine On일 때만 유효로 간주
+                if [ "${rewrite_engine_on}" = true ]; then
+                    hit=$(grep -niE '^[[:space:]]*RewriteRule[[:space:]]+.*https://' "${conf_file}" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' | head -1 || true)
+                    if [ -n "${hit}" ]; then
+                        has_redirect=true
+                        matched_line="${conf_file}: ${hit} (RewriteEngine On)"
+                        break 2
+                    fi
+                fi
+            fi
+        done
+    done
+
+    command_executed="grep -niE 'Redirect.*https://|RewriteRule.*https://' <apache conf files>"
+
+    if [ "${conf_seen}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Apache 설정 파일을 찾을 수 없어 HTTP->HTTPS Redirection 활성화 여부를 자동으로 판단할 수 없습니다. 설정 파일에서 80 포트 접근 시 https:// 로의 Redirect/RewriteRule 설정 여부를 수동으로 확인하세요."
+        command_result="No readable Apache configuration file found"
+    elif [ "${has_redirect}" = true ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="HTTP 접근 시 HTTPS로의 Redirection이 활성화되어 있습니다. (${matched_line})"
+        command_result="HTTPS redirection directive found: ${matched_line}"
+    else
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="HTTP 접근 시 HTTPS로의 Redirection이 비활성화되어 있습니다. 검사한 설정 파일: ${scanned_files}"
+        command_result="No HTTPS redirection directive found in: ${scanned_files}"
+    fi
 
     # Run-all 모드 확인
     save_dual_result \

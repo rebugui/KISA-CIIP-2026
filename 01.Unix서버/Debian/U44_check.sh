@@ -73,8 +73,9 @@ diagnose() {
 
     # in.tftpd (inetd/xinetd 기반) 확인
     if [ -f /etc/xinetd.d/tftp ]; then
-        local disabled=$(grep -i "disable" /etc/xinetd.d/tftp | grep -v "^#" | awk '{print $2}')
-        service_info="${service_info}xinetd tftp: disable=${disabled}${newline}"
+        local disabled=$(grep -E '^[[:space:]]*disable' /etc/xinetd.d/tftp 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
+        service_info="${service_info}xinetd tftp: disable=${disabled:-없음}${newline}"
+        # xinetd 기본값: disable 항목이 없으면 서비스 활성화 상태
         if [ "$disabled" != "yes" ]; then
             services_running=true
             running_services+=("tftp(xinetd)")
@@ -95,11 +96,19 @@ diagnose() {
 
     # talkd/ntalkd (inetd 기반) 확인
     if [ -f /etc/inetd.conf ]; then
-        local talk_services=$(grep -E "^talk|^ntalk" /etc/inetd.conf | grep -v "^#" || echo "")
+        local talk_services=$(grep -E "^[[:space:]]*(talk|ntalk)[[:space:]]" /etc/inetd.conf | grep -v "^[[:space:]]*#" || echo "")
         if [ -n "$talk_services" ]; then
             services_running=true
             running_services+=("talk(inetd)")
             service_info="${service_info}inetd talk 활성화됨${newline}"
+        fi
+
+        # tftpd (inetd 기반) 확인 - 포트 미바인딩 상태에서도 설정 누락 탐지
+        local tftp_inetd=$(grep -E "^[[:space:]]*tftp[[:space:]]" /etc/inetd.conf | grep -v "^[[:space:]]*#" || echo "")
+        if [ -n "$tftp_inetd" ]; then
+            services_running=true
+            running_services+=("tftp(inetd)")
+            service_info="${service_info}inetd tftp 활성화됨${newline}"
         fi
     fi
 
@@ -131,7 +140,7 @@ diagnose() {
         status="취약"
         inspection_summary="불필요한 서비스 활성화됨: ${running_services[*]}"
         command_result="${service_info}"
-        command_executed="systemctl is-active tftp talk ntalk; grep -E '^talk|^ntalk' /etc/inetd.conf"
+        command_executed="systemctl is-active tftp talk ntalk; grep -E '^[[:space:]]*(tftp|talk|ntalk)[[:space:]]' /etc/inetd.conf"
     fi
 
     # echo ""

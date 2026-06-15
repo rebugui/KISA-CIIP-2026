@@ -45,69 +45,207 @@ diagnose() {
     local command_executed=""
     local newline=$'\n'
 
-    local is_vulnerable=false
-    local unused_accounts=""
-    
+    local inactive_threshold_days=90
+
+    # 점검 축(leg) 상태: GOOD / VULNERABLE / MANUAL
+    local default_leg="GOOD"
+    local inactive_leg="GOOD"
+    local vulnerable_defaults=""
+    local locked_defaults=""
+    local undetermined_defaults=""
+    local stale_accounts=""
+    local undetermined_accounts=""
+
+    # ------------------------------------------------------------------
+    # [Leg 1] 불필요한 기본 계정(lp, uucp, nuucp) 존재 및 잠금 여부
+    # ------------------------------------------------------------------
+    local account entry shell lock_state pw_field
+    for account in lp uucp nuucp; do
+        entry=$(awk -F: -v u="$account" '$1 == u { print $0; exit }' /etc/passwd 2>/dev/null || true)
+        [ -z "$entry" ] && continue
+        shell=$(echo "$entry" | awk -F: '{ print $NF }')
+
+        lock_state="unknown"
+        case "$shell" in
+            */nologin|*/false)
+                lock_state="locked"
+                ;;
+        esac
+
+        if [ "$lock_state" = "unknown" ]; then
+            pw_field=$(echo "$entry" | awk -F: '{ print $2 }')
+            if [ "$pw_field" = "x" ]; then
+                # HP-UX 11i v3 shadow 모드
+                if [ -r /etc/shadow ]; then
+                    pw_field=$(awk -F: -v u="$account" '$1 == u { print $2; exit }' /etc/shadow 2>/dev/null || true)
+                else
+                    pw_field="__UNREADABLE__"
+                fi
+            fi
+            case "$pw_field" in
+                '!'*|'*'*|NP)   lock_state="locked" ;;
+                __UNREADABLE__) lock_state="unknown" ;;
+                *)              lock_state="unlocked" ;;
+            esac
+        fi
+
+        case "$lock_state" in
+            locked)   locked_defaults="${locked_defaults}${account} " ;;
+            unlocked) vulnerable_defaults="${vulnerable_defaults}${account} " ;;
+            *)        undetermined_defaults="${undetermined_defaults}${account} " ;;
+        esac
+    done
+
+    if [ -n "$vulnerable_defaults" ]; then
+        default_leg="VULNERABLE"
+    elif [ -n "$undetermined_defaults" ]; then
+        default_leg="MANUAL"
+    fi
+
+    # ------------------------------------------------------------------
+    # [Leg 2] 장기 미사용(90일 이상) 계정 점검 - last 출력의 월/일을
+    # 일자(day-of-year)로 환산하여 90일 기준 실제 적용
+    # (wtmp는 연도 미표기 → 근사 계산, 판정 불가 시 수동진단)
+    # ------------------------------------------------------------------
     local checkable_accounts=""
     if [ -f /etc/passwd ]; then
-        checkable_accounts=$(awk -F: '$3 >= 1000 && $7 !~ /nologin|false/ {print $1}' /etc/passwd 2>/dev/null || echo "")
+        checkable_accounts=$(awk -F: '$3 >= 1000 && $7 !~ /nologin|false/ {print $1}' /etc/passwd 2>/dev/null || true)
     fi
-    
-    local recent_login_accounts=""
-    local inactive_threshold_days=90
-    
+
+    local last_output=""
+    local last_full_output=""
     if command -v last >/dev/null 2>&1; then
-        recent_login_accounts=$(last 2>/dev/null | awk -v days="$inactive_threshold_days" '
-            NR>1 && $1 !~ /^(reboot|shutdown|wtmp)$/ {
-                # HP-UX last format: user tty date time
-                print $1
-            }
-        ' | sort -u || echo "")
+        last_output=$(last 2>/dev/null || true)
+        # GNU/util-linux last는 -F로 연도 포함 전체 시각 출력 (HP-UX last 미지원 시 빈 값)
+        last_full_output=$(last -F 2>/dev/null || true)
     fi
-    
+
+    local current_doy=""
+    current_doy=$(date +%j 2>/dev/null | sed 's/^0*//' || true)
+    case "$current_doy" in
+        ''|*[!0-9]*) current_doy="" ;;
+    esac
+    local current_year=""
+    current_year=$(date +%Y 2>/dev/null || true)
+    case "$current_year" in
+        ''|*[!0-9]*) current_year="" ;;
+    esac
+
     if [ -n "$checkable_accounts" ]; then
+        local user_line days_old
         while IFS= read -r account; do
             [ -z "$account" ] && continue
-            if [ -z "$recent_login_accounts" ] || ! echo "$recent_login_accounts" | grep -qw "^${account}$"; then
-                unused_accounts="${unused_accounts}${account} "
-                is_vulnerable=true
+            user_line=$(echo "$last_output" | awk -v u="$account" '$1 == u { print; exit }' || true)
+            if [ -z "$user_line" ] || [ -z "$current_doy" ]; then
+                # wtmp에 이력 없음(로그 순환 가능성) 또는 날짜 계산 불가 → 수동 확인
+                undetermined_accounts="${undetermined_accounts}${account} "
+                continue
             fi
-        done <<< "$checkable_accounts"
-    fi
-    
-    local passwd_check_output=""
-    local last_check_output=""
-    
-    passwd_check_output="점검 대상 계정 (UID>=1000, 로그인 가능):"
-    if [ -n "$checkable_accounts" ]; then
-        passwd_check_output="${passwd_check_output}${newline}$(echo "$checkable_accounts" | tr '\n' ' ')"
-    else
-        passwd_check_output="${passwd_check_output}${newline}없음"
-    fi
-    
-    if command -v last >/dev/null 2>&1; then
-        last_check_output="로그인 이력이 있는 계정 (last):"
-        if [ -n "$recent_login_accounts" ]; then
-            last_check_output="${last_check_output}${newline}$(echo "$recent_login_accounts" | tr '\n' ' ')"
-        else
-            last_check_output="${last_check_output}${newline}없음"
-        fi
-    else
-        last_check_output="last 명령어 없음"
-    fi
-    
-    command_result="[Check 1: /etc/passwd 필터링]${newline}${passwd_check_output}${newline}${newline}[Check 2: last (HP-UX)]${newline}${last_check_output}"
-    command_executed="awk -F: '\$3 >= 1000 && \$7 !~ /nologin|false/ {print \$1}' /etc/passwd; last"
+            # 로그인 일자(day-of-year) 추출
+            local login_doy login_year user_line_full
+            login_doy=$(echo "$user_line" | awk '
+                BEGIN {
+                    split("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec", mn, " ")
+                    split("0 31 59 90 120 151 181 212 243 273 304 334", mc, " ")
+                    for (k = 1; k <= 12; k++) base[mn[k]] = mc[k]
+                }
+                {
+                    for (i = 2; i < NF; i++) {
+                        if (($i in base) && $(i + 1) ~ /^[0-9][0-9]?$/) {
+                            print base[$i] + $(i + 1)
+                            exit
+                        }
+                    }
+                }' || true)
+            case "$login_doy" in
+                ''|*[!0-9]*) login_doy="" ;;
+            esac
 
-    if [ "$is_vulnerable" = true ]; then
+            # 연도 확인 가능 시(last -F) 정확한 경과일 계산
+            login_year=""
+            if [ -n "$last_full_output" ]; then
+                user_line_full=$(echo "$last_full_output" | awk -v u="$account" '$1 == u { print; exit }' || true)
+                login_year=$(echo "$user_line_full" | awk '{ for (i = 2; i <= NF; i++) if ($i ~ /^[12][0-9][0-9][0-9]$/) { print $i; exit } }' || true)
+            fi
+            case "$login_year" in
+                ''|*[!0-9]*) login_year="" ;;
+            esac
+
+            days_old=""
+            if [ -n "$login_doy" ] && [ -n "$login_year" ] && [ -n "$current_year" ]; then
+                days_old=$(( (current_year - login_year) * 365 + current_doy - login_doy ))
+                [ "$days_old" -lt 0 ] && days_old=0
+            elif [ -n "$login_doy" ]; then
+                days_old=$(( current_doy - login_doy ))
+                if [ "$days_old" -lt 0 ]; then
+                    days_old=$(( days_old + 365 ))
+                elif [ "$days_old" -le "$inactive_threshold_days" ]; then
+                    # wtmp 연도 미표기: 달력상 최근으로 보여도 수년 전 로그인일 수 있음 → 수동 확인
+                    undetermined_accounts="${undetermined_accounts}${account}(연도확인불가) "
+                    continue
+                fi
+            fi
+            case "$days_old" in
+                ''|*[!0-9]*)
+                    undetermined_accounts="${undetermined_accounts}${account} "
+                    ;;
+                *)
+                    if [ "$days_old" -gt "$inactive_threshold_days" ]; then
+                        stale_accounts="${stale_accounts}${account}(${days_old}일전) "
+                    fi
+                    ;;
+            esac
+        done <<< "$checkable_accounts"
+
+        if [ -n "$stale_accounts" ]; then
+            inactive_leg="VULNERABLE"
+        elif [ -n "$undetermined_accounts" ]; then
+            inactive_leg="MANUAL"
+        fi
+    fi
+
+    # ------------------------------------------------------------------
+    # 증적 구성
+    # ------------------------------------------------------------------
+    local default_check_output="기본 계정(lp, uucp, nuucp) 점검:"
+    [ -n "$vulnerable_defaults" ] && default_check_output="${default_check_output}${newline}로그인 가능(미잠금) 기본 계정: ${vulnerable_defaults}"
+    [ -n "$locked_defaults" ] && default_check_output="${default_check_output}${newline}잠금/로그인 불가 기본 계정: ${locked_defaults}"
+    [ -n "$undetermined_defaults" ] && default_check_output="${default_check_output}${newline}잠금 여부 확인 불가 기본 계정(수동 확인 필요): ${undetermined_defaults}"
+    if [ -z "$vulnerable_defaults" ] && [ -z "$locked_defaults" ] && [ -z "$undetermined_defaults" ]; then
+        default_check_output="${default_check_output}${newline}해당 기본 계정 없음"
+    fi
+
+    local inactive_check_output="장기 미사용(${inactive_threshold_days}일) 점검 대상 (UID>=1000, 로그인 가능):"
+    if [ -n "$checkable_accounts" ]; then
+        inactive_check_output="${inactive_check_output}${newline}$(echo "$checkable_accounts" | tr '\n' ' ')"
+    else
+        inactive_check_output="${inactive_check_output}${newline}없음"
+    fi
+    [ -n "$stale_accounts" ] && inactive_check_output="${inactive_check_output}${newline}${inactive_threshold_days}일 이상 미사용 계정(wtmp 연도 미표기, 근사 계산): ${stale_accounts}"
+    [ -n "$undetermined_accounts" ] && inactive_check_output="${inactive_check_output}${newline}wtmp 이력 없음/날짜 계산 불가 계정(수동 확인 필요): ${undetermined_accounts}"
+
+    command_result="[Check 1: 기본 계정 존재/잠금 여부]${newline}${default_check_output}${newline}${newline}[Check 2: last 기반 ${inactive_threshold_days}일 미사용 점검 (HP-UX)]${newline}${inactive_check_output}"
+    command_executed="awk -F: /etc/passwd; awk -F: /etc/shadow; last"
+
+    # ------------------------------------------------------------------
+    # 판정 병합: 취약 leg 존재 → 취약, 미확정 leg 존재 → 수동진단, 모두 양호 → 양호
+    # ------------------------------------------------------------------
+    if [ "$default_leg" = "VULNERABLE" ] || [ "$inactive_leg" = "VULNERABLE" ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        unused_accounts=$(echo "$unused_accounts" | tr -s ' ' | sed 's/^ *//;s/ *$//')
-        inspection_summary="90일 이상 미사용 계정 발견: ${unused_accounts}"
+        inspection_summary="불필요한 계정 발견:"
+        [ -n "$vulnerable_defaults" ] && inspection_summary="${inspection_summary} 미잠금 기본 계정(${vulnerable_defaults% })"
+        [ -n "$stale_accounts" ] && inspection_summary="${inspection_summary} ${inactive_threshold_days}일 이상 미사용 계정(${stale_accounts% })"
+    elif [ "$default_leg" = "MANUAL" ] || [ "$inactive_leg" = "MANUAL" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="자동 판정 불가 항목 존재 - 기본 계정 잠금 여부 또는 마지막 로그인 시각을 수동으로 확인 필요"
+        [ -n "$undetermined_defaults" ] && inspection_summary="${inspection_summary} (잠금 확인 불가: ${undetermined_defaults% })"
+        [ -n "$undetermined_accounts" ] && inspection_summary="${inspection_summary} (로그인 이력 확인 불가: ${undetermined_accounts% })"
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="90일 이상 미사용 계정 없음 (시스템 계정 및 로그인 불가 계정은 점검 대상에서 제외됨)"
+        inspection_summary="미잠금 기본 계정(lp, uucp, nuucp) 및 ${inactive_threshold_days}일 이상 미사용 계정 없음"
     fi
 
     save_dual_result \

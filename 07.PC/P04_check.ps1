@@ -41,9 +41,14 @@ $commandOutput = ""
 try {
     $shareOutput = net share 2>&1 | Out-String
     $commandOutput = $shareOutput
-    $lines = $shareOutput -split '`r`?`n'
-    $basicShares = @('C$', 'ADMIN$', 'IPC$', 'print$')
-    $unnecessaryShares = @()
+    $lines = $shareOutput -split "`r?`n"
+    # 기본(관리) 공유는 점검 대상에서 제외:
+    #  - 드라이브 문자 관리 공유: C$, D$, E$ ... (드라이브 문자 + '$')
+    #  - 시스템 관리 공유: ADMIN$, IPC$, print$, FAX$
+    # KISA 가이드: 기본 공유(C$, D$, Admin$ 등)는 별도 조치(AutoShareWks) 항목이며,
+    # 이 점검의 "취약" 판정은 접근권한/비밀번호 없이 노출된 '일반(사용자) 공유'에 한함.
+    $systemAdminShares = @('ADMIN$', 'IPC$', 'PRINT$', 'FAX$')
+    $userShares = @()
     $everyoneAccessShares = @()
 
     foreach ($line in $lines) {
@@ -52,46 +57,59 @@ try {
         }
         if ($line -match '^([A-Za-z\$][A-Za-z0-9\$\-_]*)\s+') {
             $shareName = $matches[1]
-            if ($shareName -notin $basicShares) {
-                $unnecessaryShares += $shareName
+            $upperName = $shareName.ToUpper()
 
-                # Check Everyone access for this share
-                try {
-                    $accessCheck = Get-SmbShareAccess -Name $shareName -ErrorAction SilentlyContinue
-                    foreach ($access in $accessCheck) {
-                        if ($access.AccountName -eq 'Everyone' -or $access.AccountName -like '*S-1-1-0') {
-                            if ($access.AccessControlType -eq 'Allow') {
-                                $everyoneAccessShares += "$shareName ($($access.AccessRight))"
-                            }
+            # 드라이브 문자 관리 공유 (예: C$, D$) 제외 — 단일 문자 + '$'
+            $isDriveLetterAdminShare = $upperName -match '^[A-Z]\$$'
+            $isSystemAdminShare = $systemAdminShares -contains $upperName
+
+            if ($isDriveLetterAdminShare -or $isSystemAdminShare) {
+                continue
+            }
+
+            # 일반(사용자) 공유: 접근 권한/비밀번호 점검 대상
+            $userShares += $shareName
+
+            # Check Everyone access for this share
+            try {
+                $accessCheck = Get-SmbShareAccess -Name $shareName -ErrorAction SilentlyContinue
+                foreach ($access in $accessCheck) {
+                    if ($access.AccountName -eq 'Everyone' -or $access.AccountName -like '*S-1-1-0') {
+                        if ($access.AccessControlType -eq 'Allow') {
+                            $everyoneAccessShares += "$shareName ($($access.AccessRight))"
                         }
                     }
-                } catch {
-                    # PowerShell 5.1 compatibility: use net share with access check
-                    $shareDetail = net share $shareName 2>&1 | Out-String
-                    if ($shareDetail -match 'Everyone') {
-                        $everyoneAccessShares += "$shareName (access suspected)"
-                    }
+                }
+            } catch {
+                # PowerShell 5.1 compatibility: use net share with access check
+                $shareDetail = net share $shareName 2>&1 | Out-String
+                if ($shareDetail -match 'Everyone') {
+                    $everyoneAccessShares += "$shareName (access suspected)"
                 }
             }
         }
     }
 
-    if ($unnecessaryShares.Count -eq 0) {
+    if ($userShares.Count -eq 0) {
+        # 일반 공유가 없고 기본 관리 공유만 존재 → 양호
         $finalResult = "GOOD"
         $unnecessaryList = "(없음)"
-        $summary = "불필요한 공유 폴더가 존재하지 않음 (기본 공유 C$, ADMIN$, IPC$, print$만 존재)"
+        $summary = "점검 대상 일반 공유 폴더가 존재하지 않음 (기본 관리 공유만 존재)"
         $status = "양호"
     } elseif ($everyoneAccessShares.Count -gt 0) {
+        # 일반 공유에 Everyone 광범위 접근 권한 → 취약
         $finalResult = "VULNERABLE"
-        $unnecessaryList = $unnecessaryShares -join ', '
+        $unnecessaryList = $userShares -join ', '
         $everyoneList = $everyoneAccessShares -join ', '
-        $summary = "불필요한 공유 폴더 존재 + Everyone 권한: $unnecessaryList`nEveryone 권한 있는 공유: $everyoneList"
+        $summary = "일반 공유 폴더에 Everyone 접근 권한 존재: $everyoneList (점검 대상 공유: $unnecessaryList)"
         $status = "취약"
     } else {
-        $finalResult = "VULNERABLE"
-        $unnecessaryList = $unnecessaryShares -join ', '
-        $summary = "불필요한 공유 폴더 존재: $unnecessaryList (Everyone 권한 없음)"
-        $status = "취약"
+        # 일반 공유가 존재하나 Everyone 광범위 접근 권한 없음 → 적절히 통제된 것으로 보고 양호
+        # (criteria_good: "공유 폴더에 접근 권한 및 비밀번호가 설정된 경우")
+        $finalResult = "GOOD"
+        $unnecessaryList = $userShares -join ', '
+        $summary = "일반 공유 폴더가 존재하나 Everyone 광범위 접근 권한 없음 (접근 통제됨): $unnecessaryList"
+        $status = "양호"
     }
 } catch {
     $finalResult = "MANUAL"

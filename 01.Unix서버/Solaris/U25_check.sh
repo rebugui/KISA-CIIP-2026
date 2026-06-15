@@ -61,18 +61,31 @@ diagnose() {
 
     local ww_files=""
     local ww_count=0
-    local sys_dirs="/ /home /tmp /var /usr /opt /etc"
+    local sys_dirs="/ /home /export/home /tmp /var /usr /opt /etc"
+    # bash 3.2 (Solaris 10 stock) 호환: 연관배열 대신 공백 구분 문자열 멤버십 사용
+    local u25_seen_files=" "
+    local u25_seen_dirs=" "
 
     # 시스템 주요 디렉터리에서 world-writable 파일 검색 - 실제 명령어 결과 저장
+    # 예외 경로(/tmp, /var/tmp, /var/mail)는 head 절단 이전에 파이프라인에서 제외
     local raw_files_output=""
     for dir in $sys_dirs; do
         if [ -d "$dir" ]; then
-            local dir_output=$(find "$dir" -perm -2 -type f 2>/dev/null | head -30 || true)
+            local dir_output=$(find "$dir" -perm -2 -type f 2>/dev/null | grep -Ev '^/tmp(/|$)|^/var/tmp(/|$)|^/var/mail(/|$)' | head -50 || true)
             if [ -n "$dir_output" ]; then
                 raw_files_output="${raw_files_output}${dir_output}"$'\n'
             fi
             while IFS= read -r file; do
                 if [ -n "$file" ]; then
+                    # 특정 예외 디렉터리 (/tmp, /var/tmp, /var/mail 등)는 카운트 전에 제외
+                    if [[ "$file" =~ ^/tmp ]] || [[ "$file" =~ ^/var/tmp ]] || [[ "$file" =~ ^/var/mail ]]; then
+                        continue
+                    fi
+                    # 중복 스캔( / 와 하위 디렉터리 중복) 제거 (bash 3.2 호환 문자열 멤버십)
+                    case "$u25_seen_files" in
+                        *" $file "*) continue ;;
+                    esac
+                    u25_seen_files="${u25_seen_files}${file} "
                     ((ww_count++)) || true
                     local perms=$(perl -e 'if (-f $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$file" 2>/dev/null)
                     local owner=$(perl -e 'if (-f $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; $gid = (stat($ARGV[0]))[5]; $user = getpwuid($uid); $group = getgrgid($gid); print "$user:$group\n"; }' "$file" 2>/dev/null)
@@ -82,10 +95,7 @@ diagnose() {
                         filetype="dir"
                     fi
 
-                    # 특정 예외 디렉터리 (/tmp, /var/tmp, /var/mail 등)는 제외
-                    if [[ ! "$file" =~ ^/tmp ]] && [[ ! "$file" =~ ^/var/tmp ]] && [[ ! "$file" =~ ^/var/mail ]]; then
-                        ww_files="${ww_files}${file} (${filetype}, 권한: ${perms}, 소유자: ${owner}), "
-                    fi
+                    ww_files="${ww_files}${file} (${filetype}, 권한: ${perms}, 소유자: ${owner}), "
                 fi
             done <<< "$dir_output" || true
         fi
@@ -98,20 +108,31 @@ diagnose() {
 
     for dir in $sys_dirs; do
         if [ -d "$dir" ]; then
-            local dir_output=$(find "$dir" -perm -2 -type d 2>/dev/null | head -20 || true)
+            # sticky bit 디렉터리는 find 단계에서 제외하여 head 절단으로 인한 누락 방지
+            local dir_output=$(find "$dir" -perm -2 -type d ! -perm -1000 2>/dev/null | grep -Ev '^/tmp$|^/var/tmp$|^/var/mail$' | head -30 || true)
             if [ -n "$dir_output" ]; then
                 raw_dirs_output="${raw_dirs_output}${dir_output}"$'\n'
             fi
             while IFS= read -r dirpath; do
                 if [ -n "$dirpath" ]; then
+                    # 예외 디렉터리는 카운트 전에 제외 (Solaris: /dev/shm 없음)
+                    if [[ "$dirpath" =~ ^/tmp$ ]] || [[ "$dirpath" =~ ^/var/tmp$ ]] || [[ "$dirpath" =~ ^/var/mail$ ]]; then
+                        continue
+                    fi
+                    # sticky bit가 설정된 world-writable 디렉터리는 표준 권한 패턴이므로 예외 처리
+                    if [ -k "$dirpath" ]; then
+                        continue
+                    fi
+                    # 중복 스캔( / 와 하위 디렉터리 중복) 제거 (bash 3.2 호환 문자열 멤버십)
+                    case "$u25_seen_dirs" in
+                        *" $dirpath "*) continue ;;
+                    esac
+                    u25_seen_dirs="${u25_seen_dirs}${dirpath} "
                     ((ww_dir_count++)) || true
                     local perms=$(perl -e 'if (-d $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$dirpath" 2>/dev/null)
                     local owner=$(perl -e 'if (-d $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; $gid = (stat($ARGV[0]))[5]; $user = getpwuid($uid); $group = getgrgid($gid); print "$user:$group\n"; }' "$dirpath" 2>/dev/null)
 
-                    # 예외 디렉터리 제외 (Solaris: /dev/shm 없음)
-                    if [[ ! "$dirpath" =~ ^/tmp$ ]] && [[ ! "$dirpath" =~ ^/var/tmp$ ]] && [[ ! "$dirpath" =~ ^/var/mail$ ]]; then
-                        ww_dirs="${ww_dirs}${dirpath} (권한: ${perms}, 소유자: ${owner}), "
-                    fi
+                    ww_dirs="${ww_dirs}${dirpath} (권한: ${perms}, 소유자: ${owner}), "
                 fi
             done <<< "$dir_output" || true
         fi
@@ -123,7 +144,7 @@ diagnose() {
         status="양호"
         inspection_summary="world-writable 파일 및 디렉터리 없음 (예외: /tmp, /var/tmp 등 제외)"
         command_result="[Command: find world-writable files]${newline}${raw_files_output}${newline}${newline}[Command: find world-writable directories]${newline}${raw_dirs_output}"
-        command_executed="find / /home /tmp /var /usr /opt /etc -perm -2 -type f 2>/dev/null; find / /home /tmp /var /usr /opt /etc -perm -2 -type d 2>/dev/null"
+        command_executed="find / /home /export/home /tmp /var /usr /opt /etc -perm -2 -type f 2>/dev/null; find / /home /export/home /tmp /var /usr /opt /etc -perm -2 -type d ! -perm -1000 2>/dev/null"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
@@ -139,7 +160,7 @@ diagnose() {
 
         inspection_summary="취약: ${details}"
         command_result="[Command: find world-writable files]${newline}${raw_files_output}${newline}${newline}[Command: find world-writable directories]${newline}${raw_dirs_output}"
-        command_executed="find / /home /tmp /var /usr /opt /etc -perm -2 -type f 2>/dev/null; find / /home /tmp /var /usr /opt /etc -perm -2 -type d 2>/dev/null"
+        command_executed="find / /home /export/home /tmp /var /usr /opt /etc -perm -2 -type f 2>/dev/null; find / /home /export/home /tmp /var /usr /opt /etc -perm -2 -type d ! -perm -1000 2>/dev/null"
     fi
 
     # echo ""

@@ -59,63 +59,58 @@ diagnose() {
     # 진단 로직 구현
     # /etc/(x)inetd.conf 파일 소유자 및 권한 설정 확인 (RedHat: xinetd 사용)
 
-    local target_file=""
-    local is_secure=false
+    local target_files=""
+    local is_secure=true
     local details=""
 
-    # RedHat: xinetd.conf 우선 확인 (RedHat 표준)
-    if [ -f "/etc/xinetd.conf" ]; then
-        target_file="/etc/xinetd.conf"
-    elif [ -f "/etc/inetd.conf" ]; then
-        target_file="/etc/inetd.conf"
-    fi
+    # 존재하는 설정 파일 전부 수집 (xinetd.conf + inetd.conf + xinetd.d/*)
+    [ -f "/etc/xinetd.conf" ] && target_files="/etc/xinetd.conf"
+    [ -f "/etc/inetd.conf" ] && target_files="${target_files} /etc/inetd.conf"
+    for xf in /etc/xinetd.d/*; do
+        [ -f "$xf" ] && target_files="${target_files} ${xf}"
+    done
 
     # Capture command outputs
     local ls_output=$(ls -l /etc/inetd.conf /etc/xinetd.conf 2>&1)
     local stat_output=""
 
     # 파일 존재 확인
-    if [ -z "$target_file" ] || [ ! -f "$target_file" ]; then
+    if [ -z "${target_files// /}" ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="xinetd 설정 파일 없음 (서비스 미사용)"
         command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}"
         command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf 2>&1"
     else
-        # RedHat: stat -c 사용 가능
-        if [ -x "$(command -v stat)" ]; then
-            stat_output=$(stat -c "%a:%U:%G" "$target_file" 2>/dev/null)
-        else
-            stat_output=$(ls -l "$target_file" 2>/dev/null | awk '{print $1":"$3":"$4}')
-        fi
+        local target_file=""
+        for target_file in $target_files; do
+            # 파일 권한 확인 (stat 실패 시 UNKNOWN → 검증 불가로 취약 처리, fail-safe)
+            local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null || echo "UNKNOWN")
+            local file_owner=$(stat -c "%U" "$target_file" 2>/dev/null || echo "unknown")
+            local file_group=$(stat -c "%G" "$target_file" 2>/dev/null || echo "unknown")
+            stat_output="${stat_output}${target_file}: ${file_perms}:${file_owner}:${file_group}${newline}"
 
-        # 파일 권한 확인 (RedHat: stat -c 사용)
-        local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null || echo "0000")
-        local file_owner=$(stat -c "%U" "$target_file" 2>/dev/null || echo "unknown")
-        local file_group=$(stat -c "%G" "$target_file" 2>/dev/null || echo "unknown")
-
-        # 소유자 및 권한 확인 (권한이 600 이하이면 양호)
-        if [ "$file_owner" = "root" ] && [ "$file_perms" -le 600 ] 2>/dev/null; then
-            is_secure=true
-            details="파일: $target_file, 권한: $file_perms, 소유자: ${file_owner}:${file_group}"
-        else
-            details="파일: $target_file, 권한: $file_perms, 소유자: ${file_owner}:${file_group}"
-        fi
+            # 소유자 및 권한 확인 (600 초과 비트 없으면 양호: 600보다 강한 400 등은 양호, 추가 비트는 취약)
+            if [ "$file_owner" = "root" ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#600 & 07777 ))" -eq 0 ]; then
+                details="${details}[양호] ${target_file} (권한: ${file_perms}, 소유자: ${file_owner}:${file_group}) "
+            else
+                is_secure=false
+                details="${details}[취약] ${target_file} (권한: ${file_perms}, 소유자: ${file_owner}:${file_group}) "
+            fi
+        done
 
         # 최종 판정
         if [ "$is_secure" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="(x)inetd.conf 보안 설정 적절 ($details)"
-            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a:%U:%G' $target_file]${newline}${stat_output}"
-            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; stat -c '%a:%U:%G' $target_file"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="(x)inetd.conf 보안 설정 부적절 ($details)"
-            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a:%U:%G' $target_file]${newline}${stat_output}"
-            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; stat -c '%a:%U:%G' $target_file"
         fi
+        command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a:%U:%G' <files>]${newline}${stat_output}"
+        command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; stat -c '%a:%U:%G' /etc/xinetd.conf /etc/inetd.conf /etc/xinetd.d/*"
     fi
 
     # 결과 생성 (PC 패턴: 스크립트에서 모드 확인 후 처리)

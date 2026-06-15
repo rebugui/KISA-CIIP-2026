@@ -11,7 +11,7 @@
 # @Platform    : HP-UX
 # @Severity    : 상
 # @Title       : 계정 잠금 임계값 설정
-# @Description : pam_faillock.so 또는 faillock 설정 확인
+# @Description : /etc/default/security AUTH_MAXTRIES 및 Trusted Mode u_maxtries 설정 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -60,101 +60,71 @@ diagnose() {
     command_executed=""
 
     # 진단 로직 구현
-    # HP-UX: /etc/pam.d/passwd에서 계정 잠금 설정 확인
+    # HP-UX: /etc/default/security의 AUTH_MAXTRIES 확인
+    # Trusted Mode(/tcb 존재) 시 /tcb/files/auth/system/default의 u_maxtries 확인
 
-    local is_secure=false
-    local config_details=""
     local newline=$'\n'
-    local matched_pam_file=""
-    local raw_pam_output=""
+    local security_file="/etc/default/security"
+    local tcb_default="/tcb/files/auth/system/default"
+    local auth_maxtries=""
+    local u_maxtries=""
     local raw_security_output=""
+    local raw_tcb_output=""
+    local trusted_mode=false
+    local tcb_readable=false
 
-    # HP-UX PAM 설정 확인
-    local pam_auth_files=(
-        "/etc/pam.d/passwd"
-        "/etc/pam.d/system-auth"
-        "/etc/pam.d/login"
-    )
+    command_executed="grep '^AUTH_MAXTRIES' ${security_file}"
 
-    for pam_file in "${pam_auth_files[@]}"; do
-        if [ -f "$pam_file" ]; then
-            # HP-UX: pam_tally.so 또는 pam_unix.so with max_retries 확인
-            if grep -E "pam_tally.so|max_retries" "$pam_file" 2>/dev/null | grep -v "^#" > /dev/null; then
-                matched_pam_file="$pam_file"
-                raw_pam_output=$(grep -E "pam_tally.so|max_retries" "$pam_file" 2>/dev/null | grep -v "^#" || echo "")
-
-                if echo "$raw_pam_output" | grep -q "pam_tally.so"; then
-                    local deny=$(echo "$raw_pam_output" | grep "pam_tally.so" | grep -oE 'deny=[0-9]+' | cut -d= -f2 | head -1)
-                    local unlock_time=$(echo "$raw_pam_output" | grep "pam_tally.so" | grep -oE 'unlock_time=[0-9]+' | cut -d= -f2 | head -1)
-
-                    if [ -n "$deny" ] && [ "$deny" -le 10 ]; then
-                        is_secure=true
-                        config_details="pam_tally.so deny=${deny}"
-                    else
-                        config_details="pam_tally.so deny=${deny:-N/A}"
-                    fi
-                elif echo "$raw_pam_output" | grep -q "max_retries"; then
-                    local max_retries=$(echo "$raw_pam_output" | grep "max_retries" | grep -oE 'max_retries=[0-9]+' | cut -d= -f2 | head -1)
-
-                    if [ -n "$max_retries" ] && [ "$max_retries" -le 10 ]; then
-                        is_secure=true
-                        config_details="max_retries=${max_retries}"
-                    else
-                        config_details="max_retries=${max_retries:-N/A}"
-                    fi
-                fi
-                break
-            fi
-        fi
-    done || true
-
-    # HP-UX: /etc/default/security에서 PASSWORD_RETRIES 확인
-    if [ -f "/etc/default/security" ]; then
-        raw_security_output=$(grep "^PASSWORD_RETRIES" /etc/default/security 2>/dev/null || echo "")
-        local password_retries=$(echo "$raw_security_output" | grep -oE '[0-9]+' | head -1)
-
-        if [ -n "$password_retries" ]; then
-            if [ "$password_retries" -le 10 ]; then
-                is_secure=true
-                config_details="${config_details:+${config_details}, }PASSWORD_RETRIES=${password_retries}"
-            else
-                config_details="${config_details:+${config_details}, }PASSWORD_RETRIES=${password_retries} (초과)"
-            fi
-        fi
-    fi
-
-    # --- 명령어 실행 및 원본 출력 캡처 ---
-    if [ -n "$matched_pam_file" ]; then
-        command_result="[FILE: ${matched_pam_file}]${newline}${raw_pam_output}${newline}"
-        command_executed="grep -E 'pam_tally.so|max_retries' '${matched_pam_file}'"
+    # 1) 표준 모드: /etc/default/security의 AUTH_MAXTRIES 확인 (주석 제외)
+    if [ -r "$security_file" ]; then
+        raw_security_output=$(grep -E '^[[:space:]]*AUTH_MAXTRIES[[:space:]]*=' "$security_file" 2>/dev/null | tail -1 || true)
+        # POSIX sed 추출 (HP-UX 기본 grep은 -o 미지원)
+        auth_maxtries=$(echo "$raw_security_output" | sed -n 's/.*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1 || true)
+        command_result="[FILE: ${security_file}]${newline}${raw_security_output:-AUTH_MAXTRIES 설정 없음}${newline}"
     else
-        local temp_output=""
-        for pam_file in "${pam_auth_files[@]}"; do
-            if [ -f "$pam_file" ]; then
-                local grep_result=$(grep -E "pam_tally.so|max_retries" "$pam_file" 2>/dev/null || echo "")
-                if [ -n "$grep_result" ]; then
-                    temp_output="${temp_output}[${pam_file}]${newline}${grep_result}${newline}"
-                fi
-            fi
-        done
-        command_result="${temp_output:-[No pam_tally.so or max_retries found in PAM configuration files]}${newline}"
-        command_executed="grep -E 'pam_tally.so|max_retries' /etc/pam.d/{passwd,system-auth,login}"
+        command_result="[FILE: ${security_file}] 파일 없음 또는 읽기 불가${newline}"
     fi
 
-    if [ -n "$raw_security_output" ]; then
-        command_result="${command_result}[FILE: /etc/default/security]${newline}${raw_security_output}${newline}"
-        command_executed="${command_executed}; grep '^PASSWORD_RETRIES' /etc/default/security"
+    # 2) Trusted Mode 확인 (/tcb 존재 시 u_maxtries가 잠금 임계값을 결정)
+    if [ -d "/tcb" ]; then
+        trusted_mode=true
+        command_executed="${command_executed}; grep 'u_maxtries' ${tcb_default}"
+        if [ -r "$tcb_default" ]; then
+            tcb_readable=true
+            raw_tcb_output=$(grep 'u_maxtries#' "$tcb_default" 2>/dev/null | head -1 || true)
+            # POSIX sed 추출 (HP-UX 기본 grep은 -o 미지원)
+            u_maxtries=$(echo "$raw_tcb_output" | sed -n 's/.*u_maxtries#\([0-9][0-9]*\).*/\1/p' | head -1 || true)
+            command_result="${command_result}[FILE: ${tcb_default}]${newline}${raw_tcb_output:-u_maxtries 설정 없음}${newline}"
+        else
+            command_result="${command_result}[FILE: ${tcb_default}] 읽기 불가 (Trusted Mode)${newline}"
+        fi
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    # - Trusted Mode인데 /tcb 기본 DB를 읽지 못하면 수동진단
+    # - u_maxtries 또는 AUTH_MAXTRIES가 1~10이면 양호, 0/미설정/10 초과는 취약
+    if [ "$trusted_mode" = true ] && [ "$tcb_readable" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Trusted Mode 시스템이나 ${tcb_default} 파일을 읽을 수 없어 u_maxtries 값을 확인하지 못함. 수동 점검 필요 (AUTH_MAXTRIES=${auth_maxtries:-미설정})"
+    elif [ "$trusted_mode" = true ] && [ -n "$u_maxtries" ]; then
+        if [ "$u_maxtries" -ge 1 ] && [ "$u_maxtries" -le 10 ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="계정 잠금 임계값 적절히 설정됨 (Trusted Mode u_maxtries#${u_maxtries})"
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="계정 잠금 임계값 부적절 (Trusted Mode u_maxtries#${u_maxtries}, 0은 잠금 미적용)"
+        fi
+    elif [ -n "$auth_maxtries" ] && [ "$auth_maxtries" -ge 1 ] && [ "$auth_maxtries" -le 10 ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="계정 잠금 임계값 적절히 설정됨 (${config_details})"
+        inspection_summary="계정 잠금 임계값 적절히 설정됨 (AUTH_MAXTRIES=${auth_maxtries})"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="계정 잠금 임계값 미설치 또는 부적절 (${config_details:-모듈 설정 없음})"
+        inspection_summary="계정 잠금 임계값 미설정 또는 부적절 (AUTH_MAXTRIES=${auth_maxtries:-미설정}, 0/미설정은 잠금 미적용)"
     fi
 
     echo "" >&2

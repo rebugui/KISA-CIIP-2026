@@ -41,14 +41,8 @@ GUIDELINE_REMEDIATION="주요 설정 파일 및 디렉터리의 권한 설정 �
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    # FR-022: Check required tools
-    if ! check_postgresql_tools; then
-        handle_missing_tools "postgresql" "${ITEM_ID}" "${ITEM_NAME}" \
-            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        return 0
-    fi
-
+    # D-14는 OS 파일 권한 항목이므로 psql 도구나 DB 연결이 필요하지 않음.
+    # stat 만으로 설정 파일 권한을 점검함.
 
     local diagnosis_result="GOOD"
     local status="양호"
@@ -56,49 +50,90 @@ diagnose() {
     local command_result=""
     local command_executed=""
 
-    # Initialize PostgreSQL connection variables
-    init_postgresql_vars
+    # D-14는 DBMS grant 항목이 아니라 OS 파일 접근 권한 항목임.
+    # PostgreSQL 주요 설정 파일(postgresql.conf, pg_hba.conf, pg_ident.conf)의
+    # 권한이 640 이하이고 소유자가 postgres 또는 root 인지 stat 으로 점검.
+    # 기준(docs/09_DBMS.md): 설정 파일은 일반 사용자의 수정 권한이 없어야 함(600/640).
 
-    # PostgreSQL 서비스 확인
-    if ! check_postgresql_service; then
-        handle_dbms_not_running "postgresql" "${ITEM_ID}" "${ITEM_NAME}" \
-            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        return 0
-    fi
-
-    # PostgreSQL 연결 시도 (FR-018)
-    if ! prompt_postgresql_connection; then
-        handle_dbms_connection_failed "postgresql" "${ITEM_ID}" "${ITEM_NAME}" \
-            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        return 0
-    fi
-
-    # ALTER 권한 확인 (information_schema.table_privileges)
-    local alter_query="SELECT grantee, table_schema, table_name FROM information_schema.role_table_grants WHERE privilege_type='ALTER' AND grantee NOT IN ('postgres', 'pg_signal_backend') LIMIT 20;"
-    command_executed="psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_ADMIN_USER} -d postgres -c \"${alter_query}\""
-    command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -c "${alter_query}" 2>/dev/null || echo "")
-
-    # 결과 분석
-    if [ -n "$command_result" ]; then
-        local alter_count=$(echo "$command_result" | grep -v "^$" | grep -v "^--" | grep -v "^grantee" | wc -l)
-
-        if [ "$alter_count" -gt 0 ]; then
-            local alter_users=$(echo "$command_result" | grep -v "^$" | grep -v "^--" | grep -v "^grantee" || echo "")
-
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="ALTER 권한을 가진 ${alter_count}개 그랜트 발견: $(echo "$alter_users" | head -3 | tr '\n' ', ')"
-        else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="ALTER 권한을 가진 계정 없음"
+    # 데이터 디렉터리 후보 탐색
+    local data_dir=""
+    local candidate
+    for candidate in \
+        "${PGDATA:-}" \
+        "/var/lib/postgresql/data" \
+        /var/lib/postgresql/*/main \
+        /var/lib/pgsql/data \
+        /var/lib/pgsql/*/data \
+        /usr/local/pgsql/data; do
+        [ -n "${candidate}" ] || continue
+        if [ -f "${candidate}/postgresql.conf" ]; then
+            data_dir="${candidate}"
+            break
         fi
+    done
+
+    command_executed="stat -c '%a %U:%G %n' <postgresql.conf|pg_hba.conf|pg_ident.conf>"
+
+    local config_files=()
+    if [ -n "${data_dir}" ]; then
+        for candidate in "postgresql.conf" "pg_hba.conf" "pg_ident.conf"; do
+            [ -f "${data_dir}/${candidate}" ] && config_files+=("${data_dir}/${candidate}")
+        done
+    fi
+
+    if [ "${#config_files[@]}" -eq 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="PostgreSQL 설정 파일을 자동으로 찾지 못했습니다. postgresql.conf/pg_hba.conf/pg_ident.conf 권한을 수동으로 점검하세요(자동 점검 불가)."
+        command_result="data_dir not found"
+        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
+
+    local bad_files=""
+    local checked=""
+    local target
+    local file_stat
+    local mode
+    local owner
+    local group_digit
+    local other_digit
+    for target in "${config_files[@]}"; do
+        file_stat="$(stat -c '%a %U:%G %n' "${target}" 2>/dev/null || true)"
+        [ -n "${file_stat}" ] || continue
+        checked+="${file_stat}"$'\n'
+        mode="${file_stat%% *}"
+        owner="$(stat -c '%U' "${target}" 2>/dev/null || echo "")"
+        # 소유자가 postgres/root 가 아니면 취약
+        if [ "${owner}" != "postgres" ] && [ "${owner}" != "root" ]; then
+            bad_files+="${file_stat} (소유자 비정상: ${owner})"$'\n'
+            continue
+        fi
+        # 3자리 8진 권한에서 group/other 자릿수 검사
+        # 640 초과(그룹 write 또는 other 임의 권한)면 취약
+        group_digit="${mode: -2:1}"
+        other_digit="${mode: -1}"
+        # group: 4(r),0 허용 / 6,7,2,3(w 포함) 취약
+        case "${group_digit}" in
+            *[2367]) bad_files+="${file_stat} (그룹 쓰기 권한)"$'\n' ; continue ;;
+        esac
+        # other: 0 이외(r/w/x 모두)면 취약 (640 기준 other=0)
+        if [ "${other_digit}" != "0" ]; then
+            bad_files+="${file_stat} (other 권한 존재)"$'\n'
+        fi
+    done
+
+    command_result="${checked}"
+
+    if [ -n "${bad_files}" ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="과도한 권한(640 초과 또는 비인가 소유자)이 설정된 PostgreSQL 설정 파일 발견:"$'\n'"${bad_files}"
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="ALTER 권한 설정 양호"
+        inspection_summary="PostgreSQL 주요 설정 파일 권한 양호(640 이하, 소유자 postgres/root):"$'\n'"${checked}"
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

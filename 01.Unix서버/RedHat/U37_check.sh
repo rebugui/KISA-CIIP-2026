@@ -35,12 +35,39 @@ GUIDELINE_CRITERIA_GOOD="crontab 및 at 명령어에 일반 사용자 실행 권
 GUIDELINE_CRITERIA_BAD="crontab 및 at 명령어에 일반 사용자 실행 권한이 부여되어 있으며,cron 및 at 관련 파일 권한이 640 이상인 경우"
 GUIDELINE_REMEDIATION="crontab 및 at 명령어 파일 권한 750 이하,cron 및 at 관련 파일 소유자 및 파일 권한 640 이하 설정"
 
+# 권한에 640(rw-r-----) 초과 비트가 있는지 비트 단위 검사 (10진 비교 아님)
+perm_exceeds_640() {
+    local p="$1"
+    while [ "${#p}" -lt 3 ]; do p="0${p}"; done
+    p="${p: -3}"
+    local o="${p:0:1}" g="${p:1:1}" t="${p:2:1}"
+    case "$o" in 1|3|5|7) return 0 ;; esac
+    case "$g" in 1|2|3|5|6|7) return 0 ;; esac
+    if [ "$t" != "0" ]; then
+        return 0
+    fi
+    return 1
+}
+
+# 권한에 750(rwxr-x---) 초과 비트가 있는지 비트 단위 검사 (crontab/at 명령어용)
+perm_exceeds_750() {
+    local p="$1"
+    while [ "${#p}" -lt 3 ]; do p="0${p}"; done
+    p="${p: -3}"
+    local g="${p:1:1}" t="${p:2:1}"
+    case "$g" in 2|3|6|7) return 0 ;; esac
+    if [ "$t" != "0" ]; then
+        return 0
+    fi
+    return 1
+}
+
 diagnose() {
     local status="양호"
     diagnosis_result="GOOD"
     local inspection_summary=""
     local command_result=""
-    local command_executed="ls -l /etc/crontab /etc/cron.allow /etc/cron.deny /etc/at.allow /etc/at.deny 2>/dev/null; stat -c '%a %U' /usr/bin/crontab /usr/bin/at 2>/dev/null"
+    local command_executed="ls -l /etc/crontab /etc/cron.allow /etc/cron.deny /etc/at.allow /etc/at.deny 2>/dev/null; stat -c '%a %U' /usr/bin/crontab /usr/bin/at 2>/dev/null; find /etc/cron.d /var/spool/cron -type f -exec stat -c '%n %a %U' {} \\; 2>/dev/null"
 
     local issues=""
     local evidence=""
@@ -59,7 +86,7 @@ diagnose() {
             status="취약"
             diagnosis_result="VULNERABLE"
         fi
-        if [ "$perm" -gt 640 ] 2>/dev/null; then
+        if perm_exceeds_640 "$perm"; then
             issues="${issues}/etc/crontab 권한 ${perm} (640 이하 권장). "
             status="취약"
             diagnosis_result="VULNERABLE"
@@ -80,7 +107,7 @@ diagnose() {
                 status="취약"
                 diagnosis_result="VULNERABLE"
             fi
-            if [ "$perm" -gt 640 ] 2>/dev/null; then
+            if perm_exceeds_640 "$perm"; then
                 issues="${issues}${cron_ctrl} 권한 ${perm} (640 이하 권장). "
                 status="취약"
                 diagnosis_result="VULNERABLE"
@@ -102,7 +129,7 @@ diagnose() {
                 status="취약"
                 diagnosis_result="VULNERABLE"
             fi
-            if [ "$perm" -gt 640 ] 2>/dev/null; then
+            if perm_exceeds_640 "$perm"; then
                 issues="${issues}${at_ctrl} 권한 ${perm} (640 이하 권장). "
                 status="취약"
                 diagnosis_result="VULNERABLE"
@@ -118,7 +145,7 @@ diagnose() {
             local perm=$(stat -c "%a" "$cmd" 2>/dev/null || echo "000")
             evidence="${evidence}${cmd}: ${perm}. "
 
-            if [ "$perm" -gt 750 ] 2>/dev/null; then
+            if perm_exceeds_750 "$perm"; then
                 issues="${issues}${cmd} 권한 ${perm} (750 이하 권장). "
                 status="취약"
                 diagnosis_result="VULNERABLE"
@@ -127,7 +154,31 @@ diagnose() {
     done
 
     # ==========================================================================
-    # 5. 판정
+    # 5. /etc/cron.d 및 /var/spool/cron 내 파일 권한 확인 (640 이하)
+    # ==========================================================================
+    local scan_dir=""
+    for scan_dir in /etc/cron.d /var/spool/cron; do
+        if [ -d "$scan_dir" ]; then
+            local scan_file=""
+            while IFS= read -r scan_file; do
+                if [ ! -f "$scan_file" ]; then
+                    continue
+                fi
+                local perm=$(stat -c "%a" "$scan_file" 2>/dev/null || echo "000")
+                local owner=$(stat -c "%U" "$scan_file" 2>/dev/null || echo "unknown")
+                evidence="${evidence}${scan_file}: ${perm} ${owner}. "
+
+                if perm_exceeds_640 "$perm"; then
+                    issues="${issues}${scan_file} 권한 ${perm} (640 이하 권장). "
+                    status="취약"
+                    diagnosis_result="VULNERABLE"
+                fi
+            done < <(find "$scan_dir" -type f 2>/dev/null | head -200) || true
+        fi
+    done
+
+    # ==========================================================================
+    # 6. 판정
     # ==========================================================================
     if [ "$diagnosis_result" = "GOOD" ]; then
         inspection_summary="crontab 관련 파일의 권한 및 소유자 설정이 적절합니다."

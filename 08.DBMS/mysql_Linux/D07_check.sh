@@ -88,21 +88,10 @@ diagnose() {
         return 0
     fi
 
-    if [ "${mysql_running:-false}" = "false" ]; then
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="MySQL/MariaDB 서비스가 실행 중이지 않습니다. 서비스 시작 후 진단이 필요합니다."
-        command_result="MySQL/MariaDB service not running"
-        command_executed="mysqladmin ping -h ${DB_HOST} -P ${DB_PORT}"
-        # Save results (only if library function exists)
-        if declare -f save_dual_result >/dev/null 2>&1; then
-            save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        fi
-        if declare -f verify_result_saved >/dev/null 2>&1; then
-            verify_result_saved "${ITEM_ID}"
-        fi
-        return 0
-    fi
+    # (제거됨) 이전에 존재하던 `${mysql_running:-false}` 가드는 mysql_running 변수가
+    # 코드 어디에서도 할당되지 않아 항상 참이 되어, 아래 프로세스 소유자 점검을 영구히
+    # 도달 불가로 만들고 항상 MANUAL을 반환하던 결함이었음. 서비스 미실행은 위 line 75의
+    # mysqladmin ping 분기에서 이미 처리되므로 여기서는 곧장 소유자 점검으로 진행한다.
 
     # MySQL 프로세스 실행 계정 확인
     command_executed="ps aux | grep mysql | grep -v grep"

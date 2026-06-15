@@ -65,17 +65,28 @@ diagnose() {
     local sgid_count=0
     local vulnerable_files=""
     local vulnerable_count=0
+    local manual_files=""
+    local manual_count=0
 
-    # AIX 핵심 시스템 디렉토리로 검색 범위 제한
+    # 표준 시스템 SUID/SGID 바이너리 허용 목록 (basename 완전 일치 비교)
+    local suid_allowlist=(
+        ping ping6 traceroute traceroute6 sudo passwd su gpasswd chsh chfn
+        newgrp umount mount pkexec at fusermount Xorg wbem doas chage expire
+        ssh-keysign
+    )
+
+    # AIX 핵심 시스템 디렉토리 + 비시스템 영역(/tmp, /home, /opt, /usr/local 전체) 포함
     local search_dirs=(
         "/usr/bin"
         "/usr/sbin"
         "/bin"
         "/sbin"
         "/usr/ccs/bin"
-        "/usr/local/bin"
-        "/usr/local/sbin"
+        "/usr/local"
         "/usr/lib"
+        "/tmp"
+        "/home"
+        "/opt"
     )
 
     # 검색 경로 구성
@@ -97,24 +108,34 @@ diagnose() {
             local perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$file" 2>/dev/null)
             local owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid)' "$file" 2>/dev/null)
 
-            # 예상되는 SUID 파일 목록 (시스템 바이너리)
-            local expected_suid_patterns="^(ping|ping6|traceroute|traceroute6|sudo|passwd|su|gpasswd|chsh|chfn|newgrp|umount|mount|pkexec|at|fusermount|Xorg|wbem|doas|chage|expire|ssh-keysign)"
-
             # 파일명만 추출
             local filename=$(basename "$file")
 
-            # 예상되는 시스템 바이너리가 아닌 경우 취약
-            if ! [[ "$filename" =~ $expected_suid_patterns ]]; then
-                # 사용자가 쓰기 가능한 스크립트 등 취약한 파일
+            # 허용 목록 비교 (basename 완전 일치 - 부분 일치 허용 안 함)
+            local allowed=false
+            local allowed_name=""
+            for allowed_name in "${suid_allowlist[@]}"; do
+                if [ "$filename" = "$allowed_name" ]; then
+                    allowed=true
+                    break
+                fi
+            done
+
+            # 허용 목록에 없는 시스템 바이너리인 경우 취약 여부 판단
+            if [ "$allowed" = false ]; then
                 if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]] || [ -w "$file" ]; then
                     ((vulnerable_count++)) || true
                     vulnerable_files="${vulnerable_files}${file} (SUID, 권한: ${perms}, 소유자: ${owner}), "
+                elif [ "${EUID:-$(id -u)}" -ne 0 ]; then
+                    # 비root 실행 시 -w 쓰기 가능 검사를 신뢰할 수 없으므로 수동진단 대상
+                    ((manual_count++)) || true
+                    manual_files="${manual_files}${file} (SUID, 권한: ${perms}, 소유자: ${owner}), "
                 fi
             fi
 
             suid_files="${suid_files}${file} (SUID, ${perms}:${owner}), "
         fi
-    done < <(eval "find $find_paths -perm -4000 -type f 2>/dev/null | head -50") || true
+    done < <(eval "find $find_paths -perm -4000 -type f 2>/dev/null") || true
 
     # SGID 파일 검색
     while IFS= read -r file; do
@@ -123,39 +144,60 @@ diagnose() {
             local perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$file" 2>/dev/null)
             local owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid)' "$file" 2>/dev/null)
 
-            # 예상되는 SGID 디렉터리/파일 (write 가능한 공유 디렉터리 등)
-            if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]] || [ -w "$file" ]; then
-                ((vulnerable_count++)) || true
-                vulnerable_files="${vulnerable_files}${file} (SGID, 권한: ${perms}, 소유자: ${owner}), "
+            # 파일명만 추출 후 허용 목록 비교 (basename 완전 일치 - 부분 일치 허용 안 함)
+            local filename=$(basename "$file")
+            local allowed=false
+            local allowed_name=""
+            for allowed_name in "${suid_allowlist[@]}"; do
+                if [ "$filename" = "$allowed_name" ]; then
+                    allowed=true
+                    break
+                fi
+            done
+
+            # 허용 목록에 없는 시스템 바이너리인 경우 취약 여부 판단
+            if [ "$allowed" = false ]; then
+                if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]] || [ -w "$file" ]; then
+                    ((vulnerable_count++)) || true
+                    vulnerable_files="${vulnerable_files}${file} (SGID, 권한: ${perms}, 소유자: ${owner}), "
+                elif [ "${EUID:-$(id -u)}" -ne 0 ]; then
+                    # 비root 실행 시 -w 쓰기 가능 검사를 신뢰할 수 없으므로 수동진단 대상
+                    ((manual_count++)) || true
+                    manual_files="${manual_files}${file} (SGID, 권한: ${perms}, 소유자: ${owner}), "
+                fi
             fi
 
             sgid_files="${sgid_files}${file} (SGID, ${perms}:${owner}), "
         fi
-    done < <(eval "find $find_paths -perm -2000 -type f 2>/dev/null | head -50") || true
+    done < <(eval "find $find_paths -perm -2000 -type f 2>/dev/null") || true
 
     # 결과 판정
     local suid_find_output=$(eval "find $find_paths -perm -4000 -type f 2>/dev/null" | head -20 || echo "No SUID files found")
     local sgid_find_output=$(eval "find $find_paths -perm -2000 -type f 2>/dev/null" | head -20 || echo "No SGID files found")
 
-    if [ "$vulnerable_count" -eq 0 ]; then
-        if [ "$suid_count" -eq 0 ] && [ "$sgid_count" -eq 0 ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="SUID/SGID 파일 없음 (시스템 보안 양호)"
-            command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}"
-            command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
-        else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="SUID/SGID 파일이 시스템 바이너리로만 구성됨 (SUID: ${suid_count}개, SGID: ${sgid_count}개)"
-            command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}"
-            command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
-        fi
-    else
+    if [ "$vulnerable_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="취약한 SUID/SGID 파일 ${vulnerable_count}개 발견: ${vulnerable_files%, }"
         command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}${newline}${newline}[Summary] Total SUID: ${suid_count}, SGID: ${sgid_count} (vulnerable: ${vulnerable_count})"
+        command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
+    elif [ "$manual_count" -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="비root 권한 실행으로 쓰기 가능 여부를 검증할 수 없는 허용 목록 외 SUID/SGID 파일 ${manual_count}개가 발견되었습니다. 수동 점검이 필요합니다."
+        command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}${newline}${newline}[수동 점검 대상 (${manual_count}개)]${newline}${manual_files%, }"
+        command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
+    elif [ "$suid_count" -eq 0 ] && [ "$sgid_count" -eq 0 ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="SUID/SGID 파일 없음 (시스템 보안 양호)"
+        command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}"
+        command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="SUID/SGID 파일이 시스템 바이너리로만 구성됨 (SUID: ${suid_count}개, SGID: ${sgid_count}개)"
+        command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}"
         command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
     fi
 

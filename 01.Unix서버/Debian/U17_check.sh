@@ -57,31 +57,29 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # /etc/init.d/* 파일 소유자 및 권한 점검
-    # 가이드라인: 소유자 root, 일반 사용자 쓰기 권한 제거
+    # 시스템 시작 스크립트 점검 (가이드 LINUX 절: [init] + [systemd])
+    # [Leg 1] /etc/init.d/* — [Leg 2] /etc/systemd/system/* 유닛 파일 (동일 기준)
+    # 가이드라인: 소유자 root, 일반 사용자(other) 쓰기 권한 제거
 
     local init_dir="/etc/init.d"
+    local systemd_dir="/etc/systemd/system"
     local vulnerable_files=""
     local vulnerable_count=0
     local total_files=0
     local raw_output=""
+    local checked_dirs=""
+    local file_perms file_owner script_name others_perm group_perm unit_file
 
-    # /etc/init.d 디렉토리 존재 확인
-    if [ ! -d "$init_dir" ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="/etc/init.d 디렉토리 없음 (systemd 환경)"
-        command_result="[DIR NOT FOUND: $init_dir]"
-        command_executed="ls -la $init_dir 2>/dev/null"
-    else
-        # init.d 내 모든 스크립트 점검
+    # [Leg 1] /etc/init.d 내 모든 스크립트 점검
+    if [ -d "$init_dir" ]; then
+        checked_dirs="${init_dir} "
         for script_file in "$init_dir"/*; do
             [ -f "$script_file" ] || continue
             ((total_files++)) || true
 
-            local file_perms=$(stat -c "%a" "$script_file" 2>/dev/null)
-            local file_owner=$(stat -c "%U:%G" "$script_file" 2>/dev/null)
-            local script_name=$(basename "$script_file")
+            file_perms=$(stat -c "%a" "$script_file" 2>/dev/null || true)
+            file_owner=$(stat -c "%U:%G" "$script_file" 2>/dev/null || true)
+            script_name=$(basename "$script_file")
 
             raw_output="${raw_output}${script_name}: ${file_owner} ${file_perms}${newline}"
 
@@ -90,37 +88,92 @@ diagnose() {
                 ((vulnerable_count++)) || true
                 vulnerable_files="${vulnerable_files}${script_name} (소유자: ${file_owner}), "
             else
-                # others에 쓰기 권한이 있는지 확인 (마지막 자리에 2,3,6,7)
-                local others_perm=${file_perms: -1}
+                # 일반 사용자(그룹 또는 others) 쓰기 권한 확인
+                # group 자리(끝에서 2번째) 또는 others 자리(마지막)에 쓰기비트(2,3,6,7)가 있으면 취약
+                others_perm=${file_perms: -1}
+                group_perm=${file_perms: -2:1}
                 case "$others_perm" in
                     2|3|6|7)
                         ((vulnerable_count++)) || true
                         vulnerable_files="${vulnerable_files}${script_name} (권한: ${file_perms}, others 쓰기 가능), "
                         ;;
+                    *)
+                        case "$group_perm" in
+                            2|3|6|7)
+                                ((vulnerable_count++)) || true
+                                vulnerable_files="${vulnerable_files}${script_name} (권한: ${file_perms}, group 쓰기 가능), "
+                                ;;
+                        esac
+                        ;;
                 esac
             fi
         done
+    fi
 
-        # 최종 판정
-        if [ "$total_files" -eq 0 ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="/etc/init.d에 스크립트 없음"
-            command_result="${raw_output}"
-            command_executed="ls -la $init_dir"
-        elif [ "$vulnerable_count" -eq 0 ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="모든 시작 스크립트 권한 양호 (${total_files}개 검사)"
-            command_result="${raw_output}"
-            command_executed="stat -c '%a %U:%G' $init_dir/*"
+    # [Leg 2] /etc/systemd/system 유닛 파일 점검 (init.d와 동일한 파일별 기준)
+    if [ -d "$systemd_dir" ]; then
+        checked_dirs="${checked_dirs}${systemd_dir} "
+        while IFS= read -r unit_file; do
+            [ -z "$unit_file" ] && continue
+            ((total_files++)) || true
+
+            file_perms=$(stat -c "%a" "$unit_file" 2>/dev/null || true)
+            file_owner=$(stat -c "%U:%G" "$unit_file" 2>/dev/null || true)
+            script_name="systemd:${unit_file#${systemd_dir}/}"
+
+            raw_output="${raw_output}${script_name}: ${file_owner} ${file_perms}${newline}"
+
+            # 소유자가 root가 아닌 경우
+            if [ "$file_owner" != "root:root" ]; then
+                ((vulnerable_count++)) || true
+                vulnerable_files="${vulnerable_files}${script_name} (소유자: ${file_owner}), "
+            else
+                # 일반 사용자(그룹 또는 others) 쓰기 권한 확인
+                others_perm=${file_perms: -1}
+                group_perm=${file_perms: -2:1}
+                case "$others_perm" in
+                    2|3|6|7)
+                        ((vulnerable_count++)) || true
+                        vulnerable_files="${vulnerable_files}${script_name} (권한: ${file_perms}, others 쓰기 가능), "
+                        ;;
+                    *)
+                        case "$group_perm" in
+                            2|3|6|7)
+                                ((vulnerable_count++)) || true
+                                vulnerable_files="${vulnerable_files}${script_name} (권한: ${file_perms}, group 쓰기 가능), "
+                                ;;
+                        esac
+                        ;;
+                esac
+            fi
+        done < <(find "$systemd_dir" -type f 2>/dev/null || true)
+    fi
+
+    # 최종 판정
+    if [ "$total_files" -eq 0 ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        if [ -z "$checked_dirs" ]; then
+            inspection_summary="시작 스크립트 디렉토리(${init_dir}, ${systemd_dir}) 없음"
+            raw_output="[DIR NOT FOUND: ${init_dir} ${systemd_dir}]"
         else
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="취약한 시작 스크립트 ${vulnerable_count}개: ${vulnerable_files%, }"
-            command_result="${raw_output}"
-            command_executed="stat -c '%a %U:%G' $init_dir/*"
+            inspection_summary="점검 대상 디렉토리(${checked_dirs% })에 스크립트 파일 없음"
+            raw_output="[NO FILES FOUND in ${checked_dirs% }]"
         fi
+        command_result="${raw_output}"
+        command_executed="ls -la $init_dir; find $systemd_dir -type f"
+    elif [ "$vulnerable_count" -eq 0 ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="모든 시작 스크립트 권한 양호 (${total_files}개 검사: ${checked_dirs% })"
+        command_result="${raw_output}"
+        command_executed="stat -c '%a %U:%G' $init_dir/*; find $systemd_dir -type f -exec stat -c '%a %U:%G %n' {} +"
+    else
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="취약한 시작 스크립트 ${vulnerable_count}개: ${vulnerable_files%, }"
+        command_result="${raw_output}"
+        command_executed="stat -c '%a %U:%G' $init_dir/*; find $systemd_dir -type f -exec stat -c '%a %U:%G %n' {} +"
     fi
 
     # 결과 생성 (PC 패턴: 스크립트에서 모드 확인 후 처리)

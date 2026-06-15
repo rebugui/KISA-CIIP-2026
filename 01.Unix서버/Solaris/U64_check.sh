@@ -58,68 +58,43 @@ diagnose() {
 
     # 진단 로직 구현
     # 주기적 보안 패치 및 벤더 권고 사항 적용 확인
+    # 패치 정책 수립/최신성 여부는 벤더 공지 대비 수동 판단이 필요하므로 항상 수동진단으로 판정
 
     local kernel_version=""
-    local package_updates=0
-    local security_updates=0
-    local last_update_info=""
+    local os_build=""
+    local patch_evidence=""
+    local evidence_source=""
     local details=""
     local raw_output=""
 
-    # 1) 커널 버전 확인
-    kernel_version=$(uname -r 2>/dev/null)
+    # 1) 커널/OS 버전 확인
+    kernel_version=$(uname -r 2>/dev/null || true)
+    os_build=$(uname -v 2>/dev/null || true)
 
-    # 2) 업데이트 가능한 패키지 확인 (Solaris IPS)
+    # 2) 패치/SRU 적용 현황 수집 (존재하는 도구만 사용)
     if command -v pkg >/dev/null 2>&1; then
-        # pkg list로 설치된 패키지 확인
-        local update_list=$(pkg list -u 2>/dev/null | grep -v "^NAME")
-
-        if [ -n "$update_list" ]; then
-            package_updates=$(echo "$update_list" | wc -l)
-
-            # 보안 업데이트만 필터링 (Solaris SRU)
-            security_updates=$(echo "$update_list" | wc -l)
-        fi
-
-        # Capture raw output for pkg
-        raw_output=$(echo "=== Kernel Version ===" && uname -r && echo -e "\n=== Package Updates ===" && pkg list -u 2>/dev/null | head -20)
-
-        # 마지막 업데이트 시간 확인 (pkg history)
-        local last_pkg=$(pkg history 2>/dev/null | head -10)
-        if [ -n "$last_pkg" ]; then
-            last_update_info=$(echo "$last_pkg" | head -1)
-        fi
-
-        details="커널: ${kernel_version}, 업데이트 가능한 패키지: ${package_updates}개"
-        [ "$security_updates" -gt 0 ] && details="${details} (보안: ${security_updates}개)"
-        [ -n "$last_update_info" ] && details="${details}, 마지막 업데이트: ${last_update_info}"
-
-    else
-        # 다른 배포판의 경우 커널 버전만 확인
-        raw_output=$(echo "=== Kernel Version ===" && uname -r)
-        details="커널: ${kernel_version}, 패키지 매니저: 확인 불가"
+        patch_evidence=$(pkg info entire 2>/dev/null | head -10 || true)
+        [ -n "$patch_evidence" ] && evidence_source="pkg info entire (IPS, Solaris 11+)"
+    fi
+    if [ -z "$patch_evidence" ] && command -v showrev >/dev/null 2>&1; then
+        patch_evidence=$(showrev -p 2>/dev/null | tail -20 || true)
+        [ -n "$patch_evidence" ] && evidence_source="showrev -p (Solaris 10)"
+    fi
+    if [ -z "$patch_evidence" ]; then
+        patch_evidence="확인 불가 (pkg/showrev 미존재 또는 결과 없음)"
+        evidence_source="확인 불가"
     fi
 
-    # 3) 판정
-    if [ "$security_updates" -gt 0 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="보안 업데이트 ${security_updates}개 적용 필요: ${details}"
-        command_result="${raw_output}"
-        command_executed="uname -r; pkg list -u 2>/dev/null | head -20"
-    elif [ "$package_updates" -gt 10 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="일반 업데이트 ${package_updates}개 미적용 (시스템 업데이트 권장): ${details}"
-        command_result="${raw_output}"
-        command_executed="uname -r; pkg list -u 2>/dev/null | wc -l"
-    else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="시스템이 최신 상태임: ${details}"
-        command_result="${raw_output}"
-        command_executed="uname -r; pkg list -u 2>/dev/null | wc -l"
-    fi
+    raw_output="=== Kernel Version (uname -r) ===${newline}${kernel_version}${newline}=== OS Build (uname -v) ===${newline}${os_build}${newline}=== Patch/SRU Evidence (${evidence_source}) ===${newline}${patch_evidence}"
+
+    details="커널: ${kernel_version}, OS 빌드: ${os_build}, 패치 증적 출처: ${evidence_source}"
+
+    # 3) 판정 (Solaris): 패치 목록 부재/카탈로그 상태로 최신성 판단 불가 — 항상 수동진단
+    diagnosis_result="MANUAL"
+    status="수동진단"
+    inspection_summary="패치 적용 현황 수동 확인 필요 (최신 보안패치 적용 여부는 벤더 공지 대비 수동 판단). ${details}. IPS 카탈로그/패치 목록 상태만으로는 최신 보안패치 적용 여부를 판단할 수 없음."
+    command_result="${raw_output}"
+    command_executed="uname -r; uname -v; pkg info entire 2>/dev/null | head -10; showrev -p 2>/dev/null | tail -20"
 
     # echo ""
     # echo "진단 결과: ${status}"

@@ -45,6 +45,19 @@ GUIDELINE_REMEDIATION="root 계정을 포함한 사용자 계정의 비밀번호
 # 진단 함수
 # ============================================================================
 
+# /etc/default/passwd 형식(KEY=VALUE)에서 키 값 추출 (마지막 정의 우선, POSIX 파이프라인)
+u02_get_key() {
+    grep "^[[:space:]]*${1}=" "${2}" 2>/dev/null | tail -1 | cut -d= -f2- | cut -d'#' -f1 | tr -d ' \t\r' || true
+}
+
+# 양의 정수(0 포함) 여부 확인
+u02_is_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # 진단 수행
 diagnose() {
 
@@ -54,193 +67,95 @@ diagnose() {
     local command_result=""
     local command_executed=""
 
-    # 진단 로직 구현
-    # 1) PAM 복잡성 설정 확인 (pam_pwquality.so 또는 pam_cracklib.so)
-    # 2) /etc/login.defs의 PASS_MAX_DAYS, PASS_MIN_DAYS 확인
+    # 진단 로직 구현 (KISA 가이드 Solaris 기준: /etc/default/passwd)
+    #  - PASSLENGTH >= 8 (비밀번호 최소 길이)
+    #  - MAXWEEKS 1~12 (주 단위 최대 사용 기간, 90일 ≈ 12주, 0/미설정은 만료 없음으로 취약)
+    #  - MINWEEKS >= 1 (주 단위 최소 사용 기간)
+    #  - HISTORY >= 4 (최근 비밀번호 기억 횟수)
+    #  - 복잡성: MINDIGIT/MINSPECIAL/MINNONALPHA 중 1개 이상 설정 (영문+숫자/특수문자 조합 강제)
 
-    local is_secure=false
-    local config_details=""
-    local found_pam_module=false
-    local complexity_ok=false
-    local age_ok=false
-
-    # Raw command outputs
-    local pam_output=""
-    local login_defs_output=""
+    local passwd_policy_file="/etc/default/passwd"
     local newline=$'\n'
+    local policy_output=""
+    local config_details=""
 
-    # ============================================================================
-    # 1) PAM 복잡성 설정 확인
-    # ============================================================================
-    local pam_files=(
-        "/etc/pam.d/common-password"
-        "/etc/pam.d/system-auth"
-        "/etc/pam.d/passwd"
-    )
+    if [ -f "$passwd_policy_file" ] && [ -r "$passwd_policy_file" ]; then
+        # Raw output 저장
+        policy_output=$(grep -E "^[[:space:]]*(PASSLENGTH|MAXWEEKS|MINWEEKS|HISTORY|MINDIGIT|MINSPECIAL|MINNONALPHA)=" "$passwd_policy_file" 2>/dev/null || echo "관련 정책 키 미설정")
 
-    local active_pam_file=""
-    local pam_module=""
+        local passlength=""
+        local max_weeks=""
+        local min_weeks=""
+        local history_count=""
+        local min_digit=""
+        local min_special=""
+        local min_nonalpha=""
+        passlength=$(u02_get_key "PASSLENGTH" "$passwd_policy_file")
+        max_weeks=$(u02_get_key "MAXWEEKS" "$passwd_policy_file")
+        min_weeks=$(u02_get_key "MINWEEKS" "$passwd_policy_file")
+        history_count=$(u02_get_key "HISTORY" "$passwd_policy_file")
+        min_digit=$(u02_get_key "MINDIGIT" "$passwd_policy_file")
+        min_special=$(u02_get_key "MINSPECIAL" "$passwd_policy_file")
+        min_nonalpha=$(u02_get_key "MINNONALPHA" "$passwd_policy_file")
 
-    for pam_file in "${pam_files[@]}"; do
-        if [ -f "$pam_file" ]; then
-            # pam_pwquality.so 또는 pam_cracklib.so 확인
-            if grep -q "pam_pwquality.so" "$pam_file"; then
-                pam_module="pam_pwquality.so"
-                found_pam_module=true
-                active_pam_file="$pam_file"
-                break
-            elif grep -q "pam_cracklib.so" "$pam_file"; then
-                pam_module="pam_cracklib.so"
-                found_pam_module=true
-                active_pam_file="$pam_file"
-                break
-            fi
-        fi
-    done || true
+        config_details="PASSLENGTH=${passlength:-미설정}, MAXWEEKS=${max_weeks:-미설정}(주), MINWEEKS=${min_weeks:-미설정}(주), HISTORY=${history_count:-미설정}, MINDIGIT=${min_digit:-미설정}, MINSPECIAL=${min_special:-미설정}, MINNONALPHA=${min_nonalpha:-미설정}"
 
-    if [ "$found_pam_module" = true ]; then
-        # PAM 설정의 raw output 저장
-        pam_output=$(grep -E "^[\s]*password.*${pam_module}" "$active_pam_file" 2>/dev/null || echo "")
+        local passlength_ok=false
+        local maxweeks_ok=false
+        local minweeks_ok=false
+        local history_ok=false
+        local complexity_ok=false
 
-        # 각 설정값 추출
-        local minlen=$(echo "$pam_output" | grep -oP 'minlen=\K[0-9]+' | head -1)
-        local ucredit=$(echo "$pam_output" | grep -oP 'ucredit=\K-?[0-9]+' | head -1)
-        local lcredit=$(echo "$pam_output" | grep -oP 'lcredit=\K-?[0-9]+' | head -1)
-        local dcredit=$(echo "$pam_output" | grep -oP 'dcredit=\K-?[0-9]+' | head -1)
-        local ocredit=$(echo "$pam_output" | grep -oP 'ocredit=\K-?[0-9]+' | head -1)
-
-        config_details="[PAM 복잡성] ${pam_module}: "
-        config_details="${config_details}minlen=${minlen:-미설정}, "
-        config_details="${config_details}ucredit=${ucredit:-미설정}, "
-        config_details="${config_details}lcredit=${lcredit:-미설정}, "
-        config_details="${config_details}dcredit=${dcredit:-미설정}, "
-        config_details="${config_details}ocredit=${ocredit:-미설정}"
-
-        # 판정: 모든 설정이 적절한지 확인
-        # minlen >= 8, ucredit <= -1, lcredit <= -1, dcredit <= -1, ocredit <= -1
-        local minlen_ok=false
-        local ucredit_ok=false
-        local lcredit_ok=false
-        local dcredit_ok=false
-        local ocredit_ok=false
-
-        if [ -n "$minlen" ] && [ "$minlen" -ge 8 ]; then
-            minlen_ok=true
+        # PASSLENGTH >= 8
+        if u02_is_number "$passlength" && [ "$passlength" -ge 8 ]; then
+            passlength_ok=true
         fi
 
-        if [ -n "$ucredit" ] && [ "$ucredit" -le -1 ]; then
-            ucredit_ok=true
+        # MAXWEEKS 1~12 (0 또는 미설정은 만료 없음 → 취약)
+        if u02_is_number "$max_weeks" && [ "$max_weeks" -ge 1 ] && [ "$max_weeks" -le 12 ]; then
+            maxweeks_ok=true
         fi
 
-        if [ -n "$lcredit" ] && [ "$lcredit" -le -1 ]; then
-            lcredit_ok=true
+        # MINWEEKS >= 1
+        if u02_is_number "$min_weeks" && [ "$min_weeks" -ge 1 ]; then
+            minweeks_ok=true
         fi
 
-        if [ -n "$dcredit" ] && [ "$dcredit" -le -1 ]; then
-            dcredit_ok=true
+        # HISTORY >= 4
+        if u02_is_number "$history_count" && [ "$history_count" -ge 4 ]; then
+            history_ok=true
         fi
 
-        if [ -n "$ocredit" ] && [ "$ocredit" -le -1 ]; then
-            ocredit_ok=true
-        fi
-
-        # 모든 조건 충족 시 양호
-        if [ "$minlen_ok" = true ] && [ "$ucredit_ok" = true ] && \
-           [ "$lcredit_ok" = true ] && [ "$dcredit_ok" = true ] && \
-           [ "$ocredit_ok" = true ]; then
+        # 복잡성: MINDIGIT/MINSPECIAL/MINNONALPHA 중 1개 이상 >= 1
+        if { u02_is_number "$min_digit" && [ "$min_digit" -ge 1 ]; } || \
+           { u02_is_number "$min_special" && [ "$min_special" -ge 1 ]; } || \
+           { u02_is_number "$min_nonalpha" && [ "$min_nonalpha" -ge 1 ]; }; then
             complexity_ok=true
         fi
-    else
-        config_details="[PAM 복잡성] 모듈 미설치 (pam_pwquality.so 또는 pam_cracklib.so 없음)"
-        # 원본 grep 출력 저장 (검사한 모든 파일의 결과)
-        local all_pam_checks=""
-        for check_file in "${pam_files[@]}"; do
-            if [ -f "$check_file" ]; then
-                local file_output=$(grep -E "pam_pwquality.so|pam_cracklib.so" "$check_file" 2>/dev/null || echo "")
-                if [ -n "$file_output" ]; then
-                    all_pam_checks="${all_pam_checks}[${check_file}]${newline}${file_output}${newline}${newline}"
-                fi
-            fi
-        done
-        if [ -z "$all_pam_checks" ]; then
-            pam_output="검사한 모든 PAM 파일에서 pam_pwquality.so 또는 pam_cracklib.so 미발견"
+
+        if [ "$passlength_ok" = true ] && [ "$maxweeks_ok" = true ] && \
+           [ "$minweeks_ok" = true ] && [ "$history_ok" = true ] && \
+           [ "$complexity_ok" = true ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="비밀번호 관리 정책이 적절하게 설정됨 (${config_details})"
         else
-            pam_output="${all_pam_checks}"
-        fi
-    fi
-
-    # ============================================================================
-    # 2) 비밀번호 사용 기간 확인 (/etc/default/passwd for Solaris)
-    # ============================================================================
-    local passwd_policy_file="/etc/default/passwd"
-    local pass_max_days=""
-    local pass_min_days=""
-
-    if [ -f "$passwd_policy_file" ]; then
-        # Raw output 저장 (Solaris uses PASSWEEKS, MAXWEEKS, MINWEEKS)
-        login_defs_output=$(grep -E "^[\s]*(MAXWEEKS|MINWEEKS|PASSWEEKS)" "$passwd_policy_file" 2>/dev/null || echo "")
-
-        # Solaris uses weeks, convert to days
-        local max_weeks=$(grep "^MAXWEEKS" "$passwd_policy_file" 2>/dev/null | awk '{print $2}')
-        local min_weeks=$(grep "^MINWEEKS" "$passwd_policy_file" 2>/dev/null | awk '{print $2}')
-
-        if [ -n "$max_weeks" ]; then
-            pass_max_days=$((max_weeks * 7))
-        fi
-        if [ -n "$min_weeks" ]; then
-            pass_min_days=$((min_weeks * 7))
-        fi
-
-        config_details="${config_details} | [사용 기간] MAXWEEKS=${max_weeks:-미설정}(${pass_max_days:-N/A}일), MINWEEKS=${min_weeks:-미설정}(${pass_min_days:-N/A}일)"
-
-        # 판정: PASS_MAX_DAYS <= 90, PASS_MIN_DAYS >= 1
-        local max_days_ok=false
-        local min_days_ok=false
-
-        if [ -n "$pass_max_days" ] && [ "$pass_max_days" -le 90 ]; then
-            max_days_ok=true
-        fi
-
-        if [ -n "$pass_min_days" ] && [ "$pass_min_days" -ge 1 ]; then
-            min_days_ok=true
-        fi
-
-        if [ "$max_days_ok" = true ] && [ "$min_days_ok" = true ]; then
-            age_ok=true
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="비밀번호 관리 정책 미흡: ${config_details} (기준: PASSLENGTH>=8, MAXWEEKS 1~12, MINWEEKS>=1, HISTORY>=4, 복잡성(MINDIGIT/MINSPECIAL/MINNONALPHA) 1개 이상)"
         fi
     else
-        config_details="${config_details} | [사용 기간] /etc/default/passwd 파일 없음"
-        # 원본 ls -l 출력 저장 (파일 존재 여부 확인)
-        login_defs_output=$(ls -l "$passwd_policy_file" 2>/dev/null || echo "파일 없음: ${passwd_policy_file}")
-    fi
-
-    # ============================================================================
-    # 최종 판정
-    # ============================================================================
-    # 복잡성 설정과 사용 기간 설정 모두 확인되어야 양호
-    if [ "$complexity_ok" = true ] && [ "$age_ok" = true ]; then
-        is_secure=true
-    fi
-
-    if [ "$found_pam_module" = false ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="비밀번호 복잡성 정책 미설정 (PAM 모듈 없음)"
-    elif [ "$is_secure" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="비밀번호 관리 정책 적절하게 설정됨 (${config_details})"
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="비밀번호 관리 정책 부적절하게 설정됨 (${config_details})"
+        # 파일이 없거나 읽을 수 없는 경우 → 수동 점검
+        policy_output=$(ls -l "$passwd_policy_file" 2>/dev/null || echo "File not found: ${passwd_policy_file}")
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="/etc/default/passwd 파일이 없거나 읽을 수 없어 비밀번호 관리 정책을 확인하지 못함 - 수동 점검 필요"
     fi
 
     # 명령어 실행 결과 결합 (raw output)
-    command_result="[PAM Password File: ${active_pam_file:-[not found]}]${newline}${pam_output}${newline}${newline}"
-    command_result="${command_result}[/etc/default/passwd]${newline}${login_defs_output}"
+    command_result="[/etc/default/passwd 비밀번호 정책]${newline}${policy_output}"
 
-    command_executed="grep -E 'pam_pwquality.so|pam_cracklib.so' /etc/pam.d/common-password /etc/pam.d/system-auth; grep -E '^(MAX|MIN)WEEKS' /etc/default/passwd"
+    command_executed="grep -E '^(PASSLENGTH|MAXWEEKS|MINWEEKS|HISTORY|MINDIGIT|MINSPECIAL|MINNONALPHA)=' /etc/default/passwd"
 
     #echo ""
     #echo "진단 결과: ${status}"

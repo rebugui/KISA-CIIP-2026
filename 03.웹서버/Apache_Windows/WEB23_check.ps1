@@ -32,7 +32,7 @@ $remediation = "LDAP 연결 인증 시 SHA-256 이상의 알고리즘을 사용�
 
 try {
     $finalResult = "N/A"
-    $status = "not_applicable"
+    $status = "N/A"
     $summary = "Apache for Windows is not a target platform for WEB-23 according to docs/guideline_metadata.json."
     $commandOutput = "WEB-23 targets Tomcat LDAP digest algorithm configuration only. Apache for Windows is outside this guideline item's target scope."
     $commandExecuted = "guideline_metadata.json WEB-23 target platform review"

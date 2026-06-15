@@ -10,7 +10,7 @@
 # @Platform    : IIS_Windows
 # @Severity    : 상
 # @Title       : 웹 서비스의 불필요한 스크립트 매핑 제거
-# @Description : 불필요한 스크립트 매핑(Handler Mappings), 특히 시스템 실행 파일(.exe, .dll, .bat, .cmd)에 대한 매핑을 제거하여 악의적인 스크립트 실행을 방지합니다. 불필요한 확장자 매핑은 공격자가 악성 스크립트를 업로드하여 실행할 수 있는 위험이 있습니다.
+# @Description : IIS 처리기 매핑(Handler Mappings)에서 가이드라인이 명시한 레거시 취약 확장자(.htr, .idc, .stm, .shtm, .shtml, .printer, .htw, .ida, .idq)에 대한 활성 매핑 존재 여부를 점검합니다. 이들 확장자는 버퍼오버플로우, 소스 공개 등 알려진 취약점과 연관되며 활성 매핑이 존재하면 취약으로 판단합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -33,15 +33,17 @@ try {
     $unnecessaryHandlers = @()
     $unnecessaryFound = $false
 
+    # 가이드라인이 명시한 레거시 취약 확장자 집합
     $unwantedExtensions = @(
-        ".exe",
-        ".dll",
-        ".bat",
-        ".cmd",
-        ".com",
-        ".vbs",
-        ".js",
-        ".htaccess"
+        ".htr",
+        ".idc",
+        ".stm",
+        ".shtm",
+        ".shtml",
+        ".printer",
+        ".htw",
+        ".ida",
+        ".idq"
     )
 
     foreach ($site in $sites) {

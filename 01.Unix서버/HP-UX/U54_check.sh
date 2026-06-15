@@ -95,24 +95,35 @@ diagnose() {
         fi
     fi
 
-    # 3) 포트 확인 (FTP: 21)
-    if command -v ss &>/dev/null; then
-        local ftp_port=$(ss -tuln 2>/dev/null | grep ":21 " || echo "")
-        if [ -n "$ftp_port" ]; then
+    # 3) 포트 확인 (FTP: 21, HP-UX netstat 점 표기 *.21 및 콜론 표기 모두 매칭)
+    local port_probe_cmd="netstat -an | grep -E '[.:]21[[:space:]].*LISTEN'"
+    local port_probe_out=""
+    local port_evidence=""
+    local port_cmd_note=""
+    if command -v netstat >/dev/null 2>&1; then
+        port_probe_out=$(netstat -an 2>/dev/null | grep -E '[.:]21[[:space:]].*LISTEN' || true)
+        port_cmd_note="${port_probe_cmd}"
+        if [ -n "$port_probe_out" ]; then
             ftp_running=true
             ftp_details="${ftp_details}FTP 포트 21 활성화\\n"
+            port_evidence="[Command: ${port_probe_cmd}]${newline}${port_probe_out}"
+        else
+            port_evidence="[Command: ${port_probe_cmd}]${newline}출력 없음 (포트 21 LISTEN 미검출)"
         fi
+    else
+        port_cmd_note="netstat 사용 불가 (포트 21 확인 생략)"
+        port_evidence="netstat 명령을 사용할 수 없어 포트 21 상태 확인 불가"
     fi
 
-    command_executed="/sbin/init.d/vsftpd status 2>/dev/null | grep -q "running" proftpd pure-ftpd; grep disable /etc/xinetd.d/ftp; ss -tuln | grep ':21 '"
+    command_executed="/sbin/init.d/{vsftpd,proftpd,pure-ftpd,wu-ftpd,ftpd} status; grep -E '^disable' /etc/xinetd.d/ftp 2>/dev/null; grep '^ftp' /etc/inetd.conf; ${port_cmd_note}"
 
     # 최종 판정
     if [ "$ftp_running" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="암호화되지 않은 FTP 서비스가 비활성화되어 있습니다."
-        local ftp_check=$(/sbin/init.d/vsftpd status 2>/dev/null | head -2; /sbin/init.d/proftpd status 2>/dev/null | head -2; ss -tuln 2>/dev/null | grep ':21' || echo "FTP service not running")
-        command_result="${ftp_check}"
+        local ftp_check=$(/sbin/init.d/vsftpd status 2>/dev/null | head -2; /sbin/init.d/proftpd status 2>/dev/null | head -2 || true)
+        command_result="[Command: /sbin/init.d/{vsftpd,proftpd} status]${newline}${ftp_check:-FTP service not found}${newline}${newline}${port_evidence}"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

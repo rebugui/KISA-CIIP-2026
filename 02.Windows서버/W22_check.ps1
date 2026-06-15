@@ -32,47 +32,96 @@ if (-not (Test-RunallMode)) {
     Write-Host "카테고리: $CATEGORY"
 }
 
-# 1. Check FTP root directory write permissions
+# 1. Check FTP home directory permissions
+# 가이드라인 판단기준: 'FTP 홈 디렉터리에 Everyone 권한이 있는 경우' = 취약 (쓰기 한정 아님, 모든 Everyone 권한 대상).
+# FTP 홈 디렉터리 경로는 하드코딩하지 않고 IIS FTP 사이트 구성에서 실제 physicalPath를 해석한다.
+# 경로를 해석할 수 없으면 GOOD으로 단정하지 않고 MANUAL로 처리한다.
 try {
-    $ftpRoot = 'C:\inetpub\ftproot'
+    $commandExecuted = "Import-Module WebAdministration; (Get-Website | Where binding=ftp).physicalPath | Get-Acl"
 
-    if (Test-Path $ftpRoot) {
-        $acl = Get-Acl -Path $ftpRoot -ErrorAction SilentlyContinue
-        $hasWrite = $false
-        $writePermissions = @()
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
 
-        foreach ($access in $acl.Access) {
-            if ($access.FileSystemRights -match 'Write' -and $access.AccessControlType -eq 'Allow' -and $access.IdentityReference -match 'Everyone') {
-                $hasWrite = $true
-                $writePermissions += "$($access.IdentityReference): $($access.FileSystemRights)"
+    # IIS에서 FTP 바인딩을 가진 모든 사이트의 홈 디렉터리 경로를 수집한다.
+    $ftpRoots = @()
+    $ftpSitesFound = $false
+    if (Get-Command Get-Website -ErrorAction SilentlyContinue) {
+        $sites = @(Get-Website -ErrorAction SilentlyContinue)
+        foreach ($site in $sites) {
+            $hasFtpBinding = $false
+            foreach ($b in @($site.Bindings.Collection)) {
+                if ($b.protocol -eq 'ftp') { $hasFtpBinding = $true }
+            }
+            if ($hasFtpBinding) {
+                $ftpSitesFound = $true
+                $resolved = [System.Environment]::ExpandEnvironmentVariables([string]$site.physicalPath)
+                if (-not [string]::IsNullOrWhiteSpace($resolved)) {
+                    $ftpRoots += [PSCustomObject]@{ Name = $site.Name; Path = $resolved }
+                }
             }
         }
-
-        if ($hasWrite) {
-            $finalResult = "VULNERABLE"
-            $summary = "FTP 루트 디렉토리에 Everyone 쓰기 권한이 존재하여 무단 업로드 가능"
-            $status = "취약"
-            $commandOutput = $writePermissions -join '; '
-        } else {
-            $finalResult = "GOOD"
-            $summary = "FTP 루트 디렉토리에 Everyone 쓰기 권한이 제거됨"
-            $status = "양호"
-            $commandOutput = "No write permissions found on FTP root directory"
-        }
-    } else {
-        $finalResult = "GOOD"
-        $summary = "FTP 루트 디렉토리가 존재하지 않음 (FTP 서비스 미사용)"
-        $status = "양호"
-        $commandOutput = "FTP root directory does not exist"
     }
 
-    $commandExecuted = "Get-Acl -Path 'C:\inetpub\ftproot' | Select-Object -ExpandProperty Access"
+    if (-not $ftpSitesFound) {
+        # FTP 사이트 자체가 없으면 FTP 홈 디렉터리 점검 대상 없음 → 양호.
+        $finalResult = "GOOD"
+        $summary = "IIS에 FTP 사이트가 구성되어 있지 않음 (FTP 서비스 미사용)"
+        $status = "양호"
+        $commandOutput = "No IIS FTP site configured"
+    } else {
+        $resolvableRoots = @($ftpRoots | Where-Object { Test-Path $_.Path })
+        $unresolvable = @($ftpRoots | Where-Object { -not (Test-Path $_.Path) })
+
+        if ($resolvableRoots.Count -eq 0) {
+            # FTP 사이트는 있으나 홈 디렉터리 경로를 해석/접근할 수 없음 → 자동 단정 불가, 수동 진단.
+            $finalResult = "MANUAL"
+            $summary = "FTP 사이트는 존재하나 홈 디렉터리 경로를 해석할 수 없어 Everyone 권한을 자동으로 점검할 수 없음 (수동 확인 필요)"
+            $status = "수동진단"
+            $commandOutput = "Unresolvable FTP roots: " + (($ftpRoots | ForEach-Object { "$($_.Name)=$($_.Path)" }) -join '; ')
+        } else {
+            $hasEveryone = $false
+            $everyonePermissions = @()
+
+            foreach ($root in $resolvableRoots) {
+                $acl = Get-Acl -Path $root.Path -ErrorAction SilentlyContinue
+                if ($acl) {
+                    foreach ($access in $acl.Access) {
+                        # 권한 종류(읽기/쓰기 등)와 무관하게 Everyone에 대한 모든 Allow 권한을 취약으로 간주.
+                        if ($access.AccessControlType -eq 'Allow' -and $access.IdentityReference -match 'Everyone') {
+                            $hasEveryone = $true
+                            $everyonePermissions += "$($root.Name) [$($root.Path)] $($access.IdentityReference): $($access.FileSystemRights)"
+                        }
+                    }
+                }
+            }
+
+            if ($hasEveryone) {
+                $finalResult = "VULNERABLE"
+                $summary = "FTP 홈 디렉터리에 Everyone 권한이 존재함"
+                $status = "취약"
+                $commandOutput = $everyonePermissions -join '; '
+            } elseif ($unresolvable.Count -gt 0) {
+                # 해석된 경로에는 Everyone 권한이 없으나, 일부 FTP 홈 경로를 해석/접근할 수 없어
+                # 해당 경로의 Everyone 권한을 확인할 수 없음 → 자동 양호 단정 불가, 수동 진단.
+                $finalResult = "MANUAL"
+                $summary = "일부 FTP 홈 디렉터리 경로를 해석할 수 없어 Everyone 권한을 자동으로 점검할 수 없음 (수동 확인 필요)"
+                $status = "수동진단"
+                $checked = ($resolvableRoots | ForEach-Object { "$($_.Name)=$($_.Path)" }) -join '; '
+                $commandOutput = "Checked (no Everyone): $checked; Unresolved roots requiring manual check: " + (($unresolvable | ForEach-Object { "$($_.Name)=$($_.Path)" }) -join ', ')
+            } else {
+                $finalResult = "GOOD"
+                $summary = "FTP 홈 디렉터리에 Everyone 권한이 없음"
+                $status = "양호"
+                $checked = ($resolvableRoots | ForEach-Object { "$($_.Name)=$($_.Path)" }) -join '; '
+                $commandOutput = "No Everyone permission on FTP home directory. Checked: $checked"
+            }
+        }
+    }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-Acl -Path 'C:\inetpub\ftproot' | Select-Object -ExpandProperty Access"
+    $commandExecuted = "Import-Module WebAdministration; (Get-Website | Where binding=ftp).physicalPath | Get-Acl"
     $commandOutput = "진단 실패: $_"
 }
 

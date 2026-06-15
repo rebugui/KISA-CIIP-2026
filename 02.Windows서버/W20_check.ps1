@@ -33,43 +33,58 @@ if (-not (Test-RunallMode)) {
 }
 
 # 1. Check NetBIOS over TCP/IP settings
+# TcpipNetbiosOptions: 0 = Use NetBIOS setting from DHCP, 1 = Enable NetBIOS over TCP/IP, 2 = Disable NetBIOS over TCP/IP
+# 양호(GOOD)는 모든 IP-enabled 어댑터에서 NetBIOS가 비활성화(2)된 경우에만 성립한다.
 try {
-    $adapters = Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' }
-    $netbiosEnabled = $false
-    $adapterDetails = @()
+    $commandExecuted = "Get-WmiObject Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True'"
 
-    foreach ($adapter in $adapters) {
-        $config = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter "Index=$($adapter.ifIndex)"
-        if ($config.TcpipNetbiosOptions -eq 1 -or $config.TcpipNetbiosOptions -eq 0) {
-            $netbiosEnabled = $true
-            $statusText = switch ($config.TcpipNetbiosOptions) {
-                0 { "Enable NetBIOS via DHCP" }
-                1 { "Enable NetBIOS" }
-                2 { "Disable NetBIOS" }
+    # 물리/활성 필터에 의존하지 않고 IP가 활성화된 모든 어댑터 구성을 직접 조회한다.
+    $configs = @(Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' -ErrorAction Stop)
+
+    if ($configs.Count -eq 0) {
+        # 조회 가능한 어댑터가 없으면 바인딩 상태를 단정할 수 없으므로 수동 진단.
+        $finalResult = "MANUAL"
+        $summary = "IP가 활성화된 네트워크 어댑터를 찾을 수 없어 NetBIOS 바인딩 상태를 자동으로 판단할 수 없음 (수동 확인 필요)"
+        $status = "수동진단"
+        $commandOutput = "No IP-enabled adapters returned by Win32_NetworkAdapterConfiguration"
+    } else {
+        $netbiosEnabled = $false
+        $adapterDetails = @()
+
+        foreach ($config in $configs) {
+            $opt = $config.TcpipNetbiosOptions
+            $label = if ([string]::IsNullOrEmpty($config.Description)) { "Index $($config.Index)" } else { $config.Description }
+            $statusText = switch ($opt) {
+                0 { "NetBIOS via DHCP (enabled)" }
+                1 { "NetBIOS enabled" }
+                2 { "NetBIOS disabled" }
+                default { "Unknown ($opt)" }
             }
-            $adapterDetails += "$($adapter.Name): $statusText"
+            $adapterDetails += "${label}: $statusText"
+            # 2(비활성화)가 아닌 모든 값(0=DHCP 기본, 1=활성화)은 바인딩이 제거되지 않은 것으로 간주.
+            if ($opt -ne 2) {
+                $netbiosEnabled = $true
+            }
+        }
+
+        if ($netbiosEnabled) {
+            $finalResult = "VULNERABLE"
+            $summary = "TCP/IP와 NetBIOS 간의 바인딩이 제거되지 않음: " + ($adapterDetails -join ', ')
+            $status = "취약"
+            $commandOutput = $adapterDetails -join '; '
+        } else {
+            $finalResult = "GOOD"
+            $summary = "TCP/IP와 NetBIOS 간의 바인딩이 제거됨 (모든 어댑터에서 NetBIOS 비활성화)"
+            $status = "양호"
+            $commandOutput = $adapterDetails -join '; '
         }
     }
-
-    if ($netbiosEnabled) {
-        $finalResult = "VULNERABLE"
-        $summary = "TCP/IP와 NetBIOS 간의 바인딩이 활성화됨: " + ($adapterDetails -join ', ')
-        $status = "취약"
-        $commandOutput = $adapterDetails -join '; '
-    } else {
-        $finalResult = "GOOD"
-        $summary = "TCP/IP와 NetBIOS 간의 바인딩이 제거됨 (모든 어댑터에서 NetBIOS 비활성화)"
-        $status = "양호"
-        $commandOutput = "NetBIOS disabled on all active adapters"
-    }
-
-    $commandExecuted = "Get-NetAdapter | Get-WmiObject Win32_NetworkAdapterConfiguration"
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-NetAdapter | Get-WmiObject Win32_NetworkAdapterConfiguration"
+    $commandExecuted = "Get-WmiObject Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True'"
     $commandOutput = "진단 실패: $_"
 }
 

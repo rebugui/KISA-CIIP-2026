@@ -71,9 +71,9 @@ diagnose() {
         [ ! -f "$vsftpd_conf" ] && vsftpd_conf="/etc/vsftpd/vsftpd.conf"
 
         # vsftpd 접근 제어 확인
-        # 1) /etc/ftpusers 또는 /etc/vsftpd.ftpusers 확인
+        # 1) /etc/ftpusers 또는 /etc/vsftpd.ftpusers 확인 (주석/공백 라인 제외)
         if [ -f /etc/ftpusers ]; then
-            local blocked_users=$(wc -l < /etc/ftpusers 2>/dev/null)
+            local blocked_users=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/ftpusers 2>/dev/null | wc -l)
             if [ "$blocked_users" -gt 0 ]; then
                 access_configured=true
                 access_details="/etc/ftpusers에 ${blocked_users}개 차단된 사용자"
@@ -116,6 +116,17 @@ diagnose() {
         fi
     done || true
 
+    # 실행 중인 FTP 서비스 확인 (설정 파일이 없어도 SMF로 동작할 수 있음)
+    local ftp_running=false
+    local running_detail=""
+    if svcs -H -o state,fmri 2>/dev/null | grep -iE '(/ftp:|/ftp$|vsftpd|proftpd)' | grep -qi '^online'; then
+        ftp_running=true
+        running_detail="svcs: FTP 서비스 online"
+    fi
+    if [ "$ftp_running" = true ]; then
+        ftp_installed=true
+    fi
+
     if [ "$ftp_installed" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
@@ -134,6 +145,9 @@ diagnose() {
         inspection_summary="FTP 접근 제어가 설정되지 않음 (root 등 관리자 계정 접근 가능)"
         local ftp_access=$(cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} 2>/dev/null || echo "No FTP access control files found")
         command_result="[Command: cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers}]\${newline}${ftp_access}"
+        if [ -n "$running_detail" ]; then
+            command_result="${command_result}${newline}[FTP daemon: ${running_detail}]"
+        fi
         command_executed="cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} 2>/dev/null"
     fi
 

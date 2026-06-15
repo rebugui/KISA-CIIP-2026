@@ -56,6 +56,7 @@ diagnose() {
     local command_result=""
     local command_executed=""
     local vulnerabilities_found=0
+    local expiry_indeterminate=0
 
     # Initialize PostgreSQL connection variables
     init_postgresql_vars
@@ -93,17 +94,22 @@ diagnose() {
     fi
 
     # 비밀번호 만료 정책 확인
-    local password_expiry_query="SELECT rolname, rolvaliduntil FROM pg_authid WHERE rolname='postgres';"
-    local expiry_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -t -c "${password_expiry_query}" 2>/dev/null || echo "")
+    # rolvaliduntil 이 NULL 이거나 'infinity' 이면 만료 정책이 없는 것(취약)이다.
+    # NULL 은 psql -t 출력에서 빈 문자열로 렌더되어 'infinity' 문자열 검색만으로는
+    # 만료 미설정을 탐지할 수 없으므로(거짓 양호), 서버측에서 불리언으로 평가한다.
+    local password_expiry_query="SELECT CASE WHEN rolvaliduntil IS NULL OR rolvaliduntil = 'infinity' THEN 'NO_EXPIRY' ELSE 'HAS_EXPIRY' END FROM pg_authid WHERE rolname='postgres';"
+    local expiry_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -t -A -c "${password_expiry_query}" 2>/dev/null | xargs || echo "")
 
-    if [ -n "$expiry_result" ]; then
-        local has_expiry=$(echo "$expiry_result" | grep -c "infinity" || echo "0")
-        if [ "$has_expiry" -gt 0 ]; then
-            ((vulnerabilities_found++)) || true
-            inspection_summary+="취약: postgres 계정 비밀번호 만료 기간 없음; "
-        else
-            inspection_summary+="양호: 비밀번호 만료 정책 설정됨; "
-        fi
+    if [ "$expiry_result" = "NO_EXPIRY" ]; then
+        ((vulnerabilities_found++)) || true
+        inspection_summary+="취약: postgres 계정 비밀번호 만료 기간 없음(rolvaliduntil NULL/infinity); "
+    elif [ "$expiry_result" = "HAS_EXPIRY" ]; then
+        inspection_summary+="양호: 비밀번호 만료 정책 설정됨; "
+    else
+        # 만료 조회 결과가 비어 있거나 예상치 못한 값(접속 후 권한 오류 등):
+        # 만료 여부를 검증할 수 없으므로 양호로 단정할 수 없음 -> 수동진단으로 강등
+        expiry_indeterminate=1
+        inspection_summary+="수동확인 필요: 비밀번호 만료 정책 조회 불가(결과 불명확); "
     fi
 
     # 비밀번호 복잡도 확인 (passwordcheck 확장 모듈)
@@ -120,6 +126,11 @@ diagnose() {
     if [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
+    elif [ $expiry_indeterminate -gt 0 ]; then
+        # 만료 정책을 검증할 수 없으면 양호로 단정 불가 -> 수동진단 (거짓 양호 방지)
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary+="비밀번호 만료 정책 검증 불가로 자동 양호 판단 불가 (수동진단 필요); "
     else
         diagnosis_result="GOOD"
         status="양호"

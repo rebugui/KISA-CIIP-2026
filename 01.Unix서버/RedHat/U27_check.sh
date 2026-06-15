@@ -50,7 +50,7 @@ diagnose() {
     if [ -f "$equiv" ]; then
         local equiv_owner=$(stat -c "%U" "$equiv" 2>/dev/null || echo "unknown")
         local equiv_perm=$(stat -c "%a" "$equiv" 2>/dev/null || echo "000")
-        local equiv_has_plus=$(grep "^\+" "$equiv" 2>/dev/null || true)
+        local equiv_has_plus=$(grep -vE '^[[:space:]]*#' "$equiv" 2>/dev/null | grep -E '(^|[[:space:]])\+([[:space:]]|$)' || true)
 
         evidence="${evidence}/etc/hosts.equiv (Owner:${equiv_owner}, Perm:${equiv_perm})"
 
@@ -61,8 +61,8 @@ diagnose() {
             evidence="${evidence} [소유자 불일치]"
         fi
 
-        # 권한이 600 초과인 경우
-        if [ "$equiv_perm" -gt 600 ] 2>/dev/null; then
+        # 권한이 600 초과인 경우 (600을 넘는 비트가 있으면 취약)
+        if ! [[ "$equiv_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$equiv_perm & ~8#600 & 07777 ))" -ne 0 ] 2>/dev/null; then
             status="취약"
             diagnosis_result="VULNERABLE"
             evidence="${evidence} [권한 초과]"
@@ -82,15 +82,15 @@ diagnose() {
     # 2. 모든 사용자의 $HOME/.rhosts 확인
     # ==========================================================================
     while IFS=: read -r username _ uid _ _ homedir shell; do
-        # 시스템 계정 (UID < 1000) 및 로그인 불가 쉘은 건너뜀
-        [ "$uid" -lt 1000 ] 2>/dev/null && continue
+        # 시스템 계정 (UID < 1000, root 제외) 및 로그인 불가 쉘은 건너뜀
+        [ "$uid" -ne 0 ] 2>/dev/null && [ "$uid" -lt 1000 ] 2>/dev/null && continue
         [ -z "$homedir" ] || [ "$homedir" = "/" ] && continue
 
         local rhosts_file="${homedir}/.rhosts"
         if [ -f "$rhosts_file" ]; then
             local rhosts_owner=$(stat -c "%U" "$rhosts_file" 2>/dev/null || echo "unknown")
             local rhosts_perm=$(stat -c "%a" "$rhosts_file" 2>/dev/null || echo "000")
-            local rhosts_has_plus=$(grep "^\+" "$rhosts_file" 2>/dev/null || true)
+            local rhosts_has_plus=$(grep -vE '^[[:space:]]*#' "$rhosts_file" 2>/dev/null | grep -E '(^|[[:space:]])\+([[:space:]]|$)' || true)
 
             evidence="${evidence}${rhosts_file} (Owner:${rhosts_owner}, Perm:${rhosts_perm})"
 
@@ -101,8 +101,8 @@ diagnose() {
                 evidence="${evidence} [소유자 불일치]"
             fi
 
-            # 권한이 600 초과인 경우
-            if [ "$rhosts_perm" -gt 600 ] 2>/dev/null; then
+            # 권한이 600 초과인 경우 (600을 넘는 비트가 있으면 취약)
+            if ! [[ "$rhosts_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$rhosts_perm & ~8#600 & 07777 ))" -ne 0 ] 2>/dev/null; then
                 status="취약"
                 diagnosis_result="VULNERABLE"
                 evidence="${evidence} [권한 초과]"

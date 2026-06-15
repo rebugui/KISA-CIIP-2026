@@ -73,27 +73,31 @@ diagnose() {
 
             # 각 exports 라인 확인
             while IFS= read -r line; do
-                # 주석和无용行 무시
-                [[ "$line" =~ ^#.*$ ]] && continue
-                [[ -z "$line" ]] && continue
+                # 주석 및 공백 행 무시 (들여쓰기된 주석 포함)
+                [[ "$line" =~ ^[[:space:]]*#.*$ ]] && continue
+                [[ "$line" =~ ^[[:space:]]*$ ]] && continue
 
-                # 취약한 옵션 확인
-                if ! echo "$line" | grep -q "ro"; then
-                    if echo "$line" | grep -q "rw"; then
+                # 호스트 접근 통제 확인: 모든 호스트(*) 대상 공유는 접근 통제 미흡
+                if echo "$line" | grep -qE '(^|[[:space:]])\*(\(|[[:space:]]|$)'; then
+                    is_secure=false
+                    issues+=("모든 호스트(*)에 공유 허용(접근 통제 없음): $line")
+                fi
+
+                # 취약한 옵션 확인 (옵션 경계 매칭: root_squash 내부의 'ro' 오탐 방지)
+                if ! echo "$line" | grep -qE '(^|[(,])ro([),]|$)'; then
+                    if echo "$line" | grep -qE '(^|[(,])rw([),]|$)'; then
                         is_secure=false
                         issues+=("쓰기 권한(rw) 허용됨: $line")
                     fi
                 fi
 
-                # root_squash 확인 (없으면 취약)
-                if ! echo "$line" | grep -q "root_squash"; then
-                    if echo "$line" | grep -q "no_root_squash"; then
-                        is_secure=false
-                        issues+=("root 권한 승급 가능(no_root_squash): $line")
-                    else
-                        # 기본값은 root_squash지만 명시적인 것이 좋음
-                        issues+=("root_squash 옵션 미명시: $line")
-                    fi
+                # root_squash 확인 (no_root_squash를 먼저 검사: 부분 문자열 오탐 방지)
+                if echo "$line" | grep -qE '(^|[(,])no_root_squash([),]|$)'; then
+                    is_secure=false
+                    issues+=("root 권한 승급 가능(no_root_squash): $line")
+                elif ! echo "$line" | grep -qE '(^|[(,])root_squash([),]|$)'; then
+                    # 기본값은 root_squash지만 명시적인 것이 좋음
+                    issues+=("root_squash 옵션 미명시: $line")
                 fi
 
                 # sync 확인
@@ -111,6 +115,17 @@ diagnose() {
             done < /etc/exports || true
         else
             exports_info="${exports_info}exports 파일이 비어있음 (안전)${newline}"
+        fi
+
+        # /etc/exports 파일 권한 확인 (root 소유, 644 이하)
+        local exp_perm=$(stat -c "%a" /etc/exports 2>/dev/null || echo "")
+        local exp_owner=$(stat -c "%U" /etc/exports 2>/dev/null || echo "")
+        exports_info="${exports_info}[파일 권한] /etc/exports 권한=${exp_perm:-확인불가} 소유자=${exp_owner:-확인불가}${newline}"
+        if [ -n "$exp_perm" ] && [[ "$exp_perm" =~ ^[0-7]{3,4}$ ]]; then
+            if [ "$(( 8#$exp_perm & ~8#644 & 07777 ))" -ne 0 ] || [ "$exp_owner" != "root" ]; then
+                is_secure=false
+                issues+=("/etc/exports 권한/소유자 부적절 (권한 ${exp_perm}, 소유자 ${exp_owner}; root 소유 644 이하 필요)")
+            fi
         fi
     fi
 

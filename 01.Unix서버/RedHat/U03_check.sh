@@ -36,27 +36,59 @@ GUIDELINE_CRITERIA_GOOD="계정 잠금 임계값이 10회 이하의 값으로 �
 GUIDELINE_CRITERIA_BAD="계정 잠금 임계값이 설정되어 있지 않거나, 10회 이하의 값으로 설정되지 않은 경우"
 GUIDELINE_REMEDIATION="계정 잠금 임계값을 10회 이하로 설정"
 
+# 비주석 pam_faillock/pam_tally2 라인에서 deny 값 추출
+extract_pam_deny() {
+    local file="$1"
+    local val=""
+    if [ -r "$file" ]; then
+        val=$(grep -E 'pam_faillock\.so|pam_tally2\.so' "$file" 2>/dev/null \
+            | grep -vE '^[[:space:]]*#' \
+            | grep -oE 'deny=[0-9]+' | cut -d= -f2 | head -n 1 || true)
+    fi
+    echo "$val"
+}
+
+# 잠금 임계값이 1~10 범위인지 확인 (0은 잠금 미적용)
+deny_in_range() {
+    [ -n "$1" ] && [ "$1" -ge 1 ] && [ "$1" -le 10 ]
+}
+
 diagnose() {
-    local status="양호"
-    diagnosis_result="GOOD"
-    local inspection_summary="계정 잠금 임계값 설정이 적절히 적용되어 있습니다."
+    local status="취약"
+    diagnosis_result="VULNERABLE"
+    local inspection_summary=""
     local command_result=""
-    local command_executed="grep -E 'pam_faillock|pam_tally2' /etc/pam.d/system-auth"
+    local command_executed="grep -E 'pam_faillock|pam_tally2' /etc/pam.d/system-auth /etc/pam.d/password-auth; grep -E '^deny' /etc/security/faillock.conf"
 
     # 1. 실제 데이터 추출 (RedHat 기준)
-    local pam_file="/etc/pam.d/system-auth"
-    # deny 설정값 추출 (첫 번째 매칭되는 숫자만 추출)
-    local deny_val=$(grep -E "pam_faillock.so|pam_tally2.so" $pam_file | grep "deny=" | sed 's/.*deny=\([0-9]*\).*/\1/' | head -n 1 || echo "미설정")
+    # deny는 system-auth와 password-auth 양쪽 모두에 적용되거나,
+    # /etc/security/faillock.conf에 중앙 설정되어야 함
+    local sys_deny pw_deny conf_deny
+    sys_deny=$(extract_pam_deny /etc/pam.d/system-auth)
+    pw_deny=$(extract_pam_deny /etc/pam.d/password-auth)
+    conf_deny=""
+    if [ -r /etc/security/faillock.conf ]; then
+        conf_deny=$(grep -E '^[[:space:]]*deny[[:space:]]*=' /etc/security/faillock.conf 2>/dev/null \
+            | grep -oE '[0-9]+' | head -n 1 || true)
+    fi
 
-    # 2. 판정 로직 (5회 초과 또는 미설정 시 취약)
-    if [ "$deny_val" = "미설정" ] || [ "$deny_val" -gt 10 ]; then
-        status="취약"
-        diagnosis_result="VULNERABLE"
-        inspection_summary="계정 잠금 임계값이 설정되지 않았거나 기준(10회)을 초과했습니다."
+    # 2. 판정 로직 (faillock.conf 중앙 설정 또는 두 PAM 파일 모두 1~10 설정 시 양호)
+    if deny_in_range "$conf_deny"; then
+        status="양호"
+        diagnosis_result="GOOD"
+        inspection_summary="계정 잠금 임계값이 /etc/security/faillock.conf에 적절히 설정됨 (deny=${conf_deny})"
+    elif deny_in_range "$sys_deny" && deny_in_range "$pw_deny"; then
+        status="양호"
+        diagnosis_result="GOOD"
+        inspection_summary="계정 잠금 임계값이 system-auth/password-auth 모두 적절히 설정됨 (deny=${sys_deny}/${pw_deny})"
+    elif deny_in_range "$sys_deny" || deny_in_range "$pw_deny"; then
+        inspection_summary="계정 잠금 임계값이 한쪽 PAM 파일에만 설정되어 미보호 인증 경로가 존재함 (system-auth deny=${sys_deny:-미설정}, password-auth deny=${pw_deny:-미설정})"
+    else
+        inspection_summary="계정 잠금 임계값이 설정되지 않았거나 기준(1~10회)을 벗어남 (system-auth deny=${sys_deny:-미설정}, password-auth deny=${pw_deny:-미설정}, faillock.conf deny=${conf_deny:-미설정})"
     fi
 
     # 3. command_result에 실제 설정값 기록 (개행 제거)
-    command_result="[system-auth] deny=${deny_val}"
+    command_result="[system-auth] deny=${sys_deny:-미설정} | [password-auth] deny=${pw_deny:-미설정} | [faillock.conf] deny=${conf_deny:-미설정}"
 
     # [중요] U-02와 동일하게 12개의 인자를 모두 전달
     save_dual_result \

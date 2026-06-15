@@ -45,6 +45,46 @@ GUIDELINE_REMEDIATION="SNMP 서비스를 사용하지 않는 경우 서비스 �
 # 진단 함수
 # ============================================================================
 
+# Community String 복잡성 판정 (판단기준)
+#  1. 기본값 'public', 'private'인 경우 취약
+#  2. 영문자, 숫자 포함 10자리 미만인 경우 취약
+#  3. 영문자, 숫자, 특수 문자 포함 8자리 미만인 경우 취약
+# 반환: 0=양호, 1=취약 (사유는 COMPLEXITY_REASON 변수에 기록)
+COMPLEXITY_REASON=""
+
+check_community_complexity() {
+    local comm="$1"
+    local lower
+    lower=$(printf '%s' "$comm" | tr '[:upper:]' '[:lower:]')
+    COMPLEXITY_REASON=""
+
+    # 1) 기본값 'public', 'private' 여부
+    if [ "$lower" = "public" ] || [ "$lower" = "private" ]; then
+        COMPLEXITY_REASON="기본값 '${comm}' 사용"
+        return 1
+    fi
+
+    local len=${#comm}
+    local has_alpha=false
+    local has_digit=false
+    local has_special=false
+    case "$comm" in *[A-Za-z]*) has_alpha=true ;; esac
+    case "$comm" in *[0-9]*) has_digit=true ;; esac
+    case "$comm" in *[!A-Za-z0-9]*) has_special=true ;; esac
+
+    # 영문자, 숫자, 특수 문자 포함 8자리 이상인 경우 양호
+    if [ "$has_alpha" = true ] && [ "$has_digit" = true ] && [ "$has_special" = true ] && [ "$len" -ge 8 ]; then
+        return 0
+    fi
+    # 영문자, 숫자 포함 10자리 이상인 경우 양호
+    if [ "$has_alpha" = true ] && [ "$has_digit" = true ] && [ "$len" -ge 10 ]; then
+        return 0
+    fi
+
+    COMPLEXITY_REASON="복잡성 미충족 (길이 ${len}자, 영문자=${has_alpha}, 숫자=${has_digit}, 특수문자=${has_special})"
+    return 1
+}
+
 # 진단 수행
 diagnose() {
 
@@ -62,10 +102,21 @@ diagnose() {
     local snmpd_installed=false
     local weak_community=false
     local community_details=""
-    local snmp_conf="/etc/snmp/snmpd.conf"
+    # AIX 가이드 점검 대상: /etc/snmpdv3.conf (SNMPv3 데몬), /etc/snmpd.conf (레거시),
+    # net-snmp 설치 시 /etc/snmp/snmpd.conf
+    local conf_candidates=("/etc/snmpdv3.conf" "/etc/snmpd.conf" "/etc/snmp/snmpd.conf")
+    local existing_confs=()
+    local unreadable_confs=()
+    local conf=""
+
+    for conf in "${conf_candidates[@]}"; do
+        if [ -f "$conf" ]; then
+            existing_confs+=("$conf")
+        fi
+    done
 
     # 1) SNMP 설치 여부 확인
-    if [ -f "$snmp_conf" ] || command -v snmpd >/dev/null 2>&1; then
+    if [ ${#existing_confs[@]} -gt 0 ] || command -v snmpd >/dev/null 2>&1; then
         snmpd_installed=true
     fi
 
@@ -76,60 +127,83 @@ diagnose() {
         local cmd_check=$(command -v snmpd 2>/dev/null || echo "snmpd command not found")
         local pkg_check=$(lslpp -L | grep -i snmp 2>/dev/null || echo "SNMP packages not found")
         command_result="[Command: command -v snmpd]${newline}${cmd_check}${newline}${newline}[Command: lslpp -L | grep snmp]${newline}${pkg_check}"
-        command_executed="ls ${snmp_conf} 2>/dev/null"
-    elif [ ! -f "$snmp_conf" ]; then
+        command_executed="ls /etc/snmpdv3.conf /etc/snmpd.conf /etc/snmp/snmpd.conf 2>/dev/null"
+    elif [ ${#existing_confs[@]} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="SNMP 설정 파일이 존재하지 않음"
-        local find_snmp=$(find /etc -name 'snmpd.*' 2>/dev/null | head -10 || echo "No SNMP config files found")
-        command_result="[Command: find /etc -name 'snmpd.*']${newline}${find_snmp}"
-        command_executed="ls /etc/snmp/*.conf 2>/dev/null"
+        local find_snmp=$(find /etc -name 'snmpd*.conf' 2>/dev/null | head -10 || echo "No SNMP config files found")
+        command_result="[Command: find /etc -name 'snmpd*.conf']${newline}${find_snmp}"
+        command_executed="ls /etc/snmpdv3.conf /etc/snmpd.conf /etc/snmp/snmpd.conf 2>/dev/null"
     else
-        # 2) Community String 확인 (기본 취약한 community: public, private, cisco 등)
-        local default_communities=("public" "private" "cisco" "admin" "monitor" "write" "read" "secret")
+        # 2) 설정 파일별 Community String 값 추출 후 복잡성 판정
+        #    - /etc/snmpdv3.conf : COMMUNITY <name> ... (2번째 필드)
+        #    - /etc/snmpd.conf   : community <name> ... (2번째 필드)
+        #    - net-snmp 계열     : ro/rwcommunity (2번째 필드), com2sec (4번째 필드)
+        local community_values=""
+        local file_values=""
+        local file_lines=""
+        local raw_output=""
+        local comm=""
 
-        for default_comm in "${default_communities[@]}"; do
-            # 대소문자 구분 없이 기본 community string 검색
-            if grep -qiE "com2sec.*${default_comm}|rocommunity.*${default_comm}|rwcommunity.*${default_comm}" "$snmp_conf" 2>/dev/null; then
-                weak_community=true
-                # 해당 라인 추출
-                local matching_lines=$(grep -iE "com2sec.*${default_comm}|rocommunity.*${default_comm}|rwcommunity.*${default_comm}" "$snmp_conf" 2>/dev/null | grep -v "^#" | head -3)
-                community_details="${community_details}기본 Community '${default_comm}' 사용: ${matching_lines}, "
+        for conf in "${existing_confs[@]}"; do
+            if [ ! -r "$conf" ]; then
+                unreadable_confs+=("$conf")
+                raw_output="${raw_output}[${conf}] unreadable${newline}"
+                continue
             fi
-        done || true
 
-        # 3) Community string 복잡성 확인 (길이, 문자열 구성)
-        # 사용자 정의 community string 확인
-        local custom_communities=$(grep -iE "com2sec|rocommunity|rwcommunity" "$snmp_conf" 2>/dev/null | grep -v "^#" | awk '{for(i=2;i<=NF;i++)print $i}' | head -10)
+            file_lines=$(grep -iE "community|com2sec" "$conf" 2>/dev/null | grep -v "^[[:space:]]*#" | head -15 || true)
+            raw_output="${raw_output}[${conf}]${newline}${file_lines:-No community entries}${newline}"
 
-        if [ -n "$custom_communities" ]; then
+            file_values=$(awk '
+                {
+                    if ($0 ~ /^[[:space:]]*#/) next
+                    key = tolower($1)
+                    if (key == "community" && $2 != "") print $2
+                    else if (key ~ /^(ro|rw)community6?$/ && $2 != "") print $2
+                    else if ((key == "com2sec" || key == "com2sec6") && $4 != "") print $4
+                }
+            ' "$conf" 2>/dev/null || true)
+
+            [ -z "$file_values" ] && continue
             while IFS= read -r comm; do
-                if [ -n "$comm" ] && [ ${#comm} -lt 8 ]; then
+                [ -z "$comm" ] && continue
+                comm="${comm%\"}"
+                comm="${comm#\"}"
+                community_values="${community_values}${comm}${newline}"
+                if ! check_community_complexity "$comm"; then
                     weak_community=true
-                    community_details="${community_details}약한 Community '${comm}' (길이 ${#comm}), "
+                    community_details="${community_details}${conf}: Community '${comm}' - ${COMPLEXITY_REASON}, "
                 fi
-            done <<< "$custom_communities" || true
-        fi
+            done <<< "$file_values" || true
+        done
 
         if [ "$weak_community" = true ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="약한 SNMP Community String 사용: ${community_details%, }"
-            command_result="${community_details%, }"
-            command_executed="grep -iE 'com2sec|rocommunity|rwcommunity' ${snmp_conf} | grep -v '^#'"
-        else
+            command_result="${raw_output}"
+            command_executed="grep -iE 'community|com2sec' ${existing_confs[*]}"
+        elif [ ${#unreadable_confs[@]} -gt 0 ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="SNMP 설정 파일(${unreadable_confs[*]})을 읽을 수 없어 Community String 복잡성 수동 확인 필요"
+            command_result="${raw_output}"
+            command_executed="grep -iE 'community|com2sec' ${existing_confs[*]}"
+        elif [ -n "$community_values" ]; then
             diagnosis_result="GOOD"
             status="양호"
-            if [ -n "$custom_communities" ]; then
-                inspection_summary="SNMP Community String이 안전하게 설정됨 (기본값 미사용, 복잡성 충분)"
-                    local grep_com=$(grep -i 'com2sec\|rocommunity\|rwcommunity' /etc/snmp/snmpd.conf 2>/dev/null | head -15 || echo "No community settings")
-                    command_result="[Command: grep community snmpd.conf]${newline}${grep_com}"
-            else
-                inspection_summary="SNMP Community String이 설정되지 않았거나 v3만 사용 중"
-                    local cat_snmp=$(cat /etc/snmp/snmpd.conf 2>/dev/null | head -20 || echo "Config not readable")
-                    command_result="[Command: cat /etc/snmp/snmpd.conf]${newline}${cat_snmp}"
-            fi
-            command_executed="grep -iE 'com2sec|rocommunity|rwcommunity' ${snmp_conf}"
+            inspection_summary="SNMP Community String이 안전하게 설정됨 (기본값 미사용, 복잡성 충족)"
+            command_result="${raw_output}"
+            command_executed="grep -iE 'community|com2sec' ${existing_confs[*]}"
+        else
+            # v3만 사용(또는 community 미설정): SNMPv3 인증 패스워드 복잡성은 자동 판독 불가 → 수동진단
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="SNMP Community String 미설정(v3 사용 추정): SNMPv3 USM 사용자 인증 패스워드 복잡성(영문·숫자 10자리 이상 또는 특수문자 포함 8자리 이상) 수동 확인 필요"
+            command_result="${raw_output}"
+            command_executed="grep -iE 'community|com2sec|USM_USER' ${existing_confs[*]}"
         fi
     fi
 

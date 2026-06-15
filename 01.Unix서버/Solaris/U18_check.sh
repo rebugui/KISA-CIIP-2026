@@ -65,7 +65,7 @@ diagnose() {
 
     # Capture raw ls -l output
     local ls_output=$(ls -l "$target_file" 2>/dev/null)
-    local stat_output=$(stat -c "%a %U:%G" "$target_file" 2>/dev/null)
+    local stat_output=$(perl -e '@s=stat($ARGV[0]); printf "%04o %s:%s", $s[2] & 07777, scalar getpwuid($s[4]), scalar getgrgid($s[5])' "$target_file" 2>/dev/null)
 
     # 파일 존재 확인
     if [ ! -f "$target_file" ]; then
@@ -75,12 +75,12 @@ diagnose() {
         command_result="[Command: ls -l $target_file]${newline}${ls_output}"
         command_executed="ls -l $target_file"
     else
-        # 파일 권한 확인
-        local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null)
-        local file_owner=$(stat -c "%U:%G" "$target_file" 2>/dev/null)
+        # 파일 권한 확인 (Solaris: stat -c 미지원, perl 사용)
+        local file_perms=$(perl -e 'printf "%04o", (stat($ARGV[0]))[2] & 07777' "$target_file" 2>/dev/null)
+        local file_owner=$(perl -e '@s=stat($ARGV[0]); print scalar getpwuid($s[4])' "$target_file" 2>/dev/null)
 
-        # 소유자 및 권한 확인 (600 또는 400)
-        if [ "$file_owner" = "root:root" ] && { [ "$file_perms" = "600" ] || [ "$file_perms" = "400" ]; }; then
+        # 소유자 및 권한 확인 (소유자 root, 권한 400 이하; Solaris 기본 그룹 sys 허용)
+        if [ "$file_owner" = "root" ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#400 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $file_perms, 소유자: $file_owner"
         else
@@ -92,14 +92,14 @@ diagnose() {
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="/etc/shadow 보안 설정 적절 ($details)"
-            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a %U:%G' $target_file]${newline}${stat_output}"
-            command_executed="ls -l $target_file; stat -c '%a %U:%G' $target_file"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl stat]${newline}${stat_output}"
+            command_executed="ls -l $target_file; perl -e 'printf \"%04o %s:%s\", (stat(\$ARGV[0]))[2] & 07777, scalar getpwuid((stat(\$ARGV[0]))[4]), scalar getgrgid((stat(\$ARGV[0]))[5])' $target_file"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="/etc/shadow 보안 설정 부적절 ($details)"
-            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a %U:%G' $target_file]${newline}${stat_output}"
-            command_executed="ls -l $target_file; stat -c '%a %U:%G' $target_file"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl stat]${newline}${stat_output}"
+            command_executed="ls -l $target_file; perl -e 'printf \"%04o %s:%s\", (stat(\$ARGV[0]))[2] & 07777, scalar getpwuid((stat(\$ARGV[0]))[4]), scalar getgrgid((stat(\$ARGV[0]))[5])' $target_file"
         fi
     fi
 

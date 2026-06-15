@@ -62,6 +62,9 @@ diagnose() {
     local ftp_banner_issue=false
     local banner_details=""
     local ftp_config_files=()
+    local manual_needed=false
+    local manual_details=""
+    local ident_quote_re="[\"']([^\"']*)[\"']"
 
     # FTP 설정 파일 검색
     if [ -f /etc/proftpd/proftpd.conf ]; then
@@ -80,29 +83,84 @@ diagnose() {
         ftp_config_files+=("/etc/pure-ftpd/conf/FortunesFile")
     fi
 
-    # 각 설정 파일에서 배너 정보 확인
-    for config_file in "${ftp_config_files[@]}"; do
+    # 각 설정 파일에서 배너 정보 확인 (빈 배열 안전 확장: bash<4.4 set -u 대응)
+    for config_file in ${ftp_config_files[@]+"${ftp_config_files[@]}"}; do
         local banner_value=""
+        local banner_text=""
+        local custom_banner=""
 
         # vsftpd 배너 설정 확인
         if [[ "$config_file" == *"vsftpd"* ]]; then
-            banner_value=$(grep -E "^[\s]*ftpd_banner|^[\s]*banner_file" "$config_file" 2>/dev/null | grep -v "^#" | head -1)
-            if [ -n "$banner_value" ]; then
-                # 배너에 버전 정보가 포함되어 있는지 확인
-                if echo "$banner_value" | grep -qiE "version|vsftpd|proftpd"; then
+            if [ ! -r "$config_file" ]; then
+                manual_needed=true
+                manual_details="${manual_details}${config_file}: 설정 파일 읽기 불가, "
+            else
+                banner_value=$(grep -E "^[[:space:]]*(ftpd_banner|banner_file)" "$config_file" 2>/dev/null | grep -v "^[[:space:]]*#" | head -1 || true)
+                if [ -z "$banner_value" ]; then
+                    # 배너 지시자 미설정 시 기본 배너가 vsFTPd 이름/버전 정보를 노출함
                     ftp_banner_issue=true
-                    banner_details="${banner_details}${config_file}: ${banner_value}, "
+                    banner_details="${banner_details}${config_file}: ftpd_banner/banner_file 미설정(기본 배너 노출), "
+                elif [[ "$banner_value" == *"banner_file"* ]]; then
+                    # banner_file 지정 시 참조 파일 내용을 읽어 서비스 이름/버전/호스트명 노출 여부 검사
+                    local banner_file_path="${banner_value#*=}"
+                    banner_file_path="$(echo "$banner_file_path" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+                    if [ -z "$banner_file_path" ] || [ ! -f "$banner_file_path" ]; then
+                        manual_needed=true
+                        manual_details="${manual_details}${config_file}: banner_file(${banner_file_path:-경로 미지정}) 파일 없음, "
+                    elif [ ! -r "$banner_file_path" ]; then
+                        manual_needed=true
+                        manual_details="${manual_details}${config_file}: banner_file(${banner_file_path}) 읽기 불가, "
+                    else
+                        local banner_file_content
+                        banner_file_content=$(cat "$banner_file_path" 2>/dev/null || echo "")
+                        local expose_pattern="version|vsftpd|proftpd|wu-ftpd|[0-9]+\.[0-9]"
+                        local host_name os_name
+                        host_name="$(hostname 2>/dev/null || true)"
+                        os_name="$(uname -s 2>/dev/null || true)"
+                        [ -n "$host_name" ] && expose_pattern="${expose_pattern}|$host_name"
+                        [ -n "$os_name" ] && expose_pattern="${expose_pattern}|$os_name"
+                        if echo "$banner_file_content" | grep -qiE "$expose_pattern"; then
+                            ftp_banner_issue=true
+                            banner_details="${banner_details}${config_file}: banner_file(${banner_file_path})에 서비스/버전/호스트명 정보 노출, "
+                        fi
+                    fi
+                else
+                    # ftpd_banner 값에 서비스 이름/버전 정보가 포함되어 있는지 확인
+                    banner_text="${banner_value#*=}"
+                    if echo "$banner_text" | grep -qiE "version|vsftpd|proftpd|wu-ftpd|[0-9]+\.[0-9]"; then
+                        ftp_banner_issue=true
+                        banner_details="${banner_details}${config_file}: ${banner_value}, "
+                    fi
                 fi
             fi
         fi
 
         # proftpd 배너 설정 확인
         if [[ "$config_file" == *"proftpd"* ]]; then
-            banner_value=$(grep -E "^[\s]*ServerIdent" "$config_file" 2>/dev/null | grep -v "^#" | head -1)
-            if [ -n "$banner_value" ]; then
-                if echo "$banner_value" | grep -qiE "On|PROFTPD"; then
+            if [ ! -r "$config_file" ]; then
+                manual_needed=true
+                manual_details="${manual_details}${config_file}: 설정 파일 읽기 불가, "
+            else
+                banner_value=$(grep -E "^[[:space:]]*ServerIdent" "$config_file" 2>/dev/null | grep -v "^[[:space:]]*#" | head -1 || true)
+                if [ -z "$banner_value" ]; then
+                    # ServerIdent 미설정 시 기본 배너가 ProFTPD 이름/버전 정보를 노출함
                     ftp_banner_issue=true
-                    banner_details="${banner_details}${config_file}: ${banner_value}, "
+                    banner_details="${banner_details}${config_file}: ServerIdent 미설정(기본 배너 노출), "
+                elif echo "$banner_value" | grep -qiE "^[[:space:]]*ServerIdent[[:space:]]+off"; then
+                    : # ServerIdent off → 배너 정보 미노출(양호)
+                else
+                    # ServerIdent on: 따옴표 안 사용자 배너 텍스트만 검사
+                    custom_banner=""
+                    if [[ "$banner_value" =~ $ident_quote_re ]]; then
+                        custom_banner="${BASH_REMATCH[1]}"
+                    fi
+                    if [ -z "$custom_banner" ]; then
+                        ftp_banner_issue=true
+                        banner_details="${banner_details}${config_file}: ${banner_value} (사용자 배너 미지정), "
+                    elif echo "$custom_banner" | grep -qiE "version|proftpd|vsftpd|wu-ftpd|[0-9]+\.[0-9]"; then
+                        ftp_banner_issue=true
+                        banner_details="${banner_details}${config_file}: ${banner_value}, "
+                    fi
                 fi
             fi
         fi
@@ -128,35 +186,49 @@ diagnose() {
         fi
     fi
 
+    # AIX 기본(native) ftpd 사용 여부는 설정 파일 유무와 무관하게 항상 확인
+    # (vsftpd 설정이 양호해도 inetd/SRC 기반 기본 ftpd가 기본 배너를 노출할 수 있음)
+    local lssrc_ftpd_out=$(lssrc -s ftpd 2>/dev/null || echo "FTP service not found")
+    local inetd_ftp=$(grep -E "^[[:space:]]*ftp[[:space:]]" /etc/inetd.conf 2>/dev/null | head -1 || true)
+    if echo "$lssrc_ftpd_out" | grep -q "active" || [ -n "$inetd_ftp" ]; then
+        manual_needed=true
+        manual_details="${manual_details}AIX 기본 ftpd 활성: 메시지 카탈로그(ftpd.cat) 배너는 dspcat으로 수동 확인 필요, "
+    fi
+
     if [ "$ftp_banner_issue" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="FTP 배너에 버전/시스템 정보 노출: ${banner_details%, }"
         command_result="${banner_details%, }"
         command_executed="grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null"
+    elif [ "$manual_needed" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="FTP 배너 설정 수동 확인 필요: ${manual_details%, }"
+        command_result="${manual_details%, }"
+        command_executed="grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null"
     else
         # FTP 서비스가 설치되지 않았거나 배너가 적절하게 설정됨
+        # (native ftpd 활성 케이스는 위에서 manual_needed로 분기 완료)
         local ftp_installed=false
-        for config_file in "${ftp_config_files[@]}"; do
+        if [ ${#ftp_config_files[@]} -gt 0 ]; then
             ftp_installed=true
-            break
-        done || true
+        fi
 
         if [ "$ftp_installed" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="FTP 배너 정보가 제거되거나 적절하게 설정됨"
-            local grep_banner=$(grep -iE 'banner|version' /etc/ssh/sshd_config 2>/dev/null | head -10 || echo "No banner/version settings found")
-            command_result="[Command: grep banner sshd_config]${newline}${grep_banner}"
-            command_executed="grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null"
+            local grep_banner=$(grep -hE '^[[:space:]]*(ftpd_banner|banner_file|ServerIdent)' ${ftp_config_files[@]+"${ftp_config_files[@]}"} 2>/dev/null | head -10 || echo "배너 지시자 설정 없음 또는 양호")
+            command_result="[Command: grep ftpd_banner/banner_file/ServerIdent (FTP 설정 파일)]${newline}${grep_banner:-배너 지시자 없음(banner_file/ServerIdent off 등 양호 설정)}"
+            command_executed="grep -E 'ftpd_banner|banner_file|ServerIdent' ${ftp_config_files[*]+"${ftp_config_files[*]}"}"
         else
+            local cmd_check=$(command -v ftpd 2>/dev/null || echo "ftpd command not found")
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="FTP 서비스가 설치되지 않음"
-            local lssrc_out=$(lssrc -s ftpd 2>/dev/null || echo "FTP service not found")
-            local cmd_check=$(command -v ftpd 2>/dev/null || echo "ftpd command not found")
-            command_result="[Command: lssrc -s ftpd]${newline}${lssrc_out}${newline}${newline}[Command: command -v ftpd]${newline}${cmd_check}"
-            command_executed="ls /etc/{vsftpd.conf,proftpd/proftpd.conf} 2>/dev/null"
+            command_result="[Command: lssrc -s ftpd]${newline}${lssrc_ftpd_out}${newline}${newline}[Command: command -v ftpd]${newline}${cmd_check}"
+            command_executed="lssrc -s ftpd; grep -E '^ftp' /etc/inetd.conf; ls /etc/{vsftpd.conf,proftpd/proftpd.conf} 2>/dev/null"
         fi
     fi
 

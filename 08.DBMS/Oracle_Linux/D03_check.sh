@@ -38,11 +38,14 @@ GUIDELINE_CRITERIA_BAD="기관 정책에 맞게 비밀번호 사용 기간 및 �
 GUIDELINE_REMEDIATION="기관 정책에 맞게 비밀번호 사용 기간 및 복잡 도 정책 설정"
 
 diagnose() {
-    # Oracle 서비스 확인
+    local command_result="" command_executed=""
+    # Oracle 서비스 확인 (서비스 미실행 시 자동 점검 불가 -> 수동진단)
     if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="서비스 미실행으로 자동 점검 불가 (수동진단 필요). 서비스 시작 후 비밀번호 사용 기간 및 복잡도 정책을 수동으로 확인하세요."
+        command_result="Oracle process not found"
+        command_executed="pgrep -x tnslsnr; pgrep -x oracle"
         save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
         verify_result_saved "${ITEM_ID}"
         return 0
@@ -98,9 +101,11 @@ diagnose() {
     local vulnerabilities_found=0
 
     if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="Oracle 서비스 미실행"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="서비스 미실행으로 자동 점검 불가 (수동진단 필요). 서비스 시작 후 비밀번호 사용 기간 및 복잡도 정책을 수동으로 확인하세요."
+        command_result="Oracle process not found"
+        command_executed="pgrep -x tnslsnr; pgrep -x oracle"
         save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
         verify_result_saved "${ITEM_ID}"
         return 0
@@ -108,7 +113,7 @@ diagnose() {
 
     # 비밀번호 Profile 확인
     local profile_check="SELECT profile FROM dba_profiles WHERE resource_name='PASSWORD_VERIFY_FUNCTION';"
-    command_result=$(sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" "${profile_check}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
+    command_result=$(echo "${profile_check}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
 
     if [ -z "$command_result" ] || echo "$command_result" | grep -q "NULL"; then
         ((vulnerabilities_found++)) || true
@@ -119,7 +124,7 @@ diagnose() {
 
     # 비밀번호 정책 변수 확인
     local policy_vars="SELECT resource_name, limit FROM dba_profiles WHERE profile='DEFAULT' AND resource_type='PASSWORD' ORDER BY resource_name;"
-    command_result=$(sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" "${policy_vars}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
+    command_result=$(echo "${policy_vars}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
 
     if [ -n "$command_result" ]; then
         local password_life=$(echo "$command_result" | grep "PASSWORD_LIFE_TIME" | awk '{print $2}' || echo "")

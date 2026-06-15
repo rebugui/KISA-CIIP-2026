@@ -11,7 +11,7 @@
 # @Platform    : Tomcat_Linux
 # @Severity    : 상
 # @Title       : 불필요한 프 록 시 설정 제한
-# @Description : 불필요한 CGI 스크립트 핸들러 매핑 제거 여부 점검
+# @Description : 불필요한 Proxy 설정(proxyName/proxyPort/AJP Connector) 제한 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 
@@ -42,12 +42,11 @@ GUIDELINE_REMEDIATION="불필요한 Proxy 설정 존재 여부 점검 및 제한
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local servlet_count=0
 
         # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -82,42 +81,50 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
-    local web_xml_locations=(
-        "/etc/tomcat*/web.xml"
-        "/var/lib/tomcat*/conf/web.xml"
-        "/usr/share/tomcat*/conf/web.xml"
+    # 불필요한 Proxy 설정 점검
+    # 가이드라인 기준: server.xml Connector 요소의 proxyName/proxyPort 속성 및
+    # AJP Connector(protocol="AJP/1.3") 등 불필요한 Proxy 관련 설정 존재 여부 점검
+    # (criteria_bad: 불필요한 Proxy 설정을 제한하지 않은 경우)
+    local server_xml_locations=(
+        "/etc/tomcat*/server.xml"
+        "/var/lib/tomcat*/conf/server.xml"
+        "/usr/share/tomcat*/conf/server.xml"
     )
 
-    local servlet_mappings=""
+    local proxy_config=""
+    local has_proxy=false
+    local config_found=false
 
-    for xml_pattern in "${web_xml_locations[@]}"; do
+    for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                local found_mapping=$(grep -E "<servlet>|<servlet-mapping>" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
-                if [ -n "${found_mapping}" ]; then
-                    servlet_mappings="${servlet_mappings}"$'\n'"${found_mapping}"
-                    servlet_count=$((servlet_count + 1))
+                config_found=true
+                # proxyName / proxyPort 속성 및 AJP Connector 점검 (주석 제외)
+                local found_proxy=$(grep -iE "proxyName|proxyPort|protocol\s*=\s*\"AJP" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                if [ -n "${found_proxy}" ]; then
+                    proxy_config="${found_proxy}"
+                    has_proxy=true
                 fi
                 break 2
             fi
         done
     done
 
-    command_executed="grep -E '<servlet>|<servlet-mapping>' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
-    command_result="${servlet_mappings:-No servlet mappings found}"
+    command_executed="grep -iE 'proxyName|proxyPort|protocol=\"AJP' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
+    command_result="${proxy_config:-No proxyName/proxyPort/AJP Connector configuration found}"
 
-    if [ ${servlet_count} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="스크립트 매핑이 발견되지 않았습니다 (정적 리소스 전용)."
-    elif [ ${servlet_count} -le 5 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="스크립트 매핑이 ${servlet_count}개 발견되었습니다. 최소한의 매핑만 유지 권장."
-    else
+    if [ "${config_found}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat server.xml을 찾을 수 없습니다. Connector 요소의 proxyName/proxyPort 속성 및 불필요한 AJP Connector 설정 존재 여부를 수동으로 확인하세요."
+    elif [ "${has_proxy}" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="다수의 스크립트 매핑(${servlet_count}개)이 발견되었습니다. 불필요한 매핑 제거 권장."
+        inspection_summary="server.xml에 Proxy 관련 설정(proxyName/proxyPort 또는 AJP Connector)이 존재합니다. 불필요한 경우 제거 권장."
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="불필요한 Proxy 설정(proxyName/proxyPort/AJP Connector)이 발견되지 않았습니다. (보안 권고사항 준수)"
     fi
 
     # Run-all 모드 확인

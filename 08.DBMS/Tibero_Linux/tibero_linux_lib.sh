@@ -226,14 +226,7 @@ invoke_tibero_linux_check() {
             fi
             ;;
         D-07)
-            lines="${TIBERO_PROCESS_EVIDENCE}"
-            if printf '%s' "${lines}" | grep -Eiq '^[[:space:]]*root[[:space:]]'; then
-                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero processes appear to run as root." "${lines}" "Inspect Tibero process owner"
-            elif [ -n "${lines}" ]; then
-                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero processes are not obviously running as root." "${lines}" "Inspect Tibero process owner"
-            else
-                tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero process owner could not be determined." "$(tibero_evidence)" "Inspect Tibero process owner"
-            fi
+            tibero_set_result "N/A" "N/A" "root-privilege service-execution control (D-07) does not target Tibero." "D-07 target scope is Oracle DB, MySQL, Altibase, Cubrid; Tibero is out of scope for this item." "Map DBMS root-execution guideline applicability"
             ;;
         D-08)
             lines="$(tibero_config_grep 'ENCRYPT|SSL|WALLET|CERT' || true)"
@@ -248,8 +241,8 @@ invoke_tibero_linux_check() {
             fi
             ;;
         D-10)
-            lines="$(tibero_config_grep 'LSNR_INVITED_IP|LSNR_DENIED_IP|LISTENER_PORT|LSNR_PORT' || true)"
-            [ -n "${lines}" ] && tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero listener IP restriction evidence was found." "${lines}" "grep Tibero listener access controls" || tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero listener IP restriction evidence was not conclusive; confirm firewall/listener policy." "$(tibero_evidence)" "grep Tibero listener access controls"
+            lines="$(tibero_config_grep '(LSNR_INVITED_IP|LSNR_DENIED_IP)[[:space:]]*=[[:space:]]*[^[:space:]]' || true)"
+            [ -n "${lines}" ] && tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero listener IP restriction evidence (LSNR_INVITED_IP/LSNR_DENIED_IP) was found." "${lines}" "grep Tibero listener IP access controls" || tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "No Tibero listener IP restriction (LSNR_INVITED_IP/LSNR_DENIED_IP) was found; confirm firewall/listener source-IP policy." "$(tibero_evidence)" "grep Tibero listener IP access controls"
             ;;
         D-11)
             tibero_sql_check "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE owner IN ('SYS','SYSCAT') AND grantee NOT IN ('SYS','SYSCAT','DBA') AND ROWNUM <= 100;" "system table access restriction" || return 0

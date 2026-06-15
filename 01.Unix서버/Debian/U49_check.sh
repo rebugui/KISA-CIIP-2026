@@ -67,7 +67,7 @@ diagnose() {
         dns_info="${dns_info}BIND 버전: ${bind_version}${newline}"
 
         # 버전에서 메이저/마이너 번호 추출
-        local version_number=$(echo "$bind_version" | grep -oP '\d+\.\d+' | head -1)
+        local version_number=$(echo "$bind_version" | sed -n 's/^[^0-9]*\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1 || true)
         dns_info="${dns_info}버전 번호: ${version_number}${newline}"
     fi
 

@@ -49,6 +49,7 @@ diagnose() {
     local command_executed=""
     local has_autoindex_on=false
     local autoindex_settings=""
+    local config_readable=false
 
     # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -91,7 +92,8 @@ diagnose() {
 
     for conf_pattern in "${nginx_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
-            if [ -f "${conf_file}" ]; then
+            if [ -f "${conf_file}" ] && [ -r "${conf_file}" ]; then
+                config_readable=true
                 local found_autoindex=$(grep -E "^\s*autoindex" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
                 if [ -n "${found_autoindex}" ]; then
                     autoindex_settings="${autoindex_settings}"$'\n'"${found_autoindex}"
@@ -110,6 +112,13 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="autoindex가 on으로 설정되어 있습니다. 디렉터리 내 파일 목록이 노출될 수 있습니다. autoindex off; 설정 권장."
+    elif [ "${config_readable}" = false ]; then
+        # nginx 프로세스는 실행 중이나 설정 파일을 읽을 수 없거나 존재하지 않음.
+        # 읽지 못한 설정에 autoindex on이 포함될 수 있으므로 GOOD로 단정할 수 없어 수동진단으로 분류.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Nginx가 실행 중이나 점검 가능한 설정 파일(/etc/nginx/nginx.conf, conf.d, sites-enabled)을 찾거나 읽을 수 없습니다. autoindex 설정 여부를 수동으로 확인하세요."
+        command_result="No readable nginx configuration file found while nginx is running"
     else
         diagnosis_result="GOOD"
         status="양호"

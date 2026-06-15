@@ -62,8 +62,8 @@ diagnose() {
     # 시스템 계정 목록 (FTP 접속이 제한되어야 할 계정)
     local system_accounts=("root" "bin" "daemon" "adm" "lp" "sync" "shutdown" "halt" "mail" "news" "uucp" "operator" "games" "gopher" "ftp" "nobody" "sys")
 
-    # ftpusers 파일 위치 확인 (다양한 경로 지원)
-    local ftpusers_files=("/etc/ftpusers" "/etc/vsftpd/ftpusers" "/etc/pure-ftpd/ftpusers" "/etc/proftpd/ftpusers")
+    # ftpusers 파일 위치 확인 (HP-UX ftpd는 /etc/ftpd/ftpusers 우선)
+    local ftpusers_files=("/etc/ftpd/ftpusers" "/etc/ftpusers" "/etc/vsftpd/ftpusers" "/etc/pure-ftpd/ftpusers" "/etc/proftpd/ftpusers")
     local found_file=""
     local file_content=""
 
@@ -75,19 +75,54 @@ diagnose() {
         fi
     done || true
 
-    command_executed="ls -la /etc/ftpusers /etc/vsftpd/ftpusers /etc/pure-ftpd/ftpusers 2>/dev/null"
+    command_executed="ls -la /etc/ftpd/ftpusers /etc/ftpusers /etc/vsftpd/ftpusers /etc/pure-ftpd/ftpusers 2>/dev/null"
+
+    # ProFTPD 설정 확인 (UseFtpUsers / RootLogin)
+    local proftpd_conf=""
+    local proftpd_root_login=""
+    local proftpd_use_ftpusers=""
+    for pconf in /etc/proftpd.conf /etc/proftpd/proftpd.conf; do
+        if [ -f "$pconf" ]; then
+            proftpd_conf="$pconf"
+            proftpd_root_login=$(grep -iE '^[[:space:]]*RootLogin[[:space:]]' "$pconf" 2>/dev/null | tail -1 | awk '{print tolower($2)}') || true
+            proftpd_use_ftpusers=$(grep -iE '^[[:space:]]*UseFtpUsers[[:space:]]' "$pconf" 2>/dev/null | tail -1 | awk '{print tolower($2)}') || true
+            break
+        fi
+    done || true
 
     # 최종 판정
-    if [ -z "$found_file" ]; then
+    if [ -n "$proftpd_conf" ] && [ "$proftpd_root_login" = "on" ]; then
+        # proftpd RootLogin on이면 ftpusers와 무관하게 root 접속 허용 상태
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="proftpd 설정에서 RootLogin on으로 root FTP 접속이 허용되어 있습니다(${proftpd_conf})."
+        command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login}, UseFtpUsers: ${proftpd_use_ftpusers:-on(기본값)}"
+    elif [ -n "$proftpd_conf" ] && [ "$proftpd_use_ftpusers" = "off" ]; then
+        # UseFtpUsers off이면 ftpusers 파일이 적용되지 않음 → 다른 차단 수단(RootLogin off) 필요
+        if [ "$proftpd_root_login" = "off" ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="proftpd UseFtpUsers off 설정이나 RootLogin off로 root FTP 접속이 차단되어 있습니다(${proftpd_conf})."
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="proftpd UseFtpUsers off 설정으로 ftpusers 파일이 적용되지 않으며, RootLogin 차단 설정이 없습니다(${proftpd_conf})."
+        fi
+        command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login:-미설정}, UseFtpUsers: ${proftpd_use_ftpusers}"
+    elif [ -z "$found_file" ]; then
         # ftpusers 파일이 존재하지 않음
-        # FTP 서비스가 설치되어 있는지 확인
+        # FTP 서비스가 동작 중인지 확인 (HP-UX: inetd.conf 우선, init.d 보조)
         local ftp_found=false
-        for ftpsvc in vsftpd proftpd pure-ftpd ftpd; do
-            if [ -f /sbin/init.d/"$ftpsvc" ]; then
-                ftp_found=true
-                break
-            fi
-        done
+        if grep -qE '^ftp[[:space:]]' /etc/inetd.conf 2>/dev/null; then
+            ftp_found=true
+        else
+            for ftpsvc in vsftpd proftpd pure-ftpd ftpd; do
+                if [ -f /sbin/init.d/"$ftpsvc" ]; then
+                    ftp_found=true
+                    break
+                fi
+            done
+        fi
 
         if [ "$ftp_found" = true ]; then
             diagnosis_result="VULNERABLE"

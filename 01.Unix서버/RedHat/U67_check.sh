@@ -89,7 +89,7 @@ diagnose() {
     fi
 
     # Capture raw output for /var/log directory and files (RedHat uses stat)
-    raw_output=$(echo "=== /var/log Directory Info ===" && ls -ld /var/log 2>/dev/null && echo -e "\n=== Critical Log Files ===" && ls -la /var/log/syslog 2>/dev/null && echo -e "\n=== World-Writable Files ===" && find /var/log -type f -perm -o+w 2>/dev/null | head -5 || echo "None found")
+    raw_output=$(echo "=== /var/log Directory Info ===" && ls -ld /var/log 2>/dev/null && echo -e "\n=== Critical Log Files ===" && ls -la /var/log/messages /var/log/secure 2>/dev/null; echo -e "\n=== Group/World-Writable Files ===" && find /var/log -xdev -type f \( -perm -g+w -o -perm -o+w \) 2>/dev/null | head -5 || echo "None found")
 
     # 권한 및 소유자 확인 (RedHat: stat -c 지원)
     local dir_perms=$(stat -c "%a" "$log_dir" 2>/dev/null || echo "0000")
@@ -103,31 +103,40 @@ diagnose() {
         is_secure=false
         details="${details} (디렉토리 소유자가 root가 아님)"
     else
-        # 개별 로그 파일 소유자 및 권한 확인 (RedHat: stat -c 지원)
+        # 개별 로그 파일 소유자 및 권한 확인 (/var/log 하위 디렉터리 포함 재귀 점검)
         local vulnerable_files=""
-        for logfile in "$log_dir"/*; do
-            if [ -f "$logfile" ]; then
-                local f_owner=$(stat -c "%U" "$logfile" 2>/dev/null || echo "unknown")
-                local f_perms=$(stat -c "%a" "$logfile" 2>/dev/null || echo "0000")
-
-                # 소유자가 root가 아니거나 권한이 644 초과인 경우 취약
-                if [ "$f_owner" != "root" ] && [ "$f_owner" != "syslog" ]; then
-                    vulnerable_files="${vulnerable_files}$(basename "$logfile")(owner:${f_owner}) "
-                elif [ "$f_perms" -gt 644 ] 2>/dev/null; then
-                    vulnerable_files="${vulnerable_files}$(basename "$logfile")(perm:${f_perms}) "
+        local vuln_count=0
+        local file_scan=""
+        file_scan=$(find "$log_dir" -xdev -type f -printf '%m %u %p\n' 2>/dev/null) || true
+        local f_perms="" f_owner="" f_path=""
+        while IFS=' ' read -r f_perms f_owner f_path; do
+            [ -n "${f_path:-}" ] || continue
+            # 소유자가 root(또는 정당한 로그 데몬 시스템 계정)가 아니거나 권한이 644 초과(644 비트 외
+            # 권한 보유)인 경우 취약. systemd 호스트의 /var/log/journal/* 는 systemd-journal 소유,
+            # 일부 배포판 로그는 syslog 소유가 표준이므로 이들 데몬 계정은 허용한다(그 외 비-root는 취약).
+            # 644 초과 여부는 십진 비교가 아닌 비트 마스크(~644 = 7133)로 판정 (예: 622, 755 모두 취약)
+            if [ "$f_owner" != "root" ] && [ "$f_owner" != "systemd-journal" ] && [ "$f_owner" != "syslog" ]; then
+                vuln_count=$((vuln_count + 1))
+                if [ "$vuln_count" -le 10 ]; then
+                    vulnerable_files="${vulnerable_files}${f_path}(owner:${f_owner}) "
+                fi
+            elif [ $(( (8#${f_perms}) & (8#7133) )) -ne 0 ]; then
+                vuln_count=$((vuln_count + 1))
+                if [ "$vuln_count" -le 10 ]; then
+                    vulnerable_files="${vulnerable_files}${f_path}(perm:${f_perms}) "
                 fi
             fi
-        done
+        done <<< "$file_scan"
 
-        if [ -z "$vulnerable_files" ]; then
+        if [ "$vuln_count" -eq 0 ]; then
             is_secure=true
         else
             is_secure=false
-            details="${details}, 취약 파일: ${vulnerable_files}"
+            details="${details}, 취약 파일 ${vuln_count}건(최대 10건 표시): ${vulnerable_files}"
         fi
     fi
 
-    command_executed="stat -c '%a %U %G' /var/log && find /var/log -type f -exec stat -c '%a %U %n' {} \; 2>/dev/null | head -20"
+    command_executed="stat -c '%a %U %G' /var/log && find /var/log -xdev -type f -printf '%m %u %p\n' 2>/dev/null"
 
     # 최종 판정
     if [ "$is_secure" = true ]; then

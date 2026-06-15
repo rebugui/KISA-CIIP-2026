@@ -46,6 +46,39 @@ GUIDELINE_REMEDIATION="root 계정을 포함한 사용자 계정의 비밀번호
 # 진단 함수
 # ============================================================================
 
+# /etc/security/user 의 default: 스탠자에서 속성 값 추출 (마지막 정의 우선)
+u02_get_default_attr() {
+    awk -v key="$1" '
+        /^\*/ { next }
+        /^default:/ { in_def=1; next }
+        /^[^ \t]/ { in_def=0 }
+        in_def && $0 ~ ("^[ \t]*" key "[ \t]*=") {
+            line=$0
+            sub(/^[ \t]*[A-Za-z_]+[ \t]*=[ \t]*/, "", line)
+            sub(/[ \t]*$/, "", line)
+            val=line
+        }
+        END { if (val != "") print val }
+    ' "$2" 2>/dev/null || true
+}
+
+# /etc/security/user 에서 지정한 스탠자 전체 추출 (증적용)
+u02_get_stanza() {
+    awk -v stanza="$1" '
+        $0 == stanza ":" { f=1; print; next }
+        /^[^ \t]/ { f=0 }
+        f { print }
+    ' "$2" 2>/dev/null || true
+}
+
+# 양의 정수(0 포함) 여부 확인
+u02_is_number() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # 진단 수행
 diagnose() {
 
@@ -55,122 +88,102 @@ diagnose() {
     local command_result=""
     local command_executed=""
 
-    # 진단 로직 구현
-    # AIX는 /etc/security/user 파일에서 비밀번호 정책 확인
-    # 확인 항목: minlen, minalpha, minother, maxage
+    # 진단 로직 구현 (KISA 가이드 AIX 기준: /etc/security/user 의 default: 스탠자)
+    #  - maxage 1~12 (주 단위 최대 사용 기간, 90일 ≈ 12주, 0/미설정은 만료 없음으로 취약)
+    #  - minage >= 1 (주 단위 최소 사용 기간)
+    #  - minlen >= 8 (비밀번호 최소 길이)
+    #  - histsize >= 4 (최근 비밀번호 기억 횟수)
+    #  - minalpha >= 1 (영문자 최소 개수, 복잡성)
+    #  - minother >= 1 (영문자 외 문자(숫자/특수문자) 최소 개수, 복잡성)
+    # root: 스탠자는 참고 증적으로만 기록
 
-    local is_secure=false
-    local config_details=""
-    local has_policy=false
-    local complexity_ok=false
-    local age_ok=false
-
-    # Raw command outputs
-    local security_user_output=""
-    local newline=$'\n'
-
-    # ============================================================================
-    # 1) /etc/security/user 파일 확인
-    # ============================================================================
     local security_user_file="/etc/security/user"
+    local newline=$'\n'
+    local default_stanza_output=""
+    local root_stanza_output=""
+    local config_details=""
 
-    if [ -f "$security_user_file" ]; then
-        # Raw output 저장 (root 섹션 추출)
-        security_user_output=$(awk '/^root:/,/^$/ {print}' "$security_user_file" 2>/dev/null || echo "")
+    if [ -f "$security_user_file" ] && [ -r "$security_user_file" ]; then
+        # 증적용 raw output (default: 스탠자 = 판정 기준, root: 스탠자 = 참고)
+        default_stanza_output=$(u02_get_stanza "default" "$security_user_file")
+        root_stanza_output=$(u02_get_stanza "root" "$security_user_file")
 
-        # 각 설정값 추출 (root 계정 기준)
-        local minlen=$(awk '/^root:/,/^$/ {print}' "$security_user_file" | grep "minlen" | awk '{print $3}')
-        local minalpha=$(awk '/^root:/,/^$/ {print}' "$security_user_file" | grep "minalpha" | awk '{print $3}')
-        local minother=$(awk '/^root:/,/^$/ {print}' "$security_user_file" | grep "minother" | awk '{print $3}')
-        local maxage=$(awk '/^root:/,/^$/ {print}' "$security_user_file" | grep "maxage" | awk '{print $3}')
+        local maxage=""
+        local minage=""
+        local minlen=""
+        local histsize=""
+        local minalpha=""
+        local minother=""
+        maxage=$(u02_get_default_attr "maxage" "$security_user_file")
+        minage=$(u02_get_default_attr "minage" "$security_user_file")
+        minlen=$(u02_get_default_attr "minlen" "$security_user_file")
+        histsize=$(u02_get_default_attr "histsize" "$security_user_file")
+        minalpha=$(u02_get_default_attr "minalpha" "$security_user_file")
+        minother=$(u02_get_default_attr "minother" "$security_user_file")
 
-        # AIX 기본값 (설정되지 않은 경우)
-        # minlen: 기본값 0 (제한 없음), minalpha/minother: 기본값 0, maxage: 기본값 0
-        minlen=${minlen:-0}
-        minalpha=${minalpha:-0}
-        minother=${minother:-0}
-        maxage=${maxage:-0}
+        config_details="default 스탠자: maxage=${maxage:-미설정}(주), minage=${minage:-미설정}(주), minlen=${minlen:-미설정}, histsize=${histsize:-미설정}, minalpha=${minalpha:-미설정}, minother=${minother:-미설정}"
 
-        config_details="[AIX /etc/security/user] root account: "
-        config_details="${config_details}minlen=${minlen}, "
-        config_details="${config_details}minalpha=${minalpha}, "
-        config_details="${config_details}minother=${minother}, "
-        config_details="${config_details}maxage=${maxage}"
-
-        # 판정: minlen >= 8, minalpha >= 1, minother >= 1, maxage <= 90
+        local maxage_ok=false
+        local minage_ok=false
         local minlen_ok=false
+        local histsize_ok=false
         local minalpha_ok=false
         local minother_ok=false
-        local maxage_ok=false
 
-        # 설정이 하나라도 있는지 확인
-        if [ -n "$(awk '/^root:/,/^$/ {print}' "$security_user_file" | grep -E 'minlen|minalpha|minother|maxage')" ]; then
-            has_policy=true
-        fi
-
-        # minlen 검증: 8자 이상
-        if [ "$minlen" -ge 8 ]; then
-            minlen_ok=true
-        fi
-
-        # minalpha 검증: 1자 이상 (영문자)
-        if [ "$minalpha" -ge 1 ]; then
-            minalpha_ok=true
-        fi
-
-        # minother 검증: 1자 이상 (숫자+특수문자)
-        if [ "$minother" -ge 1 ]; then
-            minother_ok=true
-        fi
-
-        # maxage 검증: 90일 이하 (0이면 무제한이므로 취약)
-        if [ "$maxage" -gt 0 ] && [ "$maxage" -le 90 ]; then
+        # maxage: 주(week) 단위. 1~12주 (90일 ≈ 12주). 0 또는 미설정은 만료 없음 → 취약
+        if u02_is_number "$maxage" && [ "$maxage" -ge 1 ] && [ "$maxage" -le 12 ]; then
             maxage_ok=true
         fi
 
-        # 복잡성: minlen, minalpha, minother 모두 충족
-        if [ "$minlen_ok" = true ] && [ "$minalpha_ok" = true ] && [ "$minother_ok" = true ]; then
-            complexity_ok=true
+        # minage: 주(week) 단위. 1주 이상
+        if u02_is_number "$minage" && [ "$minage" -ge 1 ]; then
+            minage_ok=true
         fi
 
-        # 사용 기간: maxage 설정 확인
-        if [ "$maxage_ok" = true ]; then
-            age_ok=true
+        # minlen >= 8
+        if u02_is_number "$minlen" && [ "$minlen" -ge 8 ]; then
+            minlen_ok=true
+        fi
+
+        # histsize >= 4
+        if u02_is_number "$histsize" && [ "$histsize" -ge 4 ]; then
+            histsize_ok=true
+        fi
+
+        # minalpha >= 1 (영문자 포함 - 복잡성. 0/미설정은 문자 구성 요구 없음 → 취약)
+        if u02_is_number "$minalpha" && [ "$minalpha" -ge 1 ]; then
+            minalpha_ok=true
+        fi
+
+        # minother >= 1 (영문자 외 문자(숫자/특수문자) 포함 - 복잡성. 0/미설정은 취약)
+        if u02_is_number "$minother" && [ "$minother" -ge 1 ]; then
+            minother_ok=true
+        fi
+
+        if [ "$maxage_ok" = true ] && [ "$minage_ok" = true ] && \
+           [ "$minlen_ok" = true ] && [ "$histsize_ok" = true ] && \
+           [ "$minalpha_ok" = true ] && [ "$minother_ok" = true ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="비밀번호 관리 정책이 적절하게 설정됨 (${config_details})"
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="비밀번호 관리 정책 미흡: ${config_details} (기준: maxage 1~12주, minage>=1주, minlen>=8, histsize>=4, minalpha>=1, minother>=1)"
         fi
     else
-        config_details="[AIX /etc/security/user] 파일 없음"
-        # 원본 ls -l 출력 저장 (파일 존재 여부 확인)
-        security_user_output=$(ls -l "$security_user_file" 2>/dev/null || echo "File not found: ${security_user_file}")
-        has_policy=false
-    fi
-
-    # ============================================================================
-    # 최종 판정
-    # ============================================================================
-    # 복잡성 설정과 사용 기간 설정 모두 확인되어야 양호
-    if [ "$complexity_ok" = true ] && [ "$age_ok" = true ]; then
-        is_secure=true
-    fi
-
-    if [ "$has_policy" = false ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="비밀번호 관리 정책 미설정 (/etc/security/user 설정 없음)"
-    elif [ "$is_secure" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="비밀번호 관리 정책이 적절하게 설정됨 (${config_details})"
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="비밀번호 관리 정책이 부적절하게 설정됨 (${config_details})"
+        # 파일이 없거나 읽을 수 없는 경우 → 수동 점검
+        default_stanza_output=$(ls -l "$security_user_file" 2>/dev/null || echo "File not found: ${security_user_file}")
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="/etc/security/user 파일이 없거나 읽을 수 없어 비밀번호 관리 정책을 확인하지 못함 - 수동 점검 필요"
     fi
 
     # 명령어 실행 결과 결합 (raw output)
-    local awk_output=$(awk '/^root:/,/^$/ {print}' "$security_user_file" 2>/dev/null || echo "No root section found")
-    command_result="[Command: awk '/^root:/,/^$/' /etc/security/user]${newline}${awk_output}"
+    command_result="[/etc/security/user default: 스탠자]${newline}${default_stanza_output:-default 스탠자 없음}${newline}${newline}"
+    command_result="${command_result}[/etc/security/user root: 스탠자 (참고)]${newline}${root_stanza_output:-root 스탠자 없음}"
 
-    command_executed="awk '/^root:/,/^$/ {print}' /etc/security/user"
+    command_executed="awk(/etc/security/user default: 스탠자 maxage/minage/minlen/histsize/minalpha/minother); awk(/etc/security/user root: 스탠자)"
 
     #echo ""
     #echo "진단 결과: ${status}"

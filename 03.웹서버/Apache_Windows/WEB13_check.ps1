@@ -32,7 +32,7 @@ $remediation = "DB 연결 파일에 대한 접근 권한 제한 또는 불필요
 
 try {
     $finalResult = "N/A"
-    $status = "not_applicable"
+    $status = "N/A"
     $summary = "Apache for Windows is not a target platform for WEB-13 according to docs/04_웹서비스.md."
     $commandOutput = "WEB-13 targets Tomcat, IIS, and JEUS. Apache DB connection/config exposure checks are not defined for this item; use Apache-specific WEB-04, WEB-05, WEB-15, and access-control checks where applicable."
     $commandExecuted = "docs/04_웹서비스.md WEB-13 target platform review"

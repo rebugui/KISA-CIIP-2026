@@ -101,10 +101,24 @@ diagnose() {
         issue_net_file="없음"
     fi
 
+    # 2b) /etc/motd 파일 확인 (로그인 시 공지/경고 메시지)
+    local motd_file=""
+    if [ -f /etc/motd ]; then
+        local motd_content=$(cat /etc/motd 2>/dev/null)
+        if [ -n "$motd_content" ] && echo "$motd_content" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
+            has_warning=true
+            motd_file="존재함 (경고 메시지 포함)"
+        else
+            motd_file="경고 메시지 없음"
+        fi
+    else
+        motd_file="없음"
+    fi
+
     # 3) SSH Banner 설정 확인 (SSH를 통한 로그인 시)
     local ssh_banner=""
     if [ -f /etc/ssh/sshd_config ]; then
-        ssh_banner=$(grep -E "^[\s]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^#" | awk '{print $2}')
+        ssh_banner=$(grep -E "^[[:space:]]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^[[:space:]]*#" | awk '{print $2}' || true)
         if [ -n "$ssh_banner" ]; then
             if [ -f "$ssh_banner" ]; then
                 has_warning=true
@@ -117,26 +131,116 @@ diagnose() {
         fi
     fi
 
+    # 4) 사용 중인 서비스(Telnet/FTP/SMTP)별 배너 설정 확인 (Solaris)
+    local svc_missing=""
+    local svc_evidence=""
+
+    # 4-1) Telnet: /etc/default/telnetd BANNER
+    local telnet_on=false
+    if svcs -H -o state svc:/network/telnet:default 2>/dev/null | grep -q online; then
+        telnet_on=true
+    elif grep -qE '^[[:space:]]*telnet[[:space:]]' /etc/inetd.conf 2>/dev/null; then
+        telnet_on=true
+    fi
+    if [ "$telnet_on" = true ]; then
+        local telnet_banner=$(grep -E '^[[:space:]]*BANNER=' /etc/default/telnetd 2>/dev/null | tail -1 || true)
+        svc_evidence="${svc_evidence}[/etc/default/telnetd BANNER] ${telnet_banner:-미설정}${newline}"
+        if [ -z "$telnet_banner" ]; then
+            svc_missing="${svc_missing}Telnet(/etc/default/telnetd BANNER) "
+        fi
+    fi
+
+    # 4-2) FTP: /etc/default/ftpd BANNER
+    local ftp_on=false
+    if svcs -H -o state svc:/network/ftp:default 2>/dev/null | grep -q online; then
+        ftp_on=true
+    elif grep -qE '^[[:space:]]*ftp[[:space:]]' /etc/inetd.conf 2>/dev/null; then
+        ftp_on=true
+    fi
+    if [ "$ftp_on" = true ]; then
+        local ftp_banner=$(grep -E '^[[:space:]]*BANNER=' /etc/default/ftpd 2>/dev/null | tail -1 || true)
+        svc_evidence="${svc_evidence}[/etc/default/ftpd BANNER] ${ftp_banner:-미설정}${newline}"
+        if [ -z "$ftp_banner" ]; then
+            svc_missing="${svc_missing}FTP(/etc/default/ftpd BANNER) "
+        fi
+    fi
+
+    # 4-3) SMTP(sendmail): SmtpGreetingMessage 설정 (버전 노출 매크로 $v 미사용)
+    local smtp_on=false
+    if svcs -H -o state svc:/network/smtp:sendmail 2>/dev/null | grep -q online; then
+        smtp_on=true
+    elif ps -ef 2>/dev/null | grep -q "[s]endmail"; then
+        smtp_on=true
+    fi
+    if [ "$smtp_on" = true ] && [ -f /etc/mail/sendmail.cf ]; then
+        local smtp_greeting=$(grep -E '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null | tail -1 || true)
+        svc_evidence="${svc_evidence}[sendmail SmtpGreetingMessage] ${smtp_greeting:-미설정}${newline}"
+        if [ -z "$smtp_greeting" ] || echo "$smtp_greeting" | grep -q '\$v'; then
+            svc_missing="${svc_missing}SMTP(sendmail.cf SmtpGreetingMessage 미설정 또는 버전 노출) "
+        fi
+    fi
+
+    # 4-4) DNS(named/BIND): named 실행 중이면 named.conf의 version 디렉티브로 버전 은닉 확인
+    #      (가이드 U-62 DNS: /etc/named.conf 또는 /etc/bind/named.conf.options 의 version "..."; 설정)
+    local dns_on=false
+    if svcs -H -o state svc:/network/dns/server:default 2>/dev/null | grep -q online; then
+        dns_on=true
+    elif ps -ef 2>/dev/null | grep -q "[n]amed"; then
+        dns_on=true
+    fi
+    if [ "$dns_on" = true ]; then
+        local named_version_ok=false
+        local named_conf
+        for named_conf in /etc/named.conf /etc/bind/named.conf.options /etc/bind/named.conf; do
+            [ -f "$named_conf" ] || continue
+            if grep -E '^[[:space:]]*version[[:space:]]+["'\'']?[^;]+' "$named_conf" 2>/dev/null | grep -v '^[[:space:]]*//' >/dev/null 2>&1; then
+                named_version_ok=true
+                svc_evidence="${svc_evidence}[DNS] ${named_conf} version 디렉티브 설정됨${newline}"
+                break
+            fi
+        done
+        if [ "$named_version_ok" = false ]; then
+            svc_missing="${svc_missing}DNS(named.conf version 은닉 미설정) "
+        fi
+    fi
+
     # Capture raw command output
-    raw_output=$(echo "=== /etc/issue ===" && cat /etc/issue 2>/dev/null && echo -e "\n=== /etc/issue.net ===" && cat /etc/issue.net 2>/dev/null && echo -e "\n=== SSH Banner ===" && grep -E "^[\s]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^#" || echo "No banner configured")
+    raw_output=$(
+        echo "=== /etc/issue ==="
+        cat /etc/issue 2>/dev/null
+        echo ""
+        echo "=== /etc/issue.net ==="
+        cat /etc/issue.net 2>/dev/null
+        echo ""
+        echo "=== /etc/motd ==="
+        cat /etc/motd 2>/dev/null
+        echo ""
+        echo "=== SSH Banner ==="
+        grep -E "^[[:space:]]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^[[:space:]]*#" || echo "No banner configured"
+    )
+    raw_output="${raw_output}${newline}${svc_evidence}"
 
     # 최종 판정
-    if [ "$has_warning" = true ]; then
+    warning_details="/etc/issue: ${issue_file}, /etc/issue.net: ${issue_net_file}, /etc/motd: ${motd_file}"
+    [ -n "$ssh_banner" ] && warning_details="${warning_details}, SSH Banner: ${ssh_banner}"
+    if [ -n "$svc_missing" ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="사용 중인 서비스에 로그온 경고 메시지 미설정: ${svc_missing%% }(일반 배너: ${warning_details})"
+        command_result="${raw_output}"
+        command_executed="cat /etc/issue /etc/issue.net /etc/motd 2>/dev/null; grep '^Banner' /etc/ssh/sshd_config 2>/dev/null; grep BANNER /etc/default/telnetd /etc/default/ftpd 2>/dev/null; grep SmtpGreetingMessage /etc/mail/sendmail.cf 2>/dev/null"
+    elif [ "$has_warning" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        warning_details="/etc/issue: ${issue_file}, /etc/issue.net: ${issue_net_file}"
-        [ -n "$ssh_banner" ] && warning_details="${warning_details}, SSH Banner: ${ssh_banner}"
         inspection_summary="로그인 경고 메시지가 설정됨: ${warning_details}"
         command_result="${raw_output}"
-        command_executed="cat /etc/issue /etc/issue.net 2>/dev/null; grep '^Banner' /etc/ssh/sshd_config 2>/dev/null"
+        command_executed="cat /etc/issue /etc/issue.net /etc/motd 2>/dev/null; grep '^Banner' /etc/ssh/sshd_config 2>/dev/null; grep BANNER /etc/default/telnetd /etc/default/ftpd 2>/dev/null; grep SmtpGreetingMessage /etc/mail/sendmail.cf 2>/dev/null"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        warning_details="/etc/issue: ${issue_file}, /etc/issue.net: ${issue_net_file}"
-        [ -n "$ssh_banner" ] && warning_details="${warning_details}, SSH Banner: ${ssh_banner}"
         inspection_summary="로그인 경고 메시지가 설정되지 않음: ${warning_details}"
         command_result="${raw_output}"
-        command_executed="cat /etc/issue /etc/issue.net 2>/dev/null; grep '^Banner' /etc/ssh/sshd_config 2>/dev/null"
+        command_executed="cat /etc/issue /etc/issue.net /etc/motd 2>/dev/null; grep '^Banner' /etc/ssh/sshd_config 2>/dev/null; grep BANNER /etc/default/telnetd /etc/default/ftpd 2>/dev/null; grep SmtpGreetingMessage /etc/mail/sendmail.cf 2>/dev/null"
     fi
 
     # echo ""

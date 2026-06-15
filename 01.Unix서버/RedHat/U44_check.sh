@@ -31,17 +31,40 @@ diagnose() {
     local inspection_summary="tftp 및 talk 서비스가 비활성화되어 있습니다."
     local command_result=""
     
-    local active_svcs=$(grep -Ei "tftp|talk" /etc/xinetd.d/* 2>/dev/null | grep "disable" | grep -i "no" | awk -F: '{print $1}' | xargs || echo "")
+    # 1) xinetd 기반 서비스: disable 항목이 없거나 disable=no 이면 활성화 상태 (xinetd 기본값)
+    local active_svcs=""
+    local svc_file disabled
+    for svc_file in /etc/xinetd.d/tftp /etc/xinetd.d/talk /etc/xinetd.d/ntalk; do
+        [ -f "$svc_file" ] || continue
+        disabled=$(grep -E '^[[:space:]]*disable' "$svc_file" 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
+        if [ "$disabled" != "yes" ]; then
+            active_svcs="${active_svcs}${svc_file}(disable=${disabled:-없음}) "
+        fi
+    done
+
+    # 2) systemd socket-activation 기반 tftp 확인
+    local socket_check=""
+    if command -v systemctl >/dev/null 2>&1; then
+        local unit state
+        for unit in tftp.socket tftp; do
+            state=$(systemctl is-active "$unit" 2>/dev/null || echo "inactive")
+            if [ "$state" = "active" ]; then
+                socket_check="${socket_check}${unit}(active) "
+            fi
+        done
+    fi
+
+    # 3) 실행 중인 프로세스 확인
     local proc_check=$(ps -ef | grep -Ei "tftpd|talkd" | grep -v grep || echo "")
 
-    if [ -n "$active_svcs" ] || [ -n "$proc_check" ]; then
+    if [ -n "$active_svcs" ] || [ -n "$socket_check" ] || [ -n "$proc_check" ]; then
         status="취약"; diagnosis_result="VULNERABLE"
         inspection_summary="보안에 취약한 tftp 또는 talk 서비스가 활성화되어 있습니다."
-        command_result="활성 서비스/프로세스: [ ${active_svcs} ${proc_check} ]"
+        command_result="활성 서비스/프로세스: [ ${active_svcs}${socket_check}${proc_check} ]"
     else
         command_result="tftp, talk 서비스가 모두 비활성화되어 있습니다."
     fi
 
-    save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "grep -Ei 'tftp|talk' /etc/xinetd.d/* 2>/dev/null; ps -ef | grep -Ei 'tftpd|talkd' | grep -v grep" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+    save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "grep -E '^[[:space:]]*disable' /etc/xinetd.d/{tftp,talk,ntalk} 2>/dev/null; systemctl is-active tftp.socket tftp; ps -ef | grep -Ei 'tftpd|talkd' | grep -v grep" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
 }
 main() { diagnose; }; main "$@"

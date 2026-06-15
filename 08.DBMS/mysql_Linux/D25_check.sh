@@ -11,7 +11,7 @@
 # @Platform    : mysql_Linux
 # @Severity    : 상
 # @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
-# @Description : 백업/복구 권한 제어로 데이터 무단 유출 방지
+# @Description : 설치된 DB 버전을 수집하여 벤더 보안 공지 대비 패치 적용 여부를 수동 판단
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -90,42 +90,21 @@ diagnose() {
         fi
     fi
 
-    # 백업 관련 권한 확인 (LOCK TABLES, SELECT, RELOAD)
-    local backup_query="SELECT user, host FROM mysql.user WHERE (Lock_tables_priv='Y' OR Reload_priv='Y' OR Select_priv='Y') ORDER BY user, host;"
-    command_executed="mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e \"${backup_query}\""
-    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${backup_query}" 2>/dev/null || echo "")
+    # D-25: 주기적 보안 패치 및 벤더 권고 사항 적용 (보안패치 항목).
+    # 적용된 패치/안전 버전 여부는 벤더 보안 공지 대비 정책적 판단이 필요하므로 자동 양호/취약 판정 불가.
+    # 설치된 버전을 근거로 수집하고 수동진단(MANUAL)으로 처리. (mysql_Windows D-25 lib과 동일 동작)
+    local version_query="SELECT VERSION();"
+    command_executed="mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e \"${version_query}\""
+    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${version_query}" 2>/dev/null || echo "")
 
-    if [ -z "$command_result" ]; then
-        # MySQL 8.0+의 경우
-        command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "SELECT DISTINCT grantee FROM information_schema.role_table_grants WHERE privilege_type IN ('SELECT', 'LOCK TABLES') OR grantee IN (SELECT user FROM mysql.user WHERE Super_priv='Y') LIMIT 20;" 2>/dev/null || echo "")
-    fi
+    local db_version=$(echo "$command_result" | tail -n +2 | grep -v "^$" | head -1)
 
-    # 결과 분석
-    if [ -n "$command_result" ]; then
-        local backup_count=$(echo "$command_result" | tail -n +2 | grep -v "^$" | wc -l)
-
-        if [ "$backup_count" -gt 0 ]; then
-            local backup_users=$(echo "$command_result" | tail -n +2 | grep -v "^$" || echo "")
-            local non_root_backup=$(echo "$backup_users" | grep -v -E "^root\s" || echo "")
-
-            if [ -n "$non_root_backup" ]; then
-                diagnosis_result="VULNERABLE"
-                status="취약"
-                inspection_summary="비-root 계정에 백업 관련 권한 부여됨: $(echo "$non_root_backup" | head -5 | tr '\n' ', ')"
-            else
-                diagnosis_result="GOOD"
-                status="양호"
-                inspection_summary="root 계정에만 백업 권한 부여됨 (총 ${backup_count}개)"
-            fi
-        else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="백업 권한을 가진 계정 없음"
-        fi
+    diagnosis_result="MANUAL"
+    status="수동진단"
+    if [ -n "$db_version" ]; then
+        inspection_summary="설치된 DB 버전: ${db_version}. 벤더 보안 공지(권고 패치 버전) 대비 적용 여부를 수동으로 판단 필요"
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="백업 권한 설정 양호"
+        inspection_summary="DB 버전 확인 불가. 벤더 보안 공지 대비 보안 패치 적용 여부를 수동으로 판단 필요"
     fi
 
     # Save results (only if library function exists)

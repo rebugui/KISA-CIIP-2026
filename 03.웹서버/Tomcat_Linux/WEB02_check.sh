@@ -42,7 +42,7 @@ diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
     local diagnosis_result="MANUAL"
-    local status="수동점검"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -84,6 +84,8 @@ diagnose() {
         "/etc/tomcat*/tomcat-users.xml"
         "/var/lib/tomcat*/conf/tomcat-users.xml"
         "/usr/share/tomcat*/conf/tomcat-users.xml"
+        "/usr/local/tomcat*/conf/tomcat-users.xml"
+        "/opt/tomcat*/conf/tomcat-users.xml"
     )
 
     local config_found=false
@@ -99,20 +101,90 @@ diagnose() {
     done
 
     if [ "${config_found}" = true ]; then
-        command_executed="cat ${xml_file}"
-        command_result="Configuration file found at: ${xml_file}"
+        command_executed="grep -iE '<user[[:space:]]' ${xml_file}"
 
-        inspection_summary="Tomcat은 비밀번호를 암호화된 형태로 저장하며 자동으로 복잡도를 확인할 수 없습니다. "
-        inspection_summary+="수동으로 tomcat-users.xml 파일(${xml_file})을 확인하여 다음 사항을 점검하세요:\\n"
-        inspection_summary+="1. 비밀번호가 SHA-256 이상으로 해시되어 있는지 확인\\n"
-        inspection_summary+="2. 영문 대소문자, 숫자, 특수문자가 2종류 이상 조합된 8자 이상인지 확인\\n"
-        inspection_summary+="3. 계정명과 동일하거나 유사한 비밀번호 사용 금지\\n"
-        inspection_summary+="4. 연속적인 문자나 숫자(1234, abcd 등) 사용 금지\\n"
-        inspection_summary+="5. 추측하기 쉬운 정보(전화번호, 생일 등) 사용 금지"
+        # 관리자 권한(roles에 manager/admin 포함) 사용자의 username/password 추출
+        # 형식: <user username="x" password="y" roles="..."/>
+        local weak_passwords="admin tomcat password passwd 1234 12345 123456 root s3cret secret manager changeit qwerty test guest tomcat123 admin123"
+        local found_priv_user=false
+        local vulnerable_evidence=""
+        local good_evidence=""
+
+        # user 요소를 한 줄씩 정규화하여 처리
+        local user_lines
+        user_lines="$(grep -ioE '<user[[:space:]][^>]*>' "${xml_file}" 2>/dev/null || true)"
+
+        while IFS= read -r line; do
+            [ -z "${line}" ] && continue
+            local roles uname pass
+            roles="$(printf '%s' "${line}" | grep -ioE 'roles="[^"]*"' | head -n1 | sed -E 's/roles="([^"]*)"/\1/I')"
+            # 관리자/매니저 권한 사용자만 평가
+            if ! printf '%s' "${roles}" | grep -iqE 'manager|admin'; then
+                continue
+            fi
+            uname="$(printf '%s' "${line}" | grep -ioE 'username="[^"]*"' | head -n1 | sed -E 's/username="([^"]*)"/\1/I')"
+            pass="$(printf '%s' "${line}" | grep -ioE 'password="[^"]*"' | head -n1 | sed -E 's/password="([^"]*)"/\1/I')"
+            [ -z "${pass}" ] && continue
+            found_priv_user=true
+
+            # 해시 여부 판정: MD5(32)/SHA-1(40)/SHA-256(64) 16진수 다이제스트
+            local is_hash=false
+            local plen="${#pass}"
+            if { [ "${plen}" -eq 32 ] || [ "${plen}" -eq 40 ] || [ "${plen}" -eq 64 ]; } \
+               && printf '%s' "${pass}" | grep -qE '^[0-9a-fA-F]+$'; then
+                is_hash=true
+            fi
+
+            # 약한/기본/유추용이 비밀번호 판정
+            local is_weak=false
+            local lpass lname
+            lpass="$(printf '%s' "${pass}" | tr 'A-Z' 'a-z')"
+            lname="$(printf '%s' "${uname}" | tr 'A-Z' 'a-z')"
+            if [ "${is_hash}" = false ]; then
+                # 평문이며 약한 사전/계정명동일/8자 미만이면 취약
+                for w in ${weak_passwords}; do
+                    if [ "${lpass}" = "${w}" ]; then is_weak=true; break; fi
+                done
+                if [ "${lpass}" = "${lname}" ] || [ "${plen}" -lt 8 ]; then
+                    is_weak=true
+                fi
+            fi
+
+            if [ "${is_hash}" = false ]; then
+                # 평문 저장 자체가 "암호화되어 있지 않은" 취약 상태 (판단기준 취약)
+                vulnerable_evidence+="사용자 '${uname}': 비밀번호가 평문(암호화 미적용)으로 저장됨"
+                if [ "${is_weak}" = true ]; then
+                    vulnerable_evidence+=" 및 유추하기 쉬운 비밀번호 사용"
+                fi
+                vulnerable_evidence+="\\n"
+            else
+                good_evidence+="사용자 '${uname}': 비밀번호가 해시(${plen}자리 16진수)로 암호화 저장됨\\n"
+            fi
+        done <<< "${user_lines}"
+
+        if [ "${found_priv_user}" = false ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            command_result="tomcat-users.xml에서 관리자 권한 사용자/비밀번호를 식별할 수 없음 (CredentialHandler 기반 외부 인증 또는 주석 처리 가능)"
+            inspection_summary="tomcat-users.xml(${xml_file})에서 manager/admin 권한 사용자의 비밀번호를 자동으로 식별하지 못했습니다. "
+            inspection_summary+="수동으로 비밀번호 암호화(SHA-256 이상) 및 복잡도(영문/숫자/특수문자 조합 8자 이상, 계정명/연속문자/개인정보 금지) 충족 여부를 확인하세요."
+        elif [ -n "${vulnerable_evidence}" ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            command_result="관리자 비밀번호가 평문(암호화 미적용)으로 저장됨"
+            inspection_summary="관리자 계정 비밀번호가 암호화되어 있지 않거나 유추하기 쉬운 값으로 설정되어 있습니다 (${xml_file}):\\n${vulnerable_evidence}"
+        else
+            diagnosis_result="GOOD"
+            status="양호"
+            command_result="관리자 비밀번호가 해시(암호화)되어 저장됨"
+            inspection_summary="관리자 계정 비밀번호가 암호화(해시)되어 저장되어 있습니다 (${xml_file}):\\n${good_evidence}"
+        fi
     else
-        command_executed="ls /etc/tomcat*/tomcat-users.xml /var/lib/tomcat*/conf/tomcat-users.xml 2>/dev/null"
+        command_executed="ls /etc/tomcat*/tomcat-users.xml /var/lib/tomcat*/conf/tomcat-users.xml /usr/local/tomcat*/conf/tomcat-users.xml 2>/dev/null"
         command_result="No tomcat-users.xml file found"
 
+        diagnosis_result="MANUAL"
+        status="수동진단"
         inspection_summary="tomcat-users.xml 파일을 찾을 수 없습니다. Tomcat 구성을 확인하세요."
     fi
 

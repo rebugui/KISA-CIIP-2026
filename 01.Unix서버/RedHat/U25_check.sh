@@ -17,18 +17,47 @@ GUIDELINE_REMEDIATION="worldwritable 파일 존재 여부를 확인하고 불필
 
 diagnose() {
     local status="양호"; diagnosis_result="GOOD"
-    local command_result=""; local command_executed="find / -type f -perm -2 -xdev"
+    local newline=$'\n'
+    local inspection_summary="World Writable 파일이 발견되지 않았습니다."
+    local command_result=""
+    local command_executed="df -lP | awk 'NR>1{print \$6}'; find <마운트포인트> -xdev -type f -perm -2 2>/dev/null"
 
-    # 시스템 내 world writable 파일 탐색 (최대 5개)
-    local ww_files=$(find / -type f -perm -2 -xdev 2>/dev/null | head -n 5 | xargs)
+    # 로컬 마운트포인트 열거 (/만 -xdev 검사 시 /home,/var 등 별도 파티션이 누락되는 문제 보완)
+    local mount_points=""
+    mount_points=$(df -lP 2>/dev/null | awk 'NR>1{print $6}' | sort -u) || true
+    [ -n "$mount_points" ] || mount_points="/"
 
-    if [ -n "$ww_files" ]; then
-        status="취약"; diagnosis_result="VULNERABLE"
-        command_result="발견된 World Writable 파일(일부): [ $ww_files ]"
-    else
-        command_result="World Writable 파일 없음"
+    # 마운트포인트별 world writable 파일 탐색 (-xdev로 각 파일시스템 내부만 검사)
+    local ww_all=""
+    local mnt=""
+    while IFS= read -r mnt; do
+        if [ -n "$mnt" ] && [ -d "$mnt" ]; then
+            local found=""
+            found=$(find "$mnt" -xdev -type f -perm -2 2>/dev/null) || true
+            if [ -n "$found" ]; then
+                ww_all="${ww_all}${found}${newline}"
+            fi
+        fi
+    done <<< "$mount_points"
+
+    # 증거 출력 제한 전에 전체 건수를 먼저 집계
+    local ww_count=0
+    if [ -n "$ww_all" ]; then
+        ww_count=$(printf '%s' "$ww_all" | grep -c '.' || true)
     fi
 
-    save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "점검 완료" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+    if [ "$ww_count" -gt 0 ]; then
+        status="취약"; diagnosis_result="VULNERABLE"
+        local ww_sample=""
+        ww_sample=$(printf '%s' "$ww_all" | head -n 10 | xargs) || true
+        inspection_summary="World Writable 파일 ${ww_count}건이 발견되었습니다. 설정 이유 인지 여부 확인이 필요합니다."
+        command_result="발견된 World Writable 파일 ${ww_count}건(최대 10건 표시): [ ${ww_sample} ]"
+    else
+        local mnt_list=""
+        mnt_list=$(printf '%s' "$mount_points" | xargs) || true
+        command_result="검사한 마운트포인트: [ ${mnt_list} ] - World Writable 파일 없음"
+    fi
+
+    save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
 }
 main() { diagnose; }; main "$@"

@@ -154,6 +154,7 @@ diagnose() {
     local default_accounts=("SYS" "SYSTEM" "DBSNMP" "SYSMAN" "OUTLN")
     local vulnerable_accounts=()
     local secure_accounts=()
+    local manual_accounts=()
     local check_results=""
 
     for account in "${default_accounts[@]}"; do
@@ -167,17 +168,14 @@ diagnose() {
             local account_status=$(echo "$account_info" | awk '{print $2}')
 
             if [ "$account_status" = "OPEN" ]; then
-                # 비밀번호 만료일 확인
+                # 계정이 OPEN(활성) 상태인 기본 계정.
+                # EXPIRY_DATE(만료일) 존재 여부는 비밀번호가 초기값에서 변경되었는지를 증명하지
+                # 못한다(만료일은 프로파일의 PASSWORD_LIFE_TIME에 의해 자동 설정되며 초기 비밀번호
+                # 그대로여도 값이 채워짐). 따라서 OPEN 상태의 기본 계정은 초기 비밀번호 변경 여부를
+                # 정적으로 증명할 수 없으므로 자동 GOOD 판정하지 않고 수동 점검(MANUAL) 대상으로 둔다.
                 local expiry_date=$(echo "$account_info" | awk '{print $4}')
-
-                if [ "$expiry_date" = "NULL" ] || [ -z "$expiry_date" ]; then
-                    # 만료일 없음 - 기본 설정 가능성
-                    vulnerable_accounts+=("${account} (만료일 없음)")
-                    check_results="${check_results}[취약] ${account}: 비밀번호 만료일 없음\\n"
-                else
-                    secure_accounts+=("${account}")
-                    check_results="${check_results}[양호] ${account}: 비밀번호 설정됨 (만료일: ${expiry_date})\\n"
-                fi
+                manual_accounts+=("${account} (OPEN, 만료일: ${expiry_date:-NULL})")
+                check_results="${check_results}[수동확인] ${account}: 계정 활성(OPEN) - 초기 비밀번호 변경 여부 수동 확인 필요 (만료일: ${expiry_date:-NULL})\\n"
             elif [ "$account_status" = "EXPIRED" ] || [ "$account_status" = "EXPIRED & LOCKED" ]; then
                 # 만료됨 - 변경 필요성
                 secure_accounts+=("${account}")
@@ -202,15 +200,14 @@ diagnose() {
     check_results="${check_results}[정보] DEFAULT PROFILE: PASSWORD_LIFE_TIME = ${profile_info}\\n"
 
     # 최종 판정
+    # 우선순위: 취약(빈/만료일 없는 활성 계정 등 명백한 결함) > 수동(OPEN 기본 계정의
+    # 초기 비밀번호 변경 여부 미증명) > 양호(모든 기본 계정이 잠금/만료되어 초기 자격증명
+    # 사용 불가). EXPIRY_DATE 존재만으로는 비밀번호 변경을 증명할 수 없으므로 GOOD으로
+    # 판정하지 않는다.
     local total_vulnerabilities=${#vulnerable_accounts[@]}
+    local total_manual=${#manual_accounts[@]}
 
-    if [ ${total_vulnerabilities} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="모든 기본 계정의 비밀번호 정책이 적절히 설정됨"
-        command_result="Oracle 버전: ${oracle_version}\\n${check_results}"
-        command_executed="sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
-    else
+    if [ ${total_vulnerabilities} -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="기본 계정 비밀번호 정책 미변경: ${total_vulnerabilities}개"
@@ -219,6 +216,22 @@ diagnose() {
             command_result="${command_result}- ${account}\\n"
         done
         command_result="${command_result}\\n상세:\\n${check_results}"
+        command_executed="sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
+    elif [ ${total_manual} -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="활성(OPEN) 상태의 기본 계정 ${total_manual}개에 대해 초기 비밀번호 변경 여부를 자동으로 증명할 수 없습니다. 해당 계정의 초기 비밀번호 변경 또는 잠금 설정 여부를 수동으로 확인하세요."
+        command_result="Oracle 버전: ${oracle_version}\\n수동 확인 필요 계정:\\n"
+        for account in "${manual_accounts[@]}"; do
+            command_result="${command_result}- ${account}\\n"
+        done
+        command_result="${command_result}\\n상세:\\n${check_results}"
+        command_executed="sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="모든 기본 계정이 잠금 또는 만료 상태로 초기 자격증명 사용이 불가함"
+        command_result="Oracle 버전: ${oracle_version}\\n${check_results}"
         command_executed="sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
     fi
 

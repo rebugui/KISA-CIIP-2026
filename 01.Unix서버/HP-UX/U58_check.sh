@@ -61,43 +61,48 @@ diagnose() {
 
     local snmp_running=false
     local service_details=""
+    local probe_available=false
+    local probe_evidence=""
 
-    # HP-UX init.d로 SNMP 서비스 확인
-    local snmp_service_list=("snmpd" "snmptrapd")
-
-    for svc in "${snmp_service_list[@]}"; do
-        if [ -f /sbin/init.d/"$svc" ]; then
-            # 서비스 상태 확인
-            if /sbin/init.d/"$svc" status 2>/dev/null | grep -q "running" >/dev/null 2>&1; then
-                snmp_running=true
-                service_details="${service_details}$svc: running, "
-            fi
-        fi
-    done || true
-
-    command_executed="/sbin/init.d/snmpd status 2>/dev/null"
-
-    # 프로세스 확인 (백업 방법)
-    if ! $snmp_running && command -v pgrep >/dev/null 2>&1; then
-        if pgrep -x "snmpd" >/dev/null 2>&1; then
+    # 프로세스 확인 (주 방법): HP-UX 네이티브 snmpdm(마스터 에이전트) 및 snmpd
+    if command -v ps >/dev/null 2>&1; then
+        probe_available=true
+        local ps_out
+        ps_out="$(ps -ef 2>/dev/null | grep -E 'snmpdm|snmpd' | grep -v grep || true)"
+        if [ -n "$ps_out" ]; then
             snmp_running=true
-            service_details="${service_details}snmpd 프로세스 실행 중"
-            command_executed="${command_executed}; pgrep -x snmpd"
+            service_details="SNMP 프로세스(snmpdm/snmpd) 실행 중"
         fi
+        command_executed="ps -ef | grep -E 'snmpdm|snmpd' | grep -v grep"
+        probe_evidence="[ps -ef | grep -E 'snmpdm|snmpd' | grep -v grep]${newline}${ps_out:-SNMP 프로세스 없음}"
+    fi
+
+    # 구동 설정 확인 (보조 증거): SnmpMaster 시작 스크립트 및 rc.config.d 플래그
+    if [ -f /sbin/init.d/SnmpMaster ]; then
+        local rc_flags
+        rc_flags="$(grep -h 'SNMP_.*START' /etc/rc.config.d/Snmp* 2>/dev/null || true)"
+        probe_evidence="${probe_evidence}${probe_evidence:+${newline}}[/sbin/init.d/SnmpMaster 존재함]${newline}[grep 'SNMP_.*START' /etc/rc.config.d/Snmp*]${newline}${rc_flags:-SNMP_*START 설정 없음}"
+        command_executed="${command_executed:+${command_executed}; }ls /sbin/init.d/SnmpMaster; grep 'SNMP_.*START' /etc/rc.config.d/Snmp*"
     fi
 
     # 최종 판정
     if [ "$snmp_running" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="SNMP 서비스가 활성화되어 있습니다 (${service_details%, }). 불필요한 경우 서비스를 중지하고 비활성화해야 합니다: systemctl stop snmpd; systemctl disable snmpd"
-        command_result="${service_details%, }"
-    else
+        inspection_summary="SNMP 서비스가 활성화되어 있습니다 (${service_details%, }). 불필요한 경우 서비스를 중지하고 비활성화해야 합니다: /sbin/init.d/SnmpMaster stop 및 /etc/rc.config.d 의 SNMP_*START=0 설정"
+        command_result="${probe_evidence}"
+    elif [ "$probe_available" = true ]; then
+        # 점검 명령이 실제로 수행되었고 SNMP 구동 흔적이 없는 경우에만 양호
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="SNMP 서비스가 비활성화되어 있습니다."
-        local snmp_check=$(/sbin/init.d/snmpd status 2>/dev/null | head -2; pgrep -x snmpd 2>/dev/null || echo "SNMP service not running")
-        command_result="${snmp_check}"
+        command_result="${probe_evidence:-SNMP service not running}"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="SNMP 서비스 상태를 확인할 수 없어 수동 점검이 필요합니다 (ps 명령 사용 불가)"
+        command_result="[Cannot determine]${newline}ps 명령을 사용할 수 없어 SNMP 프로세스(snmpdm/snmpd) 구동 여부를 확인하지 못했습니다."
+        command_executed="${command_executed:-command -v ps}"
     fi
 
     # echo ""

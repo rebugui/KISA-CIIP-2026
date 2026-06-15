@@ -50,15 +50,30 @@ diagnose() {
     local allow_content=$(cat /etc/hosts.allow 2>/dev/null | grep -v "^#" | xargs || echo "empty")
     local deny_content=$(cat /etc/hosts.deny 2>/dev/null | grep -v "^#" | xargs || echo "empty")
 
-    # 2. 판정 로직: hosts.deny에 ALL: ALL 설정이 있는지 확인 (기본적인 접근 차단 정책)
-    if ! grep -qi "ALL: ALL" /etc/hosts.deny 2>/dev/null; then
+    # 2. 판정 로직: hosts.allow에 주석이 아닌 ALL: ALL(전체 허용)이 있으면 취약,
+    #    hosts.deny에 주석이 아닌 ALL: ALL 차단 정책이 없으면 취약
+    #    (인라인 주석(#...) 제거 후 검사하여 주석 내 문구로 인한 오판 방지)
+    local fw_state=$(systemctl is-active firewalld 2>/dev/null || echo "inactive")
+    if sed 's/#.*//' /etc/hosts.allow 2>/dev/null | grep -qiE "ALL[[:space:]]*:[[:space:]]*ALL"; then
         status="취약"
         diagnosis_result="VULNERABLE"
-        inspection_summary="접속 IP 및 포트 제한 설정(TCP Wrapper)이 미흡합니다."
+        inspection_summary="hosts.allow에 모든 호스트 허용(ALL: ALL) 설정이 존재합니다."
+    elif ! sed 's/#.*//' /etc/hosts.deny 2>/dev/null | grep -qiE "ALL[[:space:]]*:[[:space:]]*ALL"; then
+        if [ "$fw_state" = "active" ]; then
+            # RHEL8+ 등 tcp_wrappers 미지원/미사용 환경: 방화벽(firewalld) 운용 중이면
+            # 허용 IP/포트 제한 정책 적정성은 수동 확인 필요
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            inspection_summary="TCP Wrapper 차단 정책은 없으나 firewalld가 활성 상태입니다. 방화벽의 접속 허용 IP 및 포트 제한 정책을 수동으로 확인하시기 바랍니다."
+        else
+            status="취약"
+            diagnosis_result="VULNERABLE"
+            inspection_summary="접속 IP 및 포트 제한 설정(TCP Wrapper)이 미흡합니다."
+        fi
     fi
 
     # 3. command_result에 실제 설정값 기록 (증적 데이터)
-    command_result="[hosts.allow]: ${allow_content} | [hosts.deny]: ${deny_content}"
+    command_result="[hosts.allow]: ${allow_content} | [hosts.deny]: ${deny_content} | [firewalld]: ${fw_state}"
 
     save_dual_result \
         "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \

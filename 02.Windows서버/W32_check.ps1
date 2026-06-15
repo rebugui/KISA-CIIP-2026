@@ -49,9 +49,22 @@ try {
         $dnsServer = Get-WmiObject -Class MicrosoftDNS_Server -Namespace 'Root\MicrosoftDNS' -ErrorAction SilentlyContinue
 
         if ($dnsServer) {
+            # AllowUpdate는 정수값: 0=None(없음), 1=Unsecure(비보안 동적), 2=Secure only(보안 동적).
+            # 양호 기준은 동적 업데이트 '없음(0)'인 경우에만 성립한다.
+            # 주의: ($x -eq $true)는 $true를 1로 강제 변환하므로 2(보안 동적)를 false로 오판한다.
+            # 따라서 정수 비교로 0 이외의 모든 값(1, 2)을 동적 업데이트 설정으로 간주한다.
             $updateEnabled = $false
+            $updateDetails = @()
             foreach ($srv in $dnsServer) {
-                if ($srv.AllowUpdate -eq $true) {
+                $au = [int]$srv.AllowUpdate
+                $label = switch ($au) {
+                    0 { "None" }
+                    1 { "Unsecure (nonsecure and secure)" }
+                    2 { "Secure only" }
+                    default { "Unknown ($au)" }
+                }
+                $updateDetails += "AllowUpdate=$au ($label)"
+                if ($au -ne 0) {
                     $updateEnabled = $true
                 }
             }
@@ -59,13 +72,13 @@ try {
             if ($updateEnabled) {
                 $finalResult = "VULNERABLE"
                 $status = "취약"
-                $summary = "DNS 서비스가 활성화되어 있고 동적 업데이트가 설정됨"
-                $commandOutput = "DNS service running with dynamic updates enabled"
+                $summary = "DNS 서비스가 활성화되어 있고 동적 업데이트가 설정됨 (보안 동적 업데이트 포함)"
+                $commandOutput = "DNS service running with dynamic updates enabled: " + ($updateDetails -join '; ')
             } else {
                 $finalResult = "GOOD"
                 $status = "양호"
-                $summary = "DNS 서비스가 비활성화되거나 동적 업데이트가 비활성화됨"
-                $commandOutput = "DNS service running with dynamic updates disabled"
+                $summary = "DNS 서비스가 비활성화되거나 동적 업데이트가 '없음'으로 설정됨"
+                $commandOutput = "DNS service running with dynamic updates disabled: " + ($updateDetails -join '; ')
             }
         } else {
             $finalResult = "MANUAL"

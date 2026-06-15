@@ -37,20 +37,16 @@ if (-not (Test-RunallMode)) {
 # 1. "네트워크 액세스: SAM 계정과 공유의 익명 열거 허용 안함" (RestrictAnonymous)
 # 2. "네트워크 액세스: SAM 계정의 익명 열거 허용 안함" (RestrictAnonymousSAM)
 try {
-    $secedit = secedit /export /cfg "$env:TEMP\secedit.tmp" 2>&1
-    $content = Get-Content "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
-    $restrictAnonymous = 0
-    $restrictAnonymousSAM = 0
+    # 레지스트리에서 두 값을 직접 읽음.
+    # (secedit 텍스트 파싱은 1) 'RestrictAnonymous' 정규식이 'RestrictAnonymousSAM'
+    #  라인까지 매칭하는 접두어 충돌, 2) Get-Content가 배열을 반환할 때 -match가
+    #  $matches를 채우지 않아 발생하는 오류 등 신뢰성 문제가 있어 사용하지 않음.)
+    $lsaPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
+    $lsa = Get-ItemProperty -Path $lsaPath -ErrorAction Stop
 
-    if ($content -match 'RestrictAnonymous\s*=\s*(\d+)') {
-        $restrictAnonymous = [int]$matches[1]
-    }
-
-    if ($content -match 'RestrictAnonymousSAM\s*=\s*(\d+)') {
-        $restrictAnonymousSAM = [int]$matches[1]
-    }
-
-    Remove-Item "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
+    # 값이 없으면 OS 기본값(0 = 익명 열거 허용 = 취약)으로 간주.
+    if ($null -ne $lsa.RestrictAnonymous) { $restrictAnonymous = [int]$lsa.RestrictAnonymous } else { $restrictAnonymous = 0 }
+    if ($null -ne $lsa.RestrictAnonymousSAM) { $restrictAnonymousSAM = [int]$lsa.RestrictAnonymousSAM } else { $restrictAnonymousSAM = 0 }
 
     if ($restrictAnonymous -eq 1 -and $restrictAnonymousSAM -eq 1) {
         $finalResult = "GOOD"
@@ -62,14 +58,14 @@ try {
         $status = "취약"
     }
 
-    $commandExecuted = "secedit /export 및 레지스트리 HKLM\SYSTEM\CurrentControlSet\Control\LSA\RestrictAnonymous, RestrictAnonymousSAM 확인"
+    $commandExecuted = "Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' (RestrictAnonymous, RestrictAnonymousSAM)"
     $commandOutput = "RestrictAnonymous=$restrictAnonymous, RestrictAnonymousSAM=$restrictAnonymousSAM"
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "secedit /export 및 레지스트리 HKLM\SYSTEM\CurrentControlSet\Control\LSA\RestrictAnonymous, RestrictAnonymousSAM 확인"
+    $commandExecuted = "Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' (RestrictAnonymous, RestrictAnonymousSAM)"
     $commandOutput = "진단 실패: $_"
 }
 

@@ -77,11 +77,35 @@ diagnose() {
     else
         # 파일 권한 확인 (HP-UX compatible)
         # HP-UX: stat -c format not supported, use perl
-        local perms_octal=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$target_file" 2>/dev/null)
-        local file_owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid).":".getgrgid($gid)' "$target_file" 2>/dev/null)
+        local perms_octal=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$target_file" 2>/dev/null || true)
+        local file_owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid).":".getgrgid($gid)' "$target_file" 2>/dev/null || true)
 
-        # 소유자 및 권한 확인 (600 또는 400)
-        if [ "$file_owner" = "root:root" ] && { [ "$perms_octal" = "0600" ] || [ "$perms_octal" = "0400" ]; }; then
+        # 권한/소유자 정보 수집 실패(perl stat 실패, 읽기 불가) → 증거 확보 불가로 수동진단 처리
+        if [[ ! "$perms_octal" =~ ^[0-7]{3,4}$ ]]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="/etc/shadow 권한 정보를 확인하지 못함 (perl stat 실패 또는 읽기 불가) - 수동 점검 필요"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl stat]${newline}${stat_output}"
+            command_executed="ls -l $target_file; perl -e '@s=stat(shift); printf \"%04o %s:%s\\n\", \$s[2]&07777, getpwuid(\$s[4]), getgrgid(\$s[5])' $target_file"
+            save_dual_result \
+                "${ITEM_ID}" \
+                "${ITEM_NAME}" \
+                "${status}" \
+                "${diagnosis_result}" \
+                "${inspection_summary}" \
+                "${command_result}" \
+                "${command_executed}" \
+                "${GUIDELINE_PURPOSE}" \
+                "${GUIDELINE_THREAT}" \
+                "${GUIDELINE_CRITERIA_GOOD}" \
+                "${GUIDELINE_CRITERIA_BAD}" \
+                "${GUIDELINE_REMEDIATION}"
+            verify_result_saved "${ITEM_ID}"
+            return 0
+        fi
+
+        # 소유자 및 권한 확인 (400 이하, 소유자 root - 그룹은 가이드 기준 아님: HP-UX 기본 root:sys 허용)
+        if [ "${file_owner%%:*}" = "root" ] && [ "$(( 8#$perms_octal & ~8#400 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $perms_octal, 소유자: $file_owner"
         else

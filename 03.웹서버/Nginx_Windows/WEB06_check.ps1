@@ -51,13 +51,18 @@ try {
     else {
         $tryFiles = @($state.ActiveLines | Where-Object { $_ -match '^(?i)try_files\s+' })
         $unsafeRoots = @($state.ActiveLines | Where-Object { $_ -match '^(?i)(root|alias)\s+(?:[A-Za-z]:[/\\]?|/|.*\.\.).*;$' })
+        # 모든 alias 지시어 (off-by-slash traversal의 주요 원인). try_files가 있어도
+        # alias 경계 오류는 막지 못하므로, alias 존재 시 양호로 단정하지 않는다.
+        $aliasDirectives = @($state.ActiveLines | Where-Object { $_ -match '^(?i)alias\s+' })
 
         $evidence = @(
             "Config files: $($state.Config.Files -join ', ')",
             "try_files directives: $($tryFiles.Count)",
+            "alias directives: $($aliasDirectives.Count)",
             "root/alias directives requiring review: $($unsafeRoots.Count)"
         )
         if ($tryFiles.Count -gt 0) { $evidence += $tryFiles }
+        if ($aliasDirectives.Count -gt 0) { $evidence += $aliasDirectives }
         if ($unsafeRoots.Count -gt 0) { $evidence += $unsafeRoots }
 
         $commandExecuted = "Parse active Nginx root/alias/try_files directives for parent-directory traversal controls"
@@ -68,15 +73,16 @@ try {
             $status = "수동진단"
             $summary = "Nginx root/alias directives use broad or parent-relative paths. Verify that '..' traversal and unintended parent-directory access are blocked."
         }
-        elseif ($tryFiles.Count -gt 0) {
-            $finalResult = "GOOD"
-            $status = "양호"
-            $summary = "Nginx configuration contains try_files routing controls and no broad parent-relative root/alias directive was detected."
-        }
-        else {
+        elseif ($aliasDirectives.Count -gt 0) {
             $finalResult = "MANUAL"
             $status = "수동진단"
-            $summary = "Nginx configuration was found, but parent-directory traversal protection cannot be proven from static config alone."
+            $summary = "Nginx alias directives were found. try_files does not prevent alias off-by-slash traversal; verify each alias has a correct trailing-slash boundary and that '..' traversal is blocked."
+        }
+        else {
+            # try_files 유무와 무관하게, 정적 설정만으로는 traversal 차단을 단정할 수 없으므로 수동진단.
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Nginx configuration was found, but parent-directory traversal protection cannot be proven from static config alone. try_files presence is not sufficient proof; perform manual path-traversal testing."
         }
     }
 }

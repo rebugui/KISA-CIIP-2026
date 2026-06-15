@@ -62,7 +62,11 @@ diagnose() {
 
     # 1) AIX automount 서비스 확인 (lssrc -a)
     if lssrc -a 2>/dev/null | grep -q "autof "; then
-        local autofs_status=$(lssrc -s autof 2>/dev/null | grep autof | awk '{print $2}' || echo "inoperative")
+        local autofs_lssrc=$(lssrc -s autof 2>/dev/null || echo "")
+        local autofs_status="inoperative"
+        if echo "$autofs_lssrc" | grep -q "active"; then
+            autofs_status="active"
+        fi
         automount_info="${automount_info}autof 서비스: ${autofs_status}\\n"
 
         if [ "$autofs_status" = "active" ]; then
@@ -72,10 +76,30 @@ diagnose() {
 
     # 2) automountd 서비스 확인 (SRC subsystem)
     if lssrc -a 2>/dev/null | grep -q "automountd "; then
-        local automountd_status=$(lssrc -s automountd 2>/dev/null | grep automountd | awk '{print $2}' || echo "inoperative")
+        local automountd_lssrc=$(lssrc -s automountd 2>/dev/null || echo "")
+        local automountd_status="inoperative"
+        if echo "$automountd_lssrc" | grep -q "active"; then
+            automountd_status="active"
+        fi
         automount_info="${automount_info}automountd 서비스: ${automountd_status}\\n"
 
         if [ "$automountd_status" = "active" ]; then
+            automount_running=true
+        fi
+    fi
+
+    # 2b) 프로세스 확인 (가이드 [process 점검]: SRC 외부에서 기동된 automountd 탐지)
+    local automount_ps=$(ps -ef 2>/dev/null | grep -E "[a]utomountd|[a]utofsd|[a]utomount" | head -3 || echo "")
+    if [ -n "$automount_ps" ]; then
+        automount_info="${automount_info}automount 프로세스 실행 중:\\n${automount_ps}\\n"
+        automount_running=true
+    fi
+
+    # 2c) /etc/inittab 기동 항목 확인
+    if [ -f /etc/inittab ]; then
+        local inittab_auto=$(grep -i "automount" /etc/inittab 2>/dev/null | grep -Ev '^[[:space:]]*[:#]' || echo "")
+        if [ -n "$inittab_auto" ]; then
+            automount_info="${automount_info}/etc/inittab automount 엔트리 발견\\n${inittab_auto}\\n"
             automount_running=true
         fi
     fi
@@ -89,12 +113,15 @@ diagnose() {
         fi
     fi
 
-    # 4) AIX automount 설정 파일 확인
-    if [ -f /etc/auto.master ]; then
-        automount_info="${automount_info}autofs 설정 파일 존재\\n"
-        automount_info="${automount_info}$(head -5 /etc/auto.master 2>/dev/null)\\n"
-        automount_running=true
-    fi
+    # 4) automount 설정 파일 확인 (AIX 기본 경로 /etc/auto_master 포함)
+    local auto_master_file=""
+    for auto_master_file in /etc/auto_master /etc/auto.master; do
+        if [ -f "$auto_master_file" ]; then
+            automount_info="${automount_info}autofs 설정 파일 존재 (${auto_master_file})\\n"
+            automount_info="${automount_info}$(head -5 "$auto_master_file" 2>/dev/null)\\n"
+            automount_running=true
+        fi
+    done
 
     # AIX에서 auto.master.d/*.conf glob은 직접 처리
     if [ -d /etc/auto.master.d ]; then
@@ -118,7 +145,7 @@ diagnose() {
         status="취약"
         inspection_summary="automount 서비스 활성화됨"
         command_result="${automount_info}"
-        command_executed="lssrc -s autof automountd; cat /etc/auto.master 2>/dev/null; grep -i automount /etc/filesystems"
+        command_executed="lssrc -s autof automountd; ps -ef | grep automountd; grep automount /etc/inittab; cat /etc/auto_master /etc/auto.master 2>/dev/null; grep -i automount /etc/filesystems"
     fi
 
     # echo ""

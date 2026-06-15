@@ -99,12 +99,12 @@ diagnose() {
                 details="${details}[SSH] PermitRootLogin 미설정 (기본값). "
             else
                 case "$ssh_val" in
-                    no|prohibit-password|without-password)
+                    no)
                         details="${details}[SSH] PermitRootLogin=${ssh_val} (양호). "
                         ;;
-                    yes)
+                    yes|prohibit-password|without-password)
                         ssh_secure=false
-                        details="${details}[SSH] PermitRootLogin=yes (취약). "
+                        details="${details}[SSH] PermitRootLogin=${ssh_val} (취약). "
                         ;;
                     *)
                         ssh_secure=false
@@ -130,12 +130,20 @@ diagnose() {
 
     # --- Telnet 진단 ---
     if [ "$telnet_active" = true ]; then
-        local securetty_pts=$(grep -E "^pts/" /etc/securetty 2>/dev/null || true)
-        if [ -n "$securetty_pts" ]; then
-            telnet_secure=false
-            details="${details}[Telnet] /etc/securetty에 pts 설정 존재 (취약). "
+        if [ -f /etc/securetty ]; then
+            local securetty_pts=$(grep -E "^pts/" /etc/securetty 2>/dev/null || true)
+            if [ -n "$securetty_pts" ]; then
+                telnet_secure=false
+                details="${details}[Telnet] /etc/securetty에 pts 설정 존재 (취약). "
+            else
+                details="${details}[Telnet] /etc/securetty에 pts 설정 없음 (양호). "
+            fi
         else
-            details="${details}[Telnet] /etc/securetty에 pts 설정 없음 (양호). "
+            # /etc/securetty 미존재(RHEL8+ 기본): pam_securetty는 파일이 없으면 제한하지
+            # 않으므로 root 원격(telnet) 직접 접속이 차단되지 않음 → 취약
+            telnet_secure=false
+            local pam_securetty=$(grep -hE "^[^#]*pam_securetty\.so" /etc/pam.d/login /etc/pam.d/remote 2>/dev/null | head -1 || true)
+            details="${details}[Telnet] /etc/securetty 파일 없음 → root telnet 직접 접속 차단 미설정 (pam_securetty: ${pam_securetty:-미설정}) (취약). "
         fi
     fi
 

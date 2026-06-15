@@ -88,55 +88,39 @@ diagnose() {
         return 0
     fi
 
-    # Check if sqlplus is available
-    if ! command -v sqlplus >/dev/null; then
+    # D-10 판단기준 (KISA 가이드): sqlnet.ora 의 tcp.validnode_checking=yes 와
+    #   tcp.invited_nodes(허용 IP 목록) 설정으로 IP 접근 제한 여부를 점검.
+    #   양호: validnode_checking=yes + invited_nodes(또는 excluded_nodes) 설정
+    #   취약: validnode_checking 미설정/off 또는 허용 IP 목록 없음
+    #   파일 판독 불가: 수동진단
+    local sqlnet_file="${ORACLE_HOME:-}/network/admin/sqlnet.ora"
+    command_executed="grep -iE 'tcp.validnode_checking|tcp.invited_nodes|tcp.excluded_nodes' ${sqlnet_file}"
+
+    if [ -z "${ORACLE_HOME:-}" ] || [ ! -f "${sqlnet_file}" ] || [ ! -r "${sqlnet_file}" ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="Oracle SQL*Plus 클라이언트가 설치되지 않았습니다. listener.ora 파일에서 ADMIN_RESTRICTIONS 설정을 수동으로 확인하세요."
-        command_result="sqlplus command not found"
-        command_executed="command -v sqlplus"
-        if declare -f save_dual_result >/dev/null 2>&1; then
-            save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        fi
-        if declare -f verify_result_saved >/dev/null 2>&1; then
-            verify_result_saved "${ITEM_ID}"
-        fi
-        return 0
-    fi
+        inspection_summary="sqlnet.ora 파일을 찾을 수 없거나 읽을 수 없습니다 (경로: ${sqlnet_file}). 수동으로 tcp.validnode_checking 및 tcp.invited_nodes 설정을 확인하세요."
+        command_result="sqlnet.ora not found or unreadable: ${sqlnet_file}"
+    else
+        command_result=$(grep -iE 'tcp\.validnode_checking|tcp\.invited_nodes|tcp\.excluded_nodes' "${sqlnet_file}" 2>/dev/null || true)
 
-    # Check listener status
-    command_executed="lsnrctl status"
-    command_result=$(lsnrctl status 2>/dev/null || echo "")
+        local validnode_on=0 invited_set=0
+        if echo "${command_result}" | grep -iE 'tcp\.validnode_checking[[:space:]]*=[[:space:]]*(yes|on|true)' >/dev/null 2>&1; then
+            validnode_on=1
+        fi
+        if echo "${command_result}" | grep -iE 'tcp\.(invited|excluded)_nodes[[:space:]]*=[[:space:]]*\(' >/dev/null 2>&1; then
+            invited_set=1
+        fi
 
-    if [ -n "$command_result" ]; then
-        # Check for remote administration restriction
-        if echo "$command_result" | grep -q "ADMIN_RESTRICTIONS"; then
+        if [ "${validnode_on}" -eq 1 ] && [ "${invited_set}" -eq 1 ]; then
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="리스너 관리 제한 설정이 확인되었습니다."
+            inspection_summary="sqlnet.ora 에 tcp.validnode_checking=yes 및 허용/차단 노드 목록이 설정되어 IP 접근이 제한됩니다."
         else
-            # Check listener.ora file
-            local listener_file="${ORACLE_HOME}/network/admin/listener.ora"
-            if [ -f "$listener_file" ]; then
-                if grep -q "ADMIN_RESTRICTIONS" "$listener_file"; then
-                    diagnosis_result="GOOD"
-                    status="양호"
-                    inspection_summary="listener.ora에 ADMIN_RESTRICTIONS 설정이 있습니다."
-                else
-                    diagnosis_result="VULNERABLE"
-                    status="취약"
-                    inspection_summary="listener.ora에 ADMIN_RESTRICTIONS 설정이 없습니다. 원격 관리가 제한되지 않을 수 있습니다."
-                fi
-            else
-                diagnosis_result="MANUAL"
-                status="수동진단"
-                inspection_summary="listener.ora 파일을 찾을 수 없습니다. 수동으로 확인하세요."
-            fi
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="sqlnet.ora 에 IP 접근 제한 설정이 미흡합니다 (validnode_checking=${validnode_on}, invited/excluded_nodes=${invited_set}). tcp.validnode_checking=yes 와 tcp.invited_nodes 를 설정하세요."
         fi
-    else
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="리스너 상태 확인 실패. 수동으로 listener.ora의 ADMIN_RESTRICTIONS 설정을 확인하세요."
     fi
 
         if declare -f save_dual_result >/dev/null 2>&1; then

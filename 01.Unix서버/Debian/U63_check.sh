@@ -88,8 +88,8 @@ diagnose() {
                 local perms=$(stat -c "%a" "$sudoers_file" 2>/dev/null)
                 local owner=$(stat -c "%U:%G" "$sudoers_file" 2>/dev/null)
 
-                # 권한이 640 이하이고 소유자가 root:root인지 확인
-                if [ "$perms" -gt 640 ] 2>/dev/null; then
+                # 권한이 640 이하이고 소유자가 root:root인지 확인 (640을 넘는 비트가 있으면 취약)
+                if ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & ~8#640 & 07777 ))" -ne 0 ] 2>/dev/null; then
                     sudoers_issues=true
                     issue_details="${issue_details}${sudoers_file} 권한 ${perms} (640 이하 권장), "
                 fi
@@ -101,23 +101,21 @@ diagnose() {
             fi
         done || true
 
-        # 2-2) 취약한 sudoers 규칙 확인
-        # ALL 권한을 가진 사용자/그룹 확인
-        local all_privilege=$(grep -v "^#" /etc/sudoers 2>/dev/null | grep -v "^$" | grep -E "ALL=\(ALL\) ALL|ALL=\(ALL:ALL\) ALL")
+        # 2-2) sudoers 규칙 확인 (정보성)
+        # 판단 기준은 파일 소유자/권한이므로 규칙 내용은 취약 판정에 반영하지 않음
+        # (%sudo ALL=(ALL:ALL) ALL 은 Debian 표준 기본 규칙으로 과탐 방지)
+        local all_privilege=$(grep -v "^#" /etc/sudoers 2>/dev/null | grep -v "^$" | grep -E "ALL=\(ALL\) ALL|ALL=\(ALL:ALL\) ALL" || true)
         if [ -n "$all_privilege" ]; then
-            # root는 제외
-            local non_root_all=$(echo "$all_privilege" | grep -v "root")
+            local non_root_all=$(echo "$all_privilege" | grep -vE "^[[:space:]]*(root|%sudo|%admin)[[:space:]]" || true)
             if [ -n "$non_root_all" ]; then
-                sudoers_issues=true
-                issue_details="${issue_details}모든 권한을 가진 비-root 사용자: ${non_root_all}, "
+                issue_details="${issue_details}[참고] 광범위한 sudo 권한 규칙: ${non_root_all}, "
             fi
         fi
 
-        # 2-3) 암호 없이 sudo 사용 가능한 규칙 확인 (NOPASSWD)
-        local nopasswd_rules=$(grep -v "^#" /etc/sudoers 2>/dev/null | grep -i "NOPASSWD")
+        # 2-3) 암호 없이 sudo 사용 가능한 규칙 확인 (NOPASSWD, 정보성)
+        local nopasswd_rules=$(grep -v "^#" /etc/sudoers 2>/dev/null | grep -i "NOPASSWD" || true)
         if [ -n "$nopasswd_rules" ]; then
-            sudoers_issues=true
-            issue_details="${issue_details}암호 없는 sudo 규칙: ${nopasswd_rules}, "
+            issue_details="${issue_details}[참고] 암호 없는 sudo 규칙: ${nopasswd_rules}, "
         fi
 
         # 2-4) sudoers.d 디렉토리 내 파일 확인
@@ -126,7 +124,7 @@ diagnose() {
             if [ -n "$sudoers_d_files" ]; then
                 for file in $sudoers_d_files; do
                     local file_perms=$(stat -c "%a" "$file" 2>/dev/null)
-                    if [ "$file_perms" -gt 640 ] 2>/dev/null; then
+                    if ! [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$file_perms & ~8#640 & 07777 ))" -ne 0 ] 2>/dev/null; then
                         sudoers_issues=true
                         issue_details="${issue_details}${file} 권한 ${file_perms}, "
                     fi
@@ -149,7 +147,8 @@ diagnose() {
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="sudoers 설정이 안전하게 구성됨 (권한 ${raw_output%%:*}, root:root)"
+            local sudoers_perm=$(stat -c "%a" /etc/sudoers 2>/dev/null || echo "확인불가")
+            inspection_summary="sudoers 설정이 안전하게 구성됨 (권한 ${sudoers_perm}, root:root)"
             command_result="${raw_output}"
             command_executed="stat -c '%a:%U:%G' /etc/sudoers 2>/dev/null"
         fi

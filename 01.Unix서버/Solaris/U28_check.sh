@@ -104,45 +104,77 @@ diagnose() {
         fi
     fi
 
-    # 결과 판정
-    if [ "$hosts_allow_exists" -eq 0 ] && [ "$hosts_deny_exists" -eq 0 ]; then
-        # TCP Wrappers 설정 파일 없음 (최신 시스템에서는 firewalld/ufw 사용)
+    # 유효 규칙 추출 (주석 및 빈 줄 제외)
+    local allow_rules=""
+    local deny_rules=""
+    local unreadable_files=""
+
+    if [ -f "/etc/hosts.allow" ]; then
+        if [ -r "/etc/hosts.allow" ]; then
+            allow_rules=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/hosts.allow 2>/dev/null || true)
+        else
+            unreadable_files="${unreadable_files} /etc/hosts.allow"
+        fi
+    fi
+
+    if [ -f "/etc/hosts.deny" ]; then
+        if [ -r "/etc/hosts.deny" ]; then
+            deny_rules=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/hosts.deny 2>/dev/null || true)
+        else
+            unreadable_files="${unreadable_files} /etc/hosts.deny"
+        fi
+    fi
+
+    # Solaris Packet Filter(PF) 확인 - TCP Wrapper 미사용 시 대체 접속 통제 수단
+    local pf_state=""
+    local pf_rules=""
+    if command -v svcs >/dev/null 2>&1; then
+        pf_state=$(svcs -H -o state svc:/network/firewall 2>/dev/null | head -1 || true)
+    fi
+    if [ -r /etc/firewall/pf.conf ]; then
+        pf_rules=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/firewall/pf.conf 2>/dev/null || true)
+    fi
+    command_result="${command_result}${newline}${newline}[Packet Filter] svc:/network/firewall state: ${pf_state:-확인 불가}${newline}[/etc/firewall/pf.conf 유효 규칙]${newline}${pf_rules:-없음/읽기 불가}"
+
+    command_executed="grep -vE '^[[:space:]]*#|^[[:space:]]*\$' /etc/hosts.allow /etc/hosts.deny; svcs -H -o state svc:/network/firewall; grep -vE '^#|^\$' /etc/firewall/pf.conf"
+
+    # 결과 판정 (TCP Wrapper 기준: 주석 제외 유효 규칙 내용 검증)
+    if [ -n "$unreadable_files" ]; then
+        # 설정 파일이 존재하나 읽을 수 없음 → 수동 확인 필요
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="TCP Wrappers 설정 파일 없음 (최신 시스템에서는 firewalld, ufw 등 사용 권장)"
-        command_result="hosts.allow: [not found], hosts.deny: [not found]"
-        command_executed="ls -l /etc/hosts.allow /etc/hosts.deny 2>/dev/null"
-    elif [ "$tcp_wrappers_enabled" -eq 0 ] && [ "$hosts_allow_exists" -gt 0 ]; then
-        # hosts.allow는 있으나 규칙 없음
+        inspection_summary="TCP Wrapper 설정 파일을 읽을 수 없어 수동 확인이 필요합니다 (대상:${unreadable_files})"
+    elif grep -qiE 'ALL[[:space:]]*:[[:space:]]*ALL' <<< "$allow_rules"; then
+        # hosts.allow에 전체 허용(ALL: ALL) 존재 → 차단 정책과 무관하게 취약
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="hosts.allow 파일 존재하나 규칙 없음. 접속 제한 미설정 상태"
-        command_result="hosts.allow: empty, hosts.deny: ${hosts_deny_content:-[not found]}"
-        command_executed="grep -v '^#' /etc/hosts.allow | grep -v '^$' 2>/dev/null | wc -l"
-    elif [ "$hosts_deny_exists" -eq 0 ]; then
-        # hosts.allow만 있고 hosts.deny 없음
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="hosts.deny 파일 없음. 기본 거부 정책 미설정 상태"
-        command_result="hosts.allow: ${hosts_allow_content}, hosts.deny: [not found]"
-        command_executed="ls -l /etc/hosts.deny 2>/dev/null"
-    else
-        # 둘 다 존재
+        inspection_summary="hosts.allow에 모든 호스트 허용(ALL: ALL) 설정이 존재하여 접속 제한이 무력화된 상태입니다."
+    elif grep -qiE 'ALL[[:space:]]*:[[:space:]]*ALL' <<< "$deny_rules"; then
+        # hosts.deny 기본 차단(ALL: ALL) + hosts.allow는 특정 호스트만 허용(또는 비어 있음) → 양호
         diagnosis_result="GOOD"
         status="양호"
-        details=""
-
         if [ -n "$hosts_allow_content" ]; then
             details="${details}${hosts_allow_content}. "
         fi
-
         if [ -n "$hosts_deny_content" ]; then
             details="${details}${hosts_deny_content}. "
         fi
-
-        inspection_summary="TCP Wrappers 설정 파일 존재 및 접속 제한 설정됨 (${details})"
-        command_result="hosts.allow: ${hosts_allow_content:-[empty file]}, hosts.deny: ${hosts_deny_content:-[empty file]}"
-        command_executed="cat /etc/hosts.allow /etc/hosts.deny 2>/dev/null | grep -v '^#' | grep -v '^$' | wc -l"
+        inspection_summary="hosts.deny에 기본 차단(ALL: ALL) 정책이 설정되어 있고 hosts.allow는 특정 호스트만 허용합니다. ${details}"
+    elif [ "$pf_state" = "online" ] && [ -n "$pf_rules" ]; then
+        # TCP Wrapper 미사용이나 Solaris Packet Filter가 동작 중이고 규칙이 존재 → 양호
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="TCP Wrapper 기본 차단 정책은 없으나 Solaris Packet Filter(svc:/network/firewall)가 동작 중이며 /etc/firewall/pf.conf에 유효 규칙이 존재합니다."
+    elif [ "$pf_state" = "online" ] || [ -n "$pf_rules" ]; then
+        # PF 서비스 또는 규칙 중 일부만 확인됨 → 실제 차단 정책 적용 여부 수동 확인
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="TCP Wrapper 기본 차단 정책이 없고 Packet Filter는 일부만 확인됨 (서비스 상태: ${pf_state:-확인 불가}, pf.conf 규칙: $([ -n "$pf_rules" ] && echo '존재' || echo '없음')) - 접속 통제 적용 여부 수동 확인 필요"
+    else
+        # 유효한 기본 차단(ALL: ALL) 정책 없음 (파일 부재 또는 주석/빈 줄만 존재) → 모든 접속 허용 상태
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="TCP Wrapper 기준 기본 차단(ALL: ALL) 정책이 없고 Packet Filter도 확인되지 않아 모든 접속이 허용되는 상태입니다 (설정 파일 부재 또는 유효 규칙 없음)."
     fi
 
     # echo ""

@@ -103,7 +103,7 @@ diagnose() {
     fi
 
     # Capture raw output for /var/log directory and files (HP-UX uses perl for stat)
-    raw_output=$(echo "=== /var/log Directory Info ===" && ls -ld /var/log 2>/dev/null && echo -e "\n=== Critical Log Files ===" && ls -la /var/log/syslog 2>/dev/null && echo -e "\n=== World-Writable Files ===" && find /var/log -type f -perm -o+w 2>/dev/null | head -5 || echo "None found")
+    raw_output=$(echo "=== /var/log Directory Info ===" && ls -ld /var/log 2>/dev/null && echo -e "\n=== Critical Log Files (HP-UX) ===" && ls -l /var/adm/syslog/syslog.log /var/adm/sulog /var/adm/wtmp 2>/dev/null; echo -e "\n=== Group/World-Writable Files ===" && find /var/log -type f \( -perm -g+w -o -perm -o+w \) 2>/dev/null | head -5; echo -e "\n=== Non-root Owned Files ===" && find /var/log -type f ! -user root ! -user syslog 2>/dev/null | head -5 || echo "None found")
 
     # 권한 및 소유자 확인
     local perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$log_dir" 2>/dev/null || echo "0000")
@@ -112,64 +112,91 @@ diagnose() {
 
     details="권한: ${perms}, 소유자: ${owner}:${group}"
 
+    # 권한/소유자 확인 불가(perl stat 실패) → 증거 미확보로 수동진단
+    if [[ ! "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$owner" = "unknown" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="/var/log 권한/소유자 정보를 확인하지 못함 (perl stat 실패) - 수동 점검 필요 (${details})"
+        command_result="${raw_output}"
+        save_dual_result \
+            "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \
+            "${inspection_summary}" "${command_result}" "${command_executed}" \
+            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
+            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
+
     # 보안 판정 (권한 700 또는 750 (디렉토리), 소유자 root)
-    if [ "$owner" = "root" ]; then
-        if [[ "$perms" =~ ..0$ ]] || [[ "$perms" =~ ..5$ ]]; then  # Others have no write/execute (mostly) or just read/execute? 
-        # Usually 755 is default for /var/log in some old systems but 750/700 is better.
-        # Guideline says 644 for files. For Dir, it implies access control.
-           
-           # Check for world writable files
-           local insecure_files=$(find "$log_dir" -type f -perm -o+w 2>/dev/null | head -5)
-           
+    # 디렉토리 자체에 group/other 쓰기 비트가 있으면 즉시 취약 (770 등 group-write 차단)
+    # 디렉토리 자체에 group/other 쓰기 비트가 없으면(700/750/751/755 등) 통과하여 하위 점검 진행.
+    # group/other 쓰기 비트 보유(770/775/757 등) → 즉시 취약. others 읽기/실행만 있는 경우는 허용.
+    if [ "$owner" = "root" ] && [ "$(( 8#$perms & 022 ))" -eq 0 ]; then
+           # Check for group/world writable files (664 등 그룹 쓰기 권한도 644 초과로 취약)
+           local insecure_files=$(find "$log_dir" -type f \( -perm -g+w -o -perm -o+w \) 2>/dev/null | head -5)
+           # Check for files not owned by root (syslog 데몬 소유는 허용)
+           local nonroot_files=$(find "$log_dir" -type f ! -user root ! -user syslog 2>/dev/null | head -5)
+
            if [ -n "$insecure_files" ]; then
                 is_secure=false
-                details="${details}, World-writable files found: ${insecure_files}..."
+                details="${details}, Group/World-writable files found: ${insecure_files}..."
+           elif [ -n "$nonroot_files" ]; then
+                is_secure=false
+                details="${details}, Non-root owned files found: ${nonroot_files}..."
            else
-                # Check specific critical logs
-                local critical_logs=("syslog" "auth.log" "kern.log" "daemon.log" "mail.log")
+                # Check specific critical logs (HP-UX 실제 로그 경로: /var/adm 하위)
+                local critical_logs=("/var/adm/syslog/syslog.log" "/var/adm/syslog/mail.log" "/var/adm/sulog" "/var/adm/wtmp" "/var/adm/btmp")
                 local crit_issue=false
-                
+                local crit_found=false
+
                 for log in "${critical_logs[@]}"; do
-                    if [ -f "$log_dir/$log" ]; then
-                        local l_perm=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$log_dir/$log")
-                        local l_owner=$(perl -e 'print getpwuid((stat(shift))[4])' "$log_dir/$log")
-                        
+                    if [ -f "$log" ]; then
+                        crit_found=true
+                        local l_perm=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$log" 2>/dev/null || echo "0000")
+                        local l_owner=$(perl -e 'print getpwuid((stat(shift))[4])' "$log" 2>/dev/null || echo "unknown")
+
                         # Expected: 600 or 640. 644 is arguably OK if info leakage is not critical, but guideline says <= 644.
                         # If > 644 (e.g. 666), bad.
-                        
+
                         if [ "$l_owner" != "root" ] && [ "$l_owner" != "syslog" ]; then
                             # Allow syslog user owner
                             crit_issue=true
                             details="${details}, ${log} owner invalid ($l_owner)"
                         fi
-                        
-                        # Check if group/others writable
-                        if [[ "$l_perm" =~ .2. ]] || [[ "$l_perm" =~ ..2 ]] || [[ "$l_perm" =~ .6. ]] || [[ "$l_perm" =~ ..6 ]]; then
+
+                        # Check if group/others writable (쓰기 비트 포함 자릿수: 2,3,6,7 — 마지막 두 자리만 검사, 4자리 perl 출력 호환)
+                        if [[ "$l_perm" =~ [2367].$ ]] || [[ "$l_perm" =~ [2367]$ ]]; then
                              crit_issue=true
                              details="${details}, ${log} writable by group/others ($l_perm)"
                         fi
                     fi
                 done || true
-                
+
                 if [ "$crit_issue" = true ]; then
                     is_secure=false
+                elif [ "$crit_found" = false ]; then
+                    # 주요 로그 파일이 하나도 존재하지 않음 → 증거 미확보로 GOOD 단정 불가
+                    is_secure=false
+                    diagnosis_result="MANUAL"
+                    details="${details}, 주요 로그 파일을 찾을 수 없어 확인 불가 (수동 점검 필요)"
                 else
                     is_secure=true
                 fi
            fi
-        else
-            is_secure=false
-            details="${details} (디렉토리 권한 취약)"
-        fi
     else
         is_secure=false
-        details="${details} (디렉토리 소유자 취약)"
+        details="${details} (디렉토리 소유자/권한 취약)"
     fi
 
-    command_executed="perl -e 'printf \"%04o %s\\n\", (stat(\"/var/log\"))[2] & 07777, getpwuid((stat(\"/var/log\"))[4])' 2>/dev/null; find /var/log -type f -perm -o+w 2>/dev/null | head -5"
+    command_executed="perl -e 'printf \"%04o %s\\n\", (stat(\"/var/log\"))[2] & 07777, getpwuid((stat(\"/var/log\"))[4])' 2>/dev/null; find /var/log -type f \\( -perm -g+w -o -perm -o+w \\); find /var/log -type f ! -user root ! -user syslog; ls -l /var/adm/syslog/syslog.log /var/adm/sulog /var/adm/wtmp"
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$diagnosis_result" = "MANUAL" ]; then
+        # 증거 미확보(주요 로그 파일 부재 등) → 수동진단 유지, GOOD 단정 금지
+        status="수동진단"
+        inspection_summary="/var/log 로그 설정을 확정하지 못함 (${details})"
+        command_result="${raw_output}"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="/var/log 디렉터리 및 주요 로그 파일 설정이 양호합니다 (${details})"

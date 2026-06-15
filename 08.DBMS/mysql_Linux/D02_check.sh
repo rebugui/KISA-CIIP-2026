@@ -98,12 +98,20 @@ diagnose() {
     fi
 
     # 불필요한 계정 확인 (test 계정, 데모 계정 등)
+    # 연결 가드를 통과한 후이므로, 빈 결과는 "0행"이 아니라 쿼리 오류(권한 부족 등)를 의미함.
+    # 정상 0행과 오류/공백을 구분하기 위해 종료 코드와 표식 행을 사용.
     local unused_accounts_query="SELECT user, host FROM mysql.user WHERE user IN ('test', 'guest', 'demo', 'anonymous');"
     command_executed="mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p*** -e \"${unused_accounts_query}\""
-    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${unused_accounts_query}" 2>/dev/null || echo "")
+    local query_ok=1
+    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${unused_accounts_query}" 2>/dev/null) || query_ok=0
 
     # 결과 분석
-    if [ -n "$command_result" ]; then
+    if [ "$query_ok" -eq 0 ]; then
+        # 쿼리 자체가 실패함 → 자동 판단 불가
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="쿼리 결과 확인 불가 - 권한 부족 가능. mysql.user 조회 권한으로 불필요 계정 존재 여부 수동 확인 필요"
+    elif [ -n "$command_result" ]; then
         local user_count=$(echo "$command_result" | tail -n +2 | grep -v "^$" | wc -l)
 
         if [ "$user_count" -gt 0 ]; then
@@ -112,14 +120,16 @@ diagnose() {
             status="취약"
             inspection_summary="불필요한 계정 ${user_count}개 발견: $(echo "$command_result" | tail -n +2 | head -5 | tr '\n' ', ')"
         else
+            # 쿼리는 성공했고 0행 → 불필요 계정 없음(양호). absence=good.
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="불필요한 계정 없음"
         fi
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="불필요한 계정 없음"
+        # 헤더조차 없는 공백 출력 → 쿼리 결과 확인 불가
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="쿼리 결과 확인 불가 - 권한 부족 가능. mysql.user 조회 권한으로 불필요 계정 존재 여부 수동 확인 필요"
     fi
 
     # Save results (only if library function exists)

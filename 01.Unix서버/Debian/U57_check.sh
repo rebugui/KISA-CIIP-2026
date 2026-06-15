@@ -77,11 +77,66 @@ diagnose() {
 
     command_executed="ls -la /etc/ftpusers /etc/vsftpd/ftpusers /etc/pure-ftpd/ftpusers 2>/dev/null"
 
+    # vsftpd 설정 파일 확인 (userlist_deny=NO allow-list 모드 감지용)
+    local vsftpd_conf_found=""
+    for vconf in /etc/vsftpd.conf /etc/vsftpd/vsftpd.conf; do
+        if [ -f "$vconf" ]; then
+            vsftpd_conf_found="$vconf"
+            break
+        fi
+    done || true
+
+    # ProFTPD 설정 확인 (UseFtpUsers / RootLogin)
+    local proftpd_conf=""
+    local proftpd_root_login=""
+    local proftpd_use_ftpusers=""
+    for pconf in /etc/proftpd.conf /etc/proftpd/proftpd.conf; do
+        if [ -f "$pconf" ]; then
+            proftpd_conf="$pconf"
+            proftpd_root_login=$(grep -iE '^[[:space:]]*RootLogin[[:space:]]' "$pconf" 2>/dev/null | tail -1 | awk '{print tolower($2)}') || true
+            proftpd_use_ftpusers=$(grep -iE '^[[:space:]]*UseFtpUsers[[:space:]]' "$pconf" 2>/dev/null | tail -1 | awk '{print tolower($2)}') || true
+            break
+        fi
+    done || true
+
     # 최종 판정
-    if [ -z "$found_file" ]; then
+    if [ -n "$proftpd_conf" ] && [ "$proftpd_root_login" = "on" ]; then
+        # proftpd RootLogin on이면 ftpusers와 무관하게 root 접속 허용 상태
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="proftpd 설정에서 RootLogin on으로 root FTP 접속이 허용되어 있습니다(${proftpd_conf})."
+        command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login}, UseFtpUsers: ${proftpd_use_ftpusers:-on(기본값)}"
+    elif [ -n "$proftpd_conf" ] && [ "$proftpd_use_ftpusers" = "off" ]; then
+        # UseFtpUsers off이면 ftpusers 파일이 적용되지 않음 → 다른 차단 수단(RootLogin off) 필요
+        if [ "$proftpd_root_login" = "off" ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="proftpd UseFtpUsers off 설정이나 RootLogin off로 root FTP 접속이 차단되어 있습니다(${proftpd_conf})."
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="proftpd UseFtpUsers off 설정으로 ftpusers 파일이 적용되지 않으며, RootLogin 차단 설정이 없습니다(${proftpd_conf})."
+        fi
+        command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login:-미설정}, UseFtpUsers: ${proftpd_use_ftpusers}"
+    elif [ -n "$vsftpd_conf_found" ] && grep -qiE '^[[:space:]]*userlist_deny[[:space:]]*=[[:space:]]*NO' "$vsftpd_conf_found" 2>/dev/null; then
+        # vsftpd allow-list 모드(userlist_deny=NO): user_list가 허용 목록으로 동작하여
+        # ftpusers 기반 자동 판정이 유효하지 않으므로 수동 진단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="vsftpd가 allow-list 모드(userlist_deny=NO)로 동작 중입니다(${vsftpd_conf_found}). user_list 및 PAM 설정에서 root 접속 차단 여부를 수동으로 확인하세요."
+        command_result="[Command: grep -i userlist ${vsftpd_conf_found}]${newline}$(grep -i userlist "$vsftpd_conf_found" 2>/dev/null || echo '확인 불가')"
+    elif [ -z "$found_file" ]; then
         # ftpusers 파일이 존재하지 않음
-        # FTP 서비스가 설치되어 있는지 확인
-        if systemctl list-unit-files | grep -qE "vsftpd|proftpd|pure-ftpd|ftpd.service" 2>/dev/null; then
+        # FTP 서비스가 설치/실행되어 있는지 확인 (systemd 외 ps/inetd 환경 포함)
+        local ftp_present=false
+        if systemctl list-unit-files 2>/dev/null | grep -qE "vsftpd|proftpd|pure-ftpd|ftpd.service"; then
+            ftp_present=true
+        elif ps -ef 2>/dev/null | grep -v grep | grep -qE '(vsftpd|proftpd|pure-ftpd|in\.ftpd)'; then
+            ftp_present=true
+        elif [ -f /etc/inetd.conf ] && grep -vE '^[[:space:]]*#' /etc/inetd.conf 2>/dev/null | grep -qw "ftp"; then
+            ftp_present=true
+        fi
+        if [ "$ftp_present" = true ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="ftpusers 파일이 존재하지 않습니다. FTP 서비스가 실행 중이므로 ftpusers 파일을 생성하고 시스템 계정을 등록하세요."

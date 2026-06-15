@@ -65,49 +65,42 @@ diagnose() {
     local config_details=""
     local tmout_value=""
 
-    # 1) /etc/profile에서 TMOUT 설정 확인
+    # 1) /etc/profile에서 TMOUT 설정 확인 (AIX grep은 -oE 미지원 → sed 사용)
     if [ -f /etc/profile ]; then
-        tmout_value=$(grep "^TMOUT=" /etc/profile 2>/dev/null | sed 's/TMOUT=//' | sed 's/export TMOUT=//' | head -1)
+        tmout_value=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)*TMOUT=\([0-9]*\).*/\2/p' /etc/profile 2>/dev/null | tail -1 || true)
         if [ -n "$tmout_value" ]; then
-            # 숫자 값 추출 (주석 제거)
-            tmout_value=$(echo "$tmout_value" | grep -oE '^[0-9]+' 2>/dev/null || echo "")
             config_details="/etc/profile TMOUT: ${tmout_value}초"
         fi
     fi
 
-    # 2) 현재 쉘 환경에서 TMOUT 확인
+    # 2) 현재 쉘 환경에서 TMOUT 확인 (증적용 - 파일 설정이 아니므로 판정에 사용하지 않음)
     local current_tmout="${TMOUT:-}"
     if [ -n "$current_tmout" ]; then
         if [ -n "$config_details" ]; then
-            config_details="${config_details}, 현재 세션 TMOUT: ${current_tmout}초"
+            config_details="${config_details}, 현재 세션 TMOUT: ${current_tmout}초 (참고)"
         else
-            config_details="현재 세션 TMOUT: ${current_tmout}초"
+            config_details="현재 세션 TMOUT: ${current_tmout}초 (참고)"
         fi
-        # 현재 세션 TMOUT 사용
-        tmout_value="$current_tmout"
     fi
 
     # 3) 사용자별 .profile 파일 확인 (선택적)
     # AIX에서는 사용자별 홈 디렉터리의 .profile 확인
-    local user_profile=""
     if [ -n "${HOME:-}" ] && [ -f "$HOME/.profile" ]; then
-        local user_tmout=$(grep "^TMOUT=" "$HOME/.profile" 2>/dev/null | sed 's/TMOUT=//' | sed 's/export TMOUT=//' | head -1)
+        local user_tmout=""
+        user_tmout=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)*TMOUT=\([0-9]*\).*/\2/p' "$HOME/.profile" 2>/dev/null | tail -1 || true)
         if [ -n "$user_tmout" ]; then
-            user_tmout=$(echo "$user_tmout" | grep -oE '^[0-9]+' 2>/dev/null || echo "")
-            if [ -n "$user_tmout" ]; then
-                if [ -n "$config_details" ]; then
-                    config_details="${config_details}, 사용자 .profile TMOUT: ${user_tmout}초"
-                else
-                    config_details="사용자 .profile TMOUT: ${user_tmout}초"
-                fi
-                # 사용자 설정이 우선
-                tmout_value="$user_tmout"
+            if [ -n "$config_details" ]; then
+                config_details="${config_details}, 사용자 .profile TMOUT: ${user_tmout}초"
+            else
+                config_details="사용자 .profile TMOUT: ${user_tmout}초"
             fi
+            # 사용자 설정이 우선 (파일 설정)
+            tmout_value="$user_tmout"
         fi
     fi
 
-    # 최종 판정
-    if [ -n "$tmout_value" ] && [ "$tmout_value" -le 600 ] 2>/dev/null; then
+    # 최종 판정: 설정 파일에 TMOUT이 1~600초로 구성된 경우만 양호 (0은 자동 종료 비활성화)
+    if [ -n "$tmout_value" ] && [ "$tmout_value" -ge 1 ] 2>/dev/null && [ "$tmout_value" -le 600 ] 2>/dev/null; then
         is_secure=true
     fi
 
@@ -122,7 +115,11 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         if [ -z "$tmout_value" ]; then
-            inspection_summary="세션 종료시간(TMOUT) 미설정 - 600초(10분) 이하로 설정 권장"
+            if [ -n "$config_details" ]; then
+                inspection_summary="설정 파일 내 세션 종료시간(TMOUT) 미설정 (${config_details}) - 600초(10분) 이하로 설정 권장"
+            else
+                inspection_summary="세션 종료시간(TMOUT) 미설정 - 600초(10분) 이하로 설정 권장"
+            fi
             local grep_raw=$(grep '^TMOUT=' /etc/profile ~/.profile 2>/dev/null || echo "TMOUT not found")
             command_result="[Command: grep '^TMOUT=' /etc/profile ~/.profile]${newline}${grep_raw}"
         else

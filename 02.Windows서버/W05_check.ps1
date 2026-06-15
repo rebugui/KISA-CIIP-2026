@@ -45,33 +45,44 @@ try {
     $value = 0
     $found = $false
 
-    # Try to find ClearTextPassword setting
-    foreach ($line in $content) {
-        if ($line -match 'ClearTextPassword\s*=\s*(\d+)') {
-            $value = [int]$matches[1]
-            $found = $true
-            break
-        }
-    }
-
-    if ($found -and $value -eq 0) {
-        $finalResult = "GOOD"
-        $summary = "해독 가능한 암호화를 사용하여 암호 저장 정책이 '사용 안 함'으로 설정됨"
-        $status = "양호"
-        $commandOutput = "ClearTextPassword = 0 (Disabled)"
-    } elseif ($found -and $value -eq 1) {
-        $finalResult = "VULNERABLE"
-        $summary = "해독 가능한 암호화를 사용하여 암호 저장 정책이 '사용'으로 설정됨 (보안 심각 위협)"
-        $status = "취약"
-        $commandOutput = "ClearTextPassword = 1 (Enabled)"
+    # secedit 내보내기 결과를 얻지 못한 경우(서비스 미동작/권한 부족 등) 정책 판단 불가 -> 수동진단
+    # null/빈 내용을 GOOD으로 처리하면 정책 미설정을 '사용 안 함'으로 잘못 단정하는 false-good 발생
+    if ($null -eq $content -or @($content).Count -eq 0) {
+        $finalResult = "MANUAL"
+        $summary = "secedit 정책 내보내기 결과를 얻지 못해 'ClearTextPassword' 정책을 확인할 수 없음. 로컬 보안 정책에서 '해독 가능한 암호화를 사용하여 암호 저장' 설정을 수동으로 확인 필요"
+        $status = "수동진단"
+        $commandOutput = "secedit export returned no content (policy undeterminable)"
+        $commandExecuted = "secedit /export (ClearTextPassword 정책 확인)"
     } else {
-        $finalResult = "GOOD"
-        $summary = "정책을 찾을 수 없음 (기본값 '사용 안 함'으로 간주)"
-        $status = "양호"
-        $commandOutput = "ClearTextPassword not found (assumed disabled)"
-    }
+        # Try to find ClearTextPassword setting
+        foreach ($line in $content) {
+            if ($line -match 'ClearTextPassword\s*=\s*(\d+)') {
+                $value = [int]$matches[1]
+                $found = $true
+                break
+            }
+        }
 
-    $commandExecuted = "secedit /export (ClearTextPassword 정책 확인)"
+        if ($found -and $value -eq 0) {
+            $finalResult = "GOOD"
+            $summary = "해독 가능한 암호화를 사용하여 암호 저장 정책이 '사용 안 함'으로 설정됨"
+            $status = "양호"
+            $commandOutput = "ClearTextPassword = 0 (Disabled)"
+        } elseif ($found -and $value -eq 1) {
+            $finalResult = "VULNERABLE"
+            $summary = "해독 가능한 암호화를 사용하여 암호 저장 정책이 '사용'으로 설정됨 (보안 심각 위협)"
+            $status = "취약"
+            $commandOutput = "ClearTextPassword = 1 (Enabled)"
+        } else {
+            # 정책 항목 자체가 export 결과에 없는 경우: 기본값은 '사용 안 함'이나 자동 단정 불가 -> 수동진단
+            $finalResult = "MANUAL"
+            $summary = "'ClearTextPassword' 정책 항목이 secedit 결과에 존재하지 않음. 기본값은 '사용 안 함'이나 정책 적용 여부를 수동으로 확인 필요"
+            $status = "수동진단"
+            $commandOutput = "ClearTextPassword not found in secedit export (verify manually)"
+        }
+
+        $commandExecuted = "secedit /export (ClearTextPassword 정책 확인)"
+    }
 
 } catch {
     $finalResult = "MANUAL"

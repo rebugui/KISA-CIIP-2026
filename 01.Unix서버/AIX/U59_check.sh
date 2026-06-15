@@ -64,15 +64,17 @@ diagnose() {
     local snmp_version=""
     local config_details=""
 
-    # 1) SNMP 서비스 설치 여부 확인
-    if command -v snmpd >/dev/null 2>&1 || [ -f /etc/snmp/snmpd.conf ]; then
+    # 1) SNMP 서비스 설치 여부 확인 (net-snmp + AIX 기본 에이전트 설정 파일)
+    if command -v snmpd >/dev/null 2>&1 || [ -f /etc/snmp/snmpd.conf ] || [ -f /etc/snmpdv3.conf ] || [ -f /etc/snmpd.conf ]; then
         snmpd_installed=true
     fi
 
-    # 2) SNMP 서비스 실행 여부 확인 (AIX: lssrc)
+    # 2) SNMP 서비스 실행 여부 확인 (AIX: lssrc, AIX 에이전트 포함)
     if [ "$snmpd_installed" = true ]; then
-        local service_status=$(lssrc -s snmpd 2>/dev/null | grep snmpd | awk '{print $2}' || echo "inoperative")
-        if [ "$service_status" = "active" ]; then
+        local snmpd_lssrc=$(lssrc -s snmpd 2>/dev/null || echo "")
+        if echo "$snmpd_lssrc" | grep -q "active"; then
+            snmp_running=true
+        elif ps -ef 2>/dev/null | grep -E 'snmpd|snmpdv3ne|snmpmibd|hostmibd' | grep -v grep >/dev/null; then
             snmp_running=true
         fi
     fi
@@ -90,63 +92,81 @@ diagnose() {
         status="양호"
         inspection_summary="SNMP 서비스가 설치되어 있으나 비활성화됨"
         local lssrc_out=$(lssrc -s snmpd 2>/dev/null || echo "SNMP service not found")
-        local ss_out=$(ss -tuln | grep ":161 " 2>/dev/null || echo "Port 161 not listening")
-        command_result="[Command: lssrc -s snmpd]${newline}${lssrc_out}${newline}${newline}[Command: ss -tuln | grep :161]${newline}${ss_out}"
-        command_executed="lssrc -s snmpd 2>/dev/null | grep -q "active" 2>/dev/null"
-    else
-        # 3) SNMP 버전 설정 확인 (snmpd.conf)
-        local snmp_conf="/etc/snmp/snmpd.conf"
-        if [ -f "$snmp_conf" ]; then
-            # SNMP v1/v2c 사용 여부 확인
-            if grep -qi "com2sec" "$snmp_conf" 2>/dev/null; then
-                snmp_version="v1/v2c"
-                config_details="com2sec 설정 발견 (SNMP v1/v2c 사용)"
-            fi
-
-            # SNMP v3 사용 여부 확인
-            if grep -qi "createUser\|rouser\|rwuser" "$snmp_conf" 2>/dev/null; then
-                # v3 사용자 설정이 있으면 v3 사용 중
-                if grep -qi "com2sec" "$snmp_conf" 2>/dev/null; then
-                    # v1/v2c와 v3가 모두 설정된 경우
-                    diagnosis_result="VULNERABLE"
-                    status="취약"
-                    inspection_summary="SNMP v1/v2c가 활성화됨 (v3와 공존): ${config_details}"
-                    local grep_com=$(grep -i 'com2sec\|comuser' /etc/snmp/snmpd.conf 2>/dev/null | head -10 || echo "No com2sec found")
-                    command_result="[Command: grep com2sec snmpd.conf]${newline}${grep_com}"
-                    command_executed="grep -E 'com2sec|createUser|rouser' ${snmp_conf}"
-                else
-                    # v3만 사용하는 경우
-                    diagnosis_result="GOOD"
-                    status="양호"
-                    inspection_summary="SNMP v3만 사용 중 (보안 설정 적절)"
-                    local grep_v3=$(grep -i 'createsnmp\|usmUser' /etc/snmp/snmpd.conf 2>/dev/null | head -10 || echo "No SNMPv3 found")
-                    command_result="[Command: grep SNMPv3 snmpd.conf]${newline}${grep_v3}"
-                    command_executed="grep -E 'createUser|rouser|rwuser' ${snmp_conf}"
-                fi
-            elif [ -n "$config_details" ]; then
-                # v1/v2c만 사용하는 경우
-                diagnosis_result="VULNERABLE"
-                status="취약"
-                inspection_summary="SNMP v1/v2c 사용 중 (v3 권장): ${config_details}"
-                    local grep_v1=$(grep -i 'com2sec\|public\|private' /etc/snmp/snmpd.conf 2>/dev/null | head -10 || echo "No v1/v2c found")
-                    command_result="[Command: grep v1/v2c snmpd.conf]${newline}${grep_v1}"
-                command_executed="grep com2sec ${snmp_conf}"
-            else
-                # 설정을 찾을 수 없는 경우 (기본 설정일 수 있음)
-                diagnosis_result="MANUAL"
-                status="수동진단"
-                inspection_summary="SNMP 버전 설정을 자동으로 확인할 수 없음 (수동 확인 필요)"
-                    local cat_snmp=$(cat /etc/snmp/snmpd.conf 2>/dev/null | head -20 || echo "Config not readable")
-                    command_result="[Command: cat /etc/snmp/snmpd.conf]${newline}${cat_snmp}"
-                command_executed="cat ${snmp_conf}"
-            fi
+        # AIX에는 ss가 없으므로 netstat으로 포트 확인 (netstat 미가용 시 포트 측정값을 날조하지 않음)
+        if command -v netstat >/dev/null 2>&1; then
+            local netstat_out=$(netstat -an 2>/dev/null | grep -E '[.:]161[[:space:]]' || echo "Port 161 not listening")
+            command_result="[Command: lssrc -s snmpd]${newline}${lssrc_out}${newline}${newline}[Command: netstat -an | grep 161]${newline}${netstat_out}"
+            command_executed="lssrc -s snmpd; netstat -an | grep 161"
         else
+            command_result="[Command: lssrc -s snmpd]${newline}${lssrc_out}${newline}${newline}[netstat 미가용: 포트 점검 생략]"
+            command_executed="lssrc -s snmpd"
+        fi
+    else
+        # 3) SNMP 버전 설정 확인 (net-snmp snmpd.conf + AIX snmpdv3.conf / 레거시 snmpd.conf)
+        local snmp_confs="/etc/snmp/snmpd.conf /etc/snmpdv3.conf /etc/snmpd.conf"
+        local found_confs=""
+        local v1v2c_evidence=""
+        local v3_evidence=""
+        local conf=""
+        local v1_hit=""
+        local v3_hit=""
+        for conf in $snmp_confs; do
+            if [ -f "$conf" ]; then
+                found_confs="${found_confs}${conf} "
+                v1_hit=""
+                v3_hit=""
+                if [ "$conf" = "/etc/snmpdv3.conf" ]; then
+                    # AIX snmpdv3.conf: COMMUNITY 스탠자 = v1/v2c 커뮤니티
+                    v1_hit=$(grep -Ei '^[[:space:]]*COMMUNITY[[:space:]]' "$conf" 2>/dev/null | head -10 || true)
+                    v3_hit=$(grep -Ei '^[[:space:]]*USM_USER[[:space:]]' "$conf" 2>/dev/null | head -10 || true)
+                elif [ "$conf" = "/etc/snmpd.conf" ]; then
+                    # AIX 레거시 snmpd.conf: community 라인 = v1/v2c
+                    v1_hit=$(grep -Ei '^[[:space:]]*community[[:space:]]' "$conf" 2>/dev/null | head -10 || true)
+                else
+                    # net-snmp: com2sec/rocommunity/rwcommunity/community = v1/v2c
+                    v1_hit=$(grep -Ei '^[[:space:]]*(com2sec|rocommunity6?|rwcommunity6?|community)[[:space:]]' "$conf" 2>/dev/null | head -10 || true)
+                    v3_hit=$(grep -Ei '^[[:space:]]*(createUser|rouser|rwuser)[[:space:]]' "$conf" 2>/dev/null | head -10 || true)
+                fi
+                if [ -n "$v1_hit" ]; then
+                    v1v2c_evidence="${v1v2c_evidence}[${conf}]${newline}${v1_hit}${newline}"
+                    config_details="${config_details}${conf}: v1/v2c 커뮤니티 설정 발견; "
+                fi
+                if [ -n "$v3_hit" ]; then
+                    v3_evidence="${v3_evidence}[${conf}]${newline}${v3_hit}${newline}"
+                fi
+            fi
+        done
+
+        if [ -z "$found_confs" ]; then
             diagnosis_result="MANUAL"
             status="수동진단"
             inspection_summary="SNMP 설정 파일을 찾을 수 없음 (수동 확인 필요)"
-            local find_snmp=$(find /etc -name 'snmpd.*' 2>/dev/null | head -10 || echo "No SNMP config files found")
-            command_result="[Command: find /etc -name 'snmpd.*']${newline}${find_snmp}"
-            command_executed="ls /etc/snmp/*.conf 2>/dev/null"
+            local find_snmp=$(ls /etc/snmp/snmpd.conf /etc/snmpdv3.conf /etc/snmpd.conf 2>/dev/null || echo "No SNMP config files found")
+            command_result="[Command: ls /etc/snmp/snmpd.conf /etc/snmpdv3.conf /etc/snmpd.conf]${newline}${find_snmp}"
+            command_executed="ls /etc/snmp/snmpd.conf /etc/snmpdv3.conf /etc/snmpd.conf 2>/dev/null"
+        elif [ -n "$v1v2c_evidence" ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            if [ -n "$v3_evidence" ]; then
+                inspection_summary="SNMP v1/v2c가 활성화됨 (v3와 공존): ${config_details}"
+            else
+                inspection_summary="SNMP v1/v2c 사용 중 (v3 권장): ${config_details}"
+            fi
+            command_result="[v1/v2c community 설정]${newline}${v1v2c_evidence}"
+            command_executed="grep -E 'com2sec|rocommunity|rwcommunity|community|COMMUNITY' ${found_confs}"
+        elif [ -n "$v3_evidence" ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="SNMP v3만 사용 중 (보안 설정 적절)"
+            command_result="[v3 설정]${newline}${v3_evidence}"
+            command_executed="grep -E 'createUser|rouser|rwuser|USM_USER' ${found_confs}"
+        else
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="SNMP 버전 설정을 자동으로 확인할 수 없음 (수동 확인 필요): ${found_confs}"
+            local cat_snmp=$(head -20 ${found_confs} 2>/dev/null || echo "Config not readable")
+            command_result="[Command: head -20 ${found_confs}]${newline}${cat_snmp}"
+            command_executed="head -20 ${found_confs}"
         fi
     fi
 

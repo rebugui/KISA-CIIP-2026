@@ -40,8 +40,12 @@ try {
     $auditOutput = auditpol /get /category:* /r 2>&1
     $out = $auditOutput | Out-String
 
-    # Parse the CSV output
-    $auditPolicy = $auditOutput | ConvertFrom-Csv -Delimiter ',' -Header 'Subcategory','Setting','InclusionSetting'
+    # auditpol /r emits a native CSV header:
+    #   Machine Name,Policy Target,Subcategory,Subcategory GUID,Inclusion Setting,Exclusion Setting
+    # Using a custom -Header would replace these native headers and misalign every
+    # column (machine name read as Subcategory). Let ConvertFrom-Csv use the native
+    # header row instead, and read the documented 'Inclusion Setting' column.
+    $auditPolicy = $auditOutput | ConvertFrom-Csv -Delimiter ','
     $out += "`n총 $($auditPolicy.Count)개의 감사 정책 확인됨`n"
 
     if ($auditPolicy) {
@@ -60,10 +64,11 @@ try {
         $allConfigured = $true
         $unconfiguredItems = @()
 
-        # Check each critical audit
+        # Check each critical audit. The audit state lives in the native
+        # 'Inclusion Setting' column ('없음'/'No Auditing' means not configured).
         foreach ($auditKeyword in $criticalAudits) {
             $found = $auditPolicy | Where-Object {
-                $_.Subcategory -like "*$auditKeyword*" -and $_.Setting -ne '없음' -and $_.Setting -ne 'No Auditing'
+                $_.Subcategory -like "*$auditKeyword*" -and $_.'Inclusion Setting' -ne '없음' -and $_.'Inclusion Setting' -ne 'No Auditing'
             }
 
             if (-not $found) {
@@ -78,7 +83,7 @@ try {
             $matching = $auditPolicy | Where-Object { $_.Subcategory -like "*$auditKeyword*" }
             if ($matching) {
                 foreach ($match in $matching) {
-                    $out += "  - $($match.Subcategory): $($match.Setting)`n"
+                    $out += "  - $($match.Subcategory): $($match.'Inclusion Setting')`n"
                 }
             }
         }

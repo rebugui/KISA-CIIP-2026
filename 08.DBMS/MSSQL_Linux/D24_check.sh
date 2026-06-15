@@ -70,29 +70,35 @@ diagnose() {
         fi
     fi
 
-    # Check for default port 1433
-    if netstat -tuln 2>/dev/null | grep -q ":1433 "; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        command_executed="netstat -tuln | grep 1433"
-        command_result=$(netstat -tuln 2>/dev/null | grep ":1433 " || echo "")
-        inspection_summary="기본 포트 1433 사용 중 (취약 - 포트 변경 권장)\n\n"
-        inspection_summary+="검증 결과: ${command_result}\n\n"
-        inspection_summary+="조치 방법:\n"
-        inspection_summary+="- SQL Server Configuration Manager 실행\n"
-        inspection_summary+="- SQL Server Network Configuration > Protocols for MSSQLSERVER\n"
-        inspection_summary+="- Properties > IP Addresses 탭\n"
-        inspection_summary+="- IPAll > TCP Port: 기본 포트가 아닌 포트로 변경 (예: 14330)\n"
-        inspection_summary+="- SQL Server 서비스 재시작\n"
-        inspection_summary+="- 방화벽에서 새 포트 허용 설정"
-    else
-        diagnosis_result="GOOD"
-        status="양호"
-        command_executed="netstat -tuln | grep 1433"
-        command_result=$(netstat -tuln 2>/dev/null || echo "포트 1433 미사용")
-        inspection_summary="기본 포트 1433 미사용 또는 서비스 미실행 (양호)\n\n"
-        inspection_summary+="검증 결과: ${command_result}"
-    fi
+    # D-24 판단기준: 제한이 필요한 시스템 확장 저장 프로시저(xp_regread, xp_regwrite,
+    # xp_regdeletevalue, xp_regenumvalues 등)의 실행 권한이 DBA 외 guest/public에게
+    # 부여되어 있는지 점검. 이는 master DB에 대한 T-SQL 연결(sys.database_permissions)을
+    # 통해서만 확인 가능하며, 포트 사용 여부와는 무관함.
+    # Linux 환경에서는 라이브 T-SQL 연결 없이 확장 저장 프로시저 권한을 정적으로 확인할 수
+    # 없으므로 MANUAL로 판정한다 (포트 기반 GOOD 오판정 제거).
+    diagnosis_result="MANUAL"
+    status="수동진단"
+    command_executed="SQL Server Management Studio 또는 sqlcmd로 master DB에 연결 후 확장 저장 프로시저 권한 확인"
+    command_result=""
+    inspection_summary="시스템 확장 저장 프로시저(xp_reg* 등)의 guest/public 권한 부여 여부는 라이브 T-SQL 연결이 필요하여 자동 점검할 수 없습니다 (수동 점검 필요).\n\n"
+    inspection_summary+="판단기준:\n"
+    inspection_summary+="- 양호: 제한이 필요한 시스템 확장 저장 프로시저가 DBA 외 guest/public에게 부여되지 않은 경우\n"
+    inspection_summary+="- 취약: 제한이 필요한 시스템 확장 저장 프로시저가 DBA 외 guest/public에게 부여된 경우\n\n"
+    inspection_summary+="점검 대상 확장 저장 프로시저(예):\n"
+    inspection_summary+="- sys.xp_regread, sys.xp_regwrite, sys.xp_regdeletevalue, sys.xp_regdeletekey,\n"
+    inspection_summary+="  sys.xp_regenumvalues, sys.xp_regremovemultistring, sys.xp_readdmultistring\n\n"
+    inspection_summary+="검증 방법:\n"
+    inspection_summary+="1. SQL Server Management Studio > 개체 탐색기 > master > 프로그래밍 기능 >\n"
+    inspection_summary+="   확장 저장 프로시저 > 시스템 확장 저장 프로시저\n"
+    inspection_summary+="2. 각 xp_reg* 프로시저 우클릭 > 속성 > 사용 권한에서 public 실행 권한 확인\n"
+    inspection_summary+="3. 또는 다음 쿼리로 권한 확인:\n"
+    inspection_summary+="   SELECT OBJECT_NAME(major_id) AS proc_name, USER_NAME(grantee_principal_id) AS grantee,\n"
+    inspection_summary+="          permission_name, state_desc\n"
+    inspection_summary+="   FROM master.sys.database_permissions\n"
+    inspection_summary+="   WHERE OBJECT_NAME(major_id) LIKE 'xp_reg%'\n"
+    inspection_summary+="     AND USER_NAME(grantee_principal_id) IN ('public', 'guest');\n\n"
+    inspection_summary+="조치 방법:\n"
+    inspection_summary+="- guest/public에게 부여된 시스템 확장 저장 프로시저 실행 권한 제거 (REVOKE)"
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
     verify_result_saved "${ITEM_ID}"; return 0

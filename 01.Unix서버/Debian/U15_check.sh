@@ -57,55 +57,39 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # 소유자가 /etc/passwd에 존재하지 않는 파일/디렉터리 확인
-    # 가이드라인: 소유자가 존재하지 않는 파일 및 디렉터리가 존재하지 않는 경우 양호
+    # 가이드 Step 1) 소유자와 그룹이 존재하지 않는 파일 및 디렉터리 확인
+    # 루트(/) 전체를 -xdev로 스캔하여 가이드 명령과 동일한 범위를 점검
+    command_executed="find / -xdev \\( -nouser -o -nogroup \\) -ls 2>/dev/null"
 
-    local orphan_files=""
+    local find_output=""
+    local find_status=0
+    find_output=$(find / -xdev \( -nouser -o -nogroup \) -ls 2>/dev/null) || find_status=$?
+
+    # 증거 출력 제한(최대 50건) 전에 전체 건수를 먼저 집계
     local orphan_count=0
-    local raw_output=""
-
-    # find 명령으로 nouser, nogroup 파일 검색
-    # 주요 파일시스템 경로 검색 (가상 파일시스템 제외)
-    local search_paths=("/home" "/var" "/tmp" "/opt" "/srv" "/usr/local")
-
-    for search_path in "${search_paths[@]}"; do
-        if [ -d "$search_path" ]; then
-            local found=$(find "$search_path" -xdev \( -nouser -o -nogroup \) -print 2>/dev/null || echo "")
-            if [ -n "$found" ]; then
-                while IFS= read -r file; do
-                    local file_info=$(ls -lnd "$file" 2>/dev/null || echo "")
-                    orphan_files="${orphan_files}${file_info}${newline}"
-                    ((orphan_count++)) || true
-                    raw_output="${raw_output}${file}${newline}"
-                done <<< "$found"
-            fi
-        fi
-    done || true
-
-    # 루트 파일시스템 직접 검색 (깊이 3까지만)
-    local root_found=$(find / -maxdepth 3 -xdev \( -nouser -o -nogroup \) -not -path "/home/*" -not -path "/var/*" -not -path "/tmp/*" -not -path "/opt/*" -not -path "/srv/*" -not -path "/usr/local/*" -not -path "/proc/*" -not -path "/sys/*" -not -path "/dev/*" -not -path "/run/*" -print 2>/dev/null || echo "")
-    if [ -n "$root_found" ]; then
-        while IFS= read -r file; do
-            local file_info=$(ls -lnd "$file" 2>/dev/null || echo "")
-            orphan_files="${orphan_files}${file_info}${newline}"
-            ((orphan_count++)) || true
-            raw_output="${raw_output}${file}${newline}"
-        done <<< "$root_found"
+    if [ -n "$find_output" ]; then
+        orphan_count=$(printf '%s\n' "$find_output" | grep -c '.' || true)
     fi
 
-    command_executed="find / -xdev \\( -nouser -o -nogroup \\) -print 2>/dev/null"
-
     # 최종 판정
-    if [ "$orphan_count" -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="소유자가 존재하지 않는 파일 및 디렉터리가 없음"
-        command_result="${raw_output:-검색 결과 없음 (모든 파일에 소유자 존재)}"
-    else
+    if [ -n "$find_output" ] && [ "$orphan_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="소유자가 존재하지 않는 파일/디렉터리 ${orphan_count}개 발견"
-        command_result="${orphan_files}"
+        inspection_summary="소유자 또는 그룹이 존재하지 않는 파일 및 디렉터리 ${orphan_count}건이 발견되었습니다."
+        local capped_list=""
+        capped_list=$(printf '%s\n' "$find_output" | head -50) || true
+        command_result="[Command: ${command_executed}]${newline}발견 건수: ${orphan_count}건 (최대 50건 표시)${newline}${capped_list}"
+    elif [ "$find_status" -ne 0 ]; then
+        # find 명령 자체가 실패한 경우(권한 부족, 시간 초과 등) → 수동 진단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="find 명령 수행이 실패하여(종료코드: ${find_status}) 소유자 없는 파일 및 디렉터리 존재 여부를 자동 판정할 수 없습니다. root 권한으로 수동 확인이 필요합니다."
+        command_result="[Command: ${command_executed}]${newline}find 종료코드: ${find_status}, 출력 없음 (권한 부족 또는 시간 초과 가능성)"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="소유자 또는 그룹이 존재하지 않는 파일 및 디렉터리가 발견되지 않았습니다."
+        command_result="[Command: ${command_executed}]${newline}발견된 파일/디렉터리 없음"
     fi
 
     # 결과 생성 (PC 패턴: 스크립트에서 모드 확인 후 처리)

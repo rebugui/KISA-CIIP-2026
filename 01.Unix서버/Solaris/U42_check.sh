@@ -11,7 +11,7 @@
 # @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 불필요한 RPC 서비스 비활성화
-# @Description : nfs-server, rpcbind 서비스 비활성화 확인
+# @Description : 취약점이 있는 불필요한 RPC 서비스(rpc.cmsd, rusersd, rexd 등) 비활성화 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,61 +57,80 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # nfs-server, rpcbind 서비스 상태 확인
+    # 가이드라인 명시 불필요 RPC 서비스의 활성화 여부 확인 (rpc/bind 자체는 점검 대상 아님)
 
     local is_secure=true
+    local probe_available=false
     local service_status=""
     local active_services=()
 
-    # 확인할 서비스 목록
-    local services=("nfs-server" "rpcbind" "nfs-client.target")
+    # 가이드라인(U-42) 명시 불필요 RPC 서비스 목록 (15종)
+    local rpc_service_list=("rpc.cmsd" "rpc.ttdbserverd" "sadmind" "rusersd" "walld" "sprayd" "rstatd" "rpc.nisd" "rexd" "rpc.pcnfsd" "rpc.statd" "rpc.ypupdated" "rpc.rquotad" "kcms_server" "cachefsd")
+    # 데몬명(rpc.*)과 inetd 서비스명 표기를 모두 매칭
+    local rpc_pattern='cmsd|ttdbserver|sadmind|rusersd|walld|sprayd|rstatd|statd|nisd|rexd|pcnfsd|ypupdated|rquotad|kcms_server|cachefsd'
+    # SMF FMRI 표기 매칭 패턴 (firewall 오탐 방지를 위해 wall/rex는 rpc/ 경로로 한정, rpc/bind 미포함)
+    local fmri_pattern='rusers|spray|rpc/wall|walld|rstat|rpc/rex|rexd|ttdbserver|cmsd|sadmind|nisplus|pcnfs|nfs/status|statd|nis/update|ypupdated|rquota|kcms|cachefs'
 
-    for service in "${services[@]}"; do
-        # Solaris SMF로 서비스 상태 확인
-        local svc_name=""
-        case "$service" in
-            "nfs-server") svc_name="network/nfs/server" ;;
-            "rpcbind") svc_name="network/rpc/bind" ;;
-            *) svc_name="$service" ;;
-        esac
-
-        if svcs "$svc_name" 2>/dev/null | grep -q "online"; then
+    # 1) inetadm 등록 불필요 RPC 서비스 확인 (enabled 상태)
+    if command -v inetadm >/dev/null 2>&1; then
+        probe_available=true
+        local inetadm_rpc=$(inetadm 2>/dev/null | grep -i enabled | grep -Ei "$fmri_pattern" || echo "")
+        if [ -n "$inetadm_rpc" ]; then
             is_secure=false
-            active_services+=("${service} (online)")
-            service_status="${service_status}${service}: online\\n"
+            active_services+=("inetadm: $(echo "$inetadm_rpc" | awk '{print $NF}' | xargs)")
+            service_status="${service_status}inetadm에서 불필요 RPC 서비스 enabled\\n"
         else
-            service_status="${service_status}${service}: offline 또는 미설치\\n"
+            service_status="${service_status}inetadm: 불필요 RPC 서비스 없음\\n"
         fi
-    done || true
+    fi
 
-    # 포트 확인 (NFS: 2049, rpcbind: 111)
-    if command -v netstat &>/dev/null; then
-        local nfs_port=$(netstat -an | grep "\.2049 " || echo "")
-        local rpcbind_port=$(netstat -an | grep "\.111 " || echo "")
-
-        if [ -n "$nfs_port" ]; then
+    # 2) SMF 서비스 상태 확인 (online 인 불필요 RPC 서비스)
+    if command -v svcs >/dev/null 2>&1; then
+        probe_available=true
+        local online_rpc=$(svcs -H -o state,fmri 2>/dev/null | awk '$1 == "online"' | grep -Ei "$fmri_pattern" || echo "")
+        if [ -n "$online_rpc" ]; then
             is_secure=false
-            service_status="${service_status}NFS 포트 2049 활성화\\n"
+            active_services+=("SMF: $(echo "$online_rpc" | awk '{print $2}' | xargs)")
+            service_status="${service_status}SMF에서 불필요 RPC 서비스 online\\n"
+        else
+            service_status="${service_status}SMF: 불필요 RPC 서비스 online 없음\\n"
         fi
-        if [ -n "$rpcbind_port" ]; then
+        # 참고: rpc/bind(rpcbind) 상태는 판정에서 제외 (증적용)
+        local bind_state=$(svcs -H -o state svc:/network/rpc/bind 2>/dev/null || echo "미설치")
+        service_status="${service_status}[참고] network/rpc/bind: ${bind_state} (판정 제외)\\n"
+    fi
+
+    # 3) 불필요 RPC 프로세스 확인
+    if command -v ps >/dev/null 2>&1; then
+        probe_available=true
+        local rpc_procs=$(ps -ef 2>/dev/null | grep -Ei "$rpc_pattern" | grep -v grep || echo "")
+        if [ -n "$rpc_procs" ]; then
             is_secure=false
-            service_status="${service_status}rpcbind 포트 111 활성화\\n"
+            local proc_names=$(echo "$rpc_procs" | awk '{print $8}' | sort -u | xargs)
+            active_services+=("프로세스: ${proc_names}")
+            service_status="${service_status}불필요 RPC 프로세스 실행 중\\n"
+        else
+            service_status="${service_status}불필요 RPC 프로세스 없음\\n"
         fi
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    command_result="점검 대상: ${rpc_service_list[*]}\\n${service_status}"
+    command_executed="inetadm | grep -Ei '${fmri_pattern}'; svcs -H -o state,fmri | grep -Ei '${fmri_pattern}'; ps -ef | grep -Ei '${rpc_pattern}'"
+
+    if [ "$probe_available" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="inetadm/svcs/ps를 사용할 수 없어 불필요한 RPC 서비스 상태를 수동으로 점검해야 합니다."
+        command_result="점검 대상: ${rpc_service_list[*]}\\n점검 수단(inetadm, svcs, ps)을 사용할 수 없습니다."
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="NFS 관련 서비스 비활성화됨"
-        command_result="${service_status}"
-        command_executed="svcs network/nfs/server network/rpc/bind; netstat -an | grep -E '\.2049|\.111'"
+        inspection_summary="불필요한 RPC 서비스가 비활성화되어 있습니다."
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="NFS 관련 서비스 활성화됨: ${active_services[*]}"
-        command_result="${service_status}"
-        command_executed="svcs network/nfs/server network/rpc/bind; netstat -an | grep -E '\.2049|\.111'"
+        inspection_summary="보안에 취약한 RPC 서비스가 활성화되어 있습니다: ${active_services[*]}"
     fi
 
     # echo ""

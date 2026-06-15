@@ -11,7 +11,7 @@
 # @Platform    : Solaris
 # @Severity    : 상
 # @Title       : Finger 서비스 비활성화
-# @Description : faillock 설정 확인 deny <= 5
+# @Description : Finger 서비스 활성화 여부 점검 (svcs/inetadm/inetd.conf)
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -57,70 +57,91 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # Solaris: /etc/default/passwd에서 RETRIES 확인
+    # Solaris: SMF(svcs/inetadm) 및 레거시 inetd.conf에서 Finger 서비스 활성화 여부 확인
 
-    local is_secure=false
-    local config_details=""
-    local deny_value=""
+    local probe_available=false
+    local finger_active=false
+    local active_details=""
+    local evidence=""
 
-    # Solaris: /etc/default/passwd에서 RETRIES 설정 확인
-    if [ -f /etc/default/passwd ]; then
-        local retries_setting=$(grep "^RETRIES=" /etc/default/passwd | awk -F= '{print $2}' | tr -d ' ')
-        if [ -n "$retries_setting" ]; then
-            deny_value=$retries_setting
-            if [ "$deny_value" -le 5 ]; then
-                is_secure=true
+    # 1) Solaris 10 이상: svcs로 finger 서비스 상태 확인
+    if command -v svcs >/dev/null 2>&1; then
+        probe_available=true
+        local svcs_out=""
+        svcs_out=$(svcs -H -o state,fmri 2>/dev/null | grep finger || true)
+        if [ -n "$svcs_out" ]; then
+            evidence="${evidence}[Command: svcs -H -o state,fmri | grep finger]${newline}${svcs_out}${newline}"
+            if printf '%s\n' "$svcs_out" | awk '{print $1}' | grep -q "^online$"; then
+                finger_active=true
+                active_details="${active_details}svcs: finger 서비스 online 상태. "
             fi
-            config_details="/etc/default/passwd: RETRIES=${deny_value}"
         else
-            # 기본값 확인 (Solaris는 보통 3-5회)
-            deny_value="3"
-            config_details="/etc/default/passwd: 기본값 RETRIES=3 (설정 없음)"
-            is_secure=true
+            evidence="${evidence}[Command: svcs -H -o state,fmri | grep finger]${newline}finger 서비스 미등록${newline}"
         fi
-    else
-        # PAM 폴백 (Solaris는 PAM도 지원)
-        local pam_files=(
-            "/etc/pam.d/common-auth"
-            "/etc/pam.d/system-auth"
-            "/etc/pam.d/login"
-        )
-
-        for pam_file in "${pam_files[@]}"; do
-            if [ -f "$pam_file" ]; then
-                if grep -q "pam_faillock.so" "$pam_file"; then
-                    deny_value=$(grep "pam_faillock.so" "$pam_file" | grep -oP 'deny=\K[0-9]+' | head -1)
-                    if [ -n "$deny_value" ]; then
-                        if [ "$deny_value" -le 5 ]; then
-                            is_secure=true
-                        fi
-                        config_details="pam_faillock.so: deny=${deny_value}"
-                    fi
-                    break
-                fi
-            fi
-        done || true
     fi
 
+    # 2) Solaris 10 이상: inetadm으로 finger 활성화 여부 확인
+    if command -v inetadm >/dev/null 2>&1; then
+        probe_available=true
+        local inetadm_out=""
+        inetadm_out=$(inetadm 2>/dev/null | grep finger || true)
+        if [ -n "$inetadm_out" ]; then
+            evidence="${evidence}[Command: inetadm | grep finger]${newline}${inetadm_out}${newline}"
+            if printf '%s\n' "$inetadm_out" | awk '{print $1}' | grep -q "^enabled$"; then
+                finger_active=true
+                active_details="${active_details}inetadm: finger 서비스 enabled 상태. "
+            fi
+        else
+            evidence="${evidence}[Command: inetadm | grep finger]${newline}finger 서비스 미등록${newline}"
+        fi
+    fi
+
+    # 3) 레거시(Solaris 5.9 이하): /etc/inetd.conf의 주석 처리되지 않은 finger 항목 확인
+    if [ -f /etc/inetd.conf ]; then
+        probe_available=true
+        local inetd_out=""
+        inetd_out=$(grep "^[[:space:]]*finger" /etc/inetd.conf 2>/dev/null || true)
+        if [ -n "$inetd_out" ]; then
+            finger_active=true
+            active_details="${active_details}/etc/inetd.conf: finger 항목 활성화. "
+            evidence="${evidence}[Command: grep '^finger' /etc/inetd.conf]${newline}${inetd_out}${newline}"
+        else
+            evidence="${evidence}[Command: grep '^finger' /etc/inetd.conf]${newline}활성화된 finger 항목 없음${newline}"
+        fi
+    fi
+
+    # 4) 보조 증적: 79/tcp 포트 리슨 여부
+    if command -v netstat >/dev/null 2>&1; then
+        local netstat_out=""
+        netstat_out=$(netstat -an 2>/dev/null | grep '\.79 ' || true)
+        if [ -n "$netstat_out" ]; then
+            evidence="${evidence}[Command: netstat -an | grep '\\.79 ']${newline}${netstat_out}${newline}"
+        else
+            evidence="${evidence}[Command: netstat -an | grep '\\.79 ']${newline}79번 포트 리슨 없음${newline}"
+        fi
+    fi
+
+    local probe_cmds="svcs -H -o state,fmri | grep finger; inetadm | grep finger; grep '^finger' /etc/inetd.conf; netstat -an | grep '\\.79 '"
+
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$finger_active" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="Finger 서비스가 활성화되어 있습니다. ${active_details}Finger 서비스를 비활성화하시기 바랍니다."
+        command_result="${evidence}"
+        command_executed="${probe_cmds}"
+    elif [ "$probe_available" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="로그온 시도 횟수 제한 적절히 설정됨 (RETRIES=${deny_value} <= 5)"
-        command_result="${config_details}"
-        command_executed="grep '^RETRIES' /etc/default/passwd; grep pam_faillock.so /etc/pam.d/common-auth"
-    elif [ -n "$deny_value" ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="로그온 시도 횟수 제한 설정됨但 임계값 초과 (RETRIES=${deny_value} > 5)"
-        command_result="${config_details}"
-        command_executed="grep '^RETRIES' /etc/default/passwd"
+        inspection_summary="Finger 서비스가 비활성화되어 있습니다."
+        command_result="${evidence}"
+        command_executed="${probe_cmds}"
     else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="로그온 시도 횟수 제한 미설정"
-        command_result="RETRIES setting not found"
-        command_executed="ls -la /etc/default/passwd 2>/dev/null; grep pam_faillock.so /etc/pam.d/common-auth"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="svcs/inetadm 명령과 /etc/inetd.conf 파일을 확인할 수 없어 Finger 서비스 상태를 판단할 수 없습니다. 수동으로 점검하시기 바랍니다."
+        command_result="svcs/inetadm 명령 없음, /etc/inetd.conf 파일 없음${newline}${evidence}"
+        command_executed="${probe_cmds}"
     fi
 
     # echo ""

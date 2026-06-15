@@ -44,20 +44,25 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="시스템 시작 스크립트의 소유자 및 권한 설정이 적절합니다."
     local command_result=""
-    local command_executed="ls -ld /etc/rc*.d/* /etc/init.d/*"
+    local command_executed="find /etc/rc.d/ /etc/init.d/ -type f -perm /022; find /etc/rc.d/ /etc/init.d/ -type f ! -user root"
 
-    # 1. 실제 데이터 추출: 타인 쓰기 권한(Other Write)이 있는 파일 검색
+    # 1. 실제 데이터 추출: 일반 사용자(그룹 또는 타인) 쓰기 권한 또는 소유자가 root가 아닌 파일 검색
+    # criteria_bad: 일반 사용자(그룹 OR 타인)의 쓰기 권한 부여 → -perm /022 (그룹쓰기 020 또는 타인쓰기 002 중 하나라도)
     # 주요 경로: /etc/rc.d, /etc/init.d 등
-    local vulnerable_files=$(find /etc/rc.d/ /etc/init.d/ -type f -perm -2 2>/dev/null | head -n 5)
+    local writable_files=$(find /etc/rc.d/ /etc/init.d/ -type f -perm /022 2>/dev/null | head -n 5 || true)
+    local nonroot_files=$(find /etc/rc.d/ /etc/init.d/ -type f ! -user root 2>/dev/null | head -n 5 || true)
 
-    # 2. 판정 로직
-    if [ -n "$vulnerable_files" ]; then
+    # 2. 판정 로직: 일반 사용자 쓰기 권한 또는 비root 소유 파일이 하나라도 발견되면 취약
+    if [ -n "$writable_files" ] || [ -n "$nonroot_files" ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
-        inspection_summary="시스템 시작 스크립트 중 타인 쓰기 권한이 허용된 파일이 존재합니다."
-        command_result="취약 파일 목록(일부): [ $(echo $vulnerable_files | xargs) ]"
+        local issue_desc=""
+        [ -n "$writable_files" ] && issue_desc="일반 사용자(그룹/타인) 쓰기 권한이 허용된 파일"
+        [ -n "$nonroot_files" ] && issue_desc="${issue_desc:+${issue_desc} 및 }소유자가 root가 아닌 파일"
+        inspection_summary="시스템 시작 스크립트 중 ${issue_desc}이 존재합니다."
+        command_result="일반 사용자 쓰기 가능 파일(일부): [ $(echo $writable_files | xargs) ] | 비root 소유 파일(일부): [ $(echo $nonroot_files | xargs) ]"
     else
-        command_result="모든 시작 스크립트에 타인 쓰기 권한이 없습니다."
+        command_result="모든 시작 스크립트의 소유자가 root이며 일반 사용자(그룹/타인) 쓰기 권한이 없습니다."
     fi
 
     save_dual_result \

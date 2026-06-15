@@ -59,56 +59,62 @@ diagnose() {
     # 진단 로직 구현
     # /etc/(x)inetd.conf 파일 소유자 및 권한 설정 확인 (600, root:root)
 
-    local target_file=""
-    local is_secure=false
-    local details=""
-
-    # 대체 파일 확인 (xinetd.conf 우선, 없으면 inetd.conf)
-    if [ -f "/etc/xinetd.conf" ]; then
-        target_file="/etc/xinetd.conf"
-    elif [ -f "/etc/inetd.conf" ]; then
-        target_file="/etc/inetd.conf"
+    # 점검 대상: 존재하는 모든 (x)inetd 설정 파일 — 각 파일이 모두 기준을 충족해야 양호
+    local files_to_check=()
+    [ -f /etc/inetd.conf ] && files_to_check+=("/etc/inetd.conf")
+    [ -f /etc/xinetd.conf ] && files_to_check+=("/etc/xinetd.conf")
+    if [ -d /etc/xinetd.d ]; then
+        local xf
+        for xf in /etc/xinetd.d/*; do
+            [ -f "$xf" ] && files_to_check+=("$xf")
+        done
     fi
 
     # Capture command outputs for both files
     local ls_xinetd=$(ls -l /etc/xinetd.conf 2>/dev/null || echo "No /etc/xinetd.conf")
     local ls_inetd=$(ls -l /etc/inetd.conf 2>/dev/null || echo "No /etc/inetd.conf")
-    local stat_output=""
 
-    # 파일 존재 확인
-    if [ -z "$target_file" ] || [ ! -f "$target_file" ]; then
+    if [ ${#files_to_check[@]} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="inetd/xinetd 설정 파일 없음 (서비스 미사용)"
         command_result="[Command: ls -l /etc/xinetd.conf]${newline}${ls_xinetd}${newline}${newline}[Command: ls -l /etc/inetd.conf]${newline}${ls_inetd}"
         command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf 2>&1"
     else
-        stat_output=$(stat -c "%a %U:%G" "$target_file" 2>/dev/null)
-        # 파일 권한 확인
-        local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null)
-        local file_owner=$(stat -c "%U:%G" "$target_file" 2>/dev/null)
+        local f file_perms file_owner
+        local bad_details=""
+        local checked_details=""
+        local stat_failed=""
 
-        # 소유자 및 권한 확인 (600 이하)
-        if [ "$file_owner" = "root:root" ] && [ "$file_perms" -le 600 ]; then
-            is_secure=true
-            details="파일: $target_file, 권한: $file_perms, 소유자: $file_owner"
-        else
-            details="파일: $target_file, 권한: $file_perms, 소유자: $file_owner"
-        fi
+        for f in "${files_to_check[@]}"; do
+            file_perms=$(stat -c "%a" "$f" 2>/dev/null || echo "")
+            file_owner=$(stat -c "%U:%G" "$f" 2>/dev/null || echo "")
+            if [ -z "$file_perms" ] || [ -z "$file_owner" ]; then
+                stat_failed="${stat_failed}${f}, "
+                continue
+            fi
+            checked_details="${checked_details}${f} ${file_perms} ${file_owner}; "
+            # 소유자 root:root + 600 초과 비트 없음 (400 등 더 강한 권한은 양호)
+            if ! { [ "$file_owner" = "root:root" ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#600 & 07777 ))" -eq 0 ]; }; then
+                bad_details="${bad_details}${f} (권한 ${file_perms}, 소유자 ${file_owner}), "
+            fi
+        done
 
-        # 최종 판정
-        if [ "$is_secure" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="inetd.conf 보안 설정 적절 ($details)"
-            command_result="[Command: ls -l $target_file]${newline}$(ls -l $target_file 2>/dev/null)${newline}${newline}[Command: stat -c '%a %U:%G' $target_file]${newline}${stat_output}"
-            command_executed="stat -c '%a %U:%G' $target_file"
-        else
+        command_result="[Command: ls -l /etc/inetd.conf]${newline}${ls_inetd}${newline}${newline}[Command: ls -l /etc/xinetd.conf]${newline}${ls_xinetd}${newline}${newline}[검사한 파일: 권한/소유자]${newline}${checked_details:-없음}${newline}[stat 실패]${newline}${stat_failed:-없음}"
+        command_executed="stat -c '%a %U:%G' /etc/inetd.conf /etc/xinetd.conf /etc/xinetd.d/*"
+
+        if [ -n "$bad_details" ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="inetd.conf 보안 설정 부적절 ($details)"
-            command_result="[Command: ls -l $target_file]${newline}$(ls -l $target_file 2>/dev/null)${newline}${newline}[Command: stat -c '%a %U:%G' $target_file]${newline}${stat_output}"
-            command_executed="stat -c '%a %U:%G' $target_file"
+            inspection_summary="(x)inetd 설정 파일 보안 설정 부적절 (${bad_details%, })"
+        elif [ -n "$stat_failed" ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="(x)inetd 설정 파일 권한 확인 실패로 수동 점검 필요 (${stat_failed%, })"
+        else
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="(x)inetd 설정 파일 보안 설정 적절 (${checked_details%; })"
         fi
     fi
 

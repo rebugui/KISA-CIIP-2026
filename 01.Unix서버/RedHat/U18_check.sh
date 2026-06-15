@@ -49,13 +49,16 @@ diagnose() {
         local file_perm=$(stat -c "%a" "$file_path")
         local ls_out=$(ls -l "$file_path")
 
-        if [ "$owner_name" != "root" ] || [ "$file_perm" -gt 400 ]; then
+        if [ "$owner_name" != "root" ] || ! [[ "$file_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$file_perm & ~8#400 & 07777 ))" -ne 0 ]; then
             status="취약"
             diagnosis_result="VULNERABLE"
             inspection_summary="/etc/shadow 파일의 소유자 또는 권한 설정이 부적절합니다."
         fi
         command_result="설정 현황: [ ${ls_out} ]"
     else
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="/etc/shadow 파일이 존재하지 않습니다. 정상 시스템에는 존재해야 하는 파일이므로 계정 패스워드 저장 방식을 수동으로 점검하시기 바랍니다."
         command_result="/etc/shadow 파일이 존재하지 않습니다."
     fi
 

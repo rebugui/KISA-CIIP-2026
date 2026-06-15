@@ -54,7 +54,7 @@ diagnose() {
         local ls_out=$(ls -l "$file_path")
 
         # 2. 판정 로직
-        if [ "$owner" != "root" ] || [ "$perm" -gt 600 ]; then
+        if [ "$owner" != "root" ] || ! [[ "$perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perm & ~8#600 & 07777 ))" -ne 0 ]; then
             status="취약"
             diagnosis_result="VULNERABLE"
             inspection_summary="/etc/hosts.lpd 파일의 소유자 또는 권한 설정이 부적절합니다."

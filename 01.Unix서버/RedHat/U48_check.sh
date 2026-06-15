@@ -36,23 +36,111 @@ GUIDELINE_CRITERIA_BAD="noexpn, novrfy 옵션이 설정되어 있지 않은 경�
 GUIDELINE_REMEDIATION="메일 서비스를 사용하지 않는 경우 서비스 중지 및 비활성화 설정 메일 서비스 사용 시 메일 서비스 설정 파일에 noexpn,novrfy 또는 goaway 옵션 추가 설정"
 
 diagnose() {
-    local status="양호"
-    diagnosis_result="GOOD"
-    local inspection_summary="EXPN, VRFY 명령어 제한 설정이 적절합니다."
+    diagnosis_result="unknown"
+    local status="미진단"
+    local inspection_summary=""
     local command_result=""
-    local command_executed="grep 'PrivacyOptions' /etc/mail/sendmail.cf"
+    local command_executed="systemctl is-active sendmail postfix; ps -ef | grep -E 'sendmail|postfix'; grep -E '^[[:space:]]*O[[:space:]]*PrivacyOptions' /etc/mail/sendmail.cf; postconf -h disable_vrfy_command"
 
-    local cf_file="/etc/mail/sendmail.cf"
-    if [ -f "$cf_file" ]; then
-        local privacy_opts=$(grep "O PrivacyOptions" "$cf_file" | cut -d= -f2 || echo "")
-        if [[ ! "$privacy_opts" =~ "noexpn" ]] || [[ ! "$privacy_opts" =~ "novrfy" ]]; then
-            status="취약"
-            diagnosis_result="VULNERABLE"
-            inspection_summary="PrivacyOptions 설정에서 noexpn 또는 novrfy 옵션이 누락되었습니다."
-        fi
-        command_result="PrivacyOptions 설정 값: [ ${privacy_opts} ]"
+    # ==========================================================================
+    # 1. 메일 서비스(MTA) 사용 여부 확인 (systemd + 설정 파일 + 프로세스)
+    # ==========================================================================
+    local sendmail_conf=""
+    if [ -f /etc/mail/sendmail.cf ]; then
+        sendmail_conf="/etc/mail/sendmail.cf"
+    elif [ -f /etc/sendmail.cf ]; then
+        sendmail_conf="/etc/sendmail.cf"
+    fi
+
+    local postfix_present=false
+    if command -v postconf >/dev/null 2>&1 || [ -f /etc/postfix/main.cf ]; then
+        postfix_present=true
+    fi
+
+    local sendmail_running=false
+    local postfix_running=false
+    if systemctl is-active --quiet sendmail 2>/dev/null; then
+        sendmail_running=true
+    fi
+    if systemctl is-active --quiet postfix 2>/dev/null; then
+        postfix_running=true
+    fi
+    local smtp_daemon=""
+    smtp_daemon=$(ps -ef 2>/dev/null | grep -E '[s]endmail|[p]ostfix/master' || true)
+    if echo "$smtp_daemon" | grep -q "endmail"; then
+        sendmail_running=true
+    fi
+    if echo "$smtp_daemon" | grep -q "ostfix"; then
+        postfix_running=true
+    fi
+
+    # ==========================================================================
+    # 2. 메일 서비스 미사용 시 양호 / 사용 중인 MTA별 expn/vrfy 제한 설정 확인
+    # ==========================================================================
+    if [ -z "$sendmail_conf" ] && [ "$postfix_present" = false ] && \
+       [ "$sendmail_running" = false ] && [ "$postfix_running" = false ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="메일 서비스(SMTP)를 사용하지 않습니다. (sendmail/postfix 설정 및 데몬 없음)"
+        command_result="sendmail.cf: 없음 / postfix: 없음 / SMTP 데몬: 미실행"
     else
-        command_result="메일 설정 파일(/etc/mail/sendmail.cf)이 없습니다."
+        local leg_vulnerable=false
+        local details=""
+
+        # 2-1. Sendmail: PrivacyOptions에 (noexpn AND novrfy) 또는 goaway 필요
+        if [ -n "$sendmail_conf" ] || [ "$sendmail_running" = true ]; then
+            local privacy_opts=""
+            if [ -n "$sendmail_conf" ]; then
+                privacy_opts=$(grep -E '^[[:space:]]*O[[:space:]]*PrivacyOptions' "$sendmail_conf" 2>/dev/null | tail -1 | sed 's/^[^=]*=//' || true)
+            fi
+            local sm_expn=false
+            local sm_vrfy=false
+            if echo "$privacy_opts" | grep -qi "goaway"; then
+                sm_expn=true
+                sm_vrfy=true
+            fi
+            if echo "$privacy_opts" | grep -qi "noexpn"; then
+                sm_expn=true
+            fi
+            if echo "$privacy_opts" | grep -qi "novrfy"; then
+                sm_vrfy=true
+            fi
+            if [ "$sm_expn" = true ] && [ "$sm_vrfy" = true ]; then
+                details="${details}[Sendmail] PrivacyOptions 제한 설정됨 (${privacy_opts}); "
+            else
+                leg_vulnerable=true
+                details="${details}[Sendmail] PrivacyOptions에 noexpn/novrfy(또는 goaway) 미설정 (현재: ${privacy_opts:-미설정}); "
+            fi
+        fi
+
+        # 2-2. Postfix: disable_vrfy_command=yes 필요 (expn은 Postfix 기본 미지원)
+        if [ "$postfix_present" = true ] || [ "$postfix_running" = true ]; then
+            local disable_vrfy=""
+            if command -v postconf >/dev/null 2>&1; then
+                disable_vrfy=$(postconf -h disable_vrfy_command 2>/dev/null | tr -d '[:space:]' || true)
+            fi
+            if [ -z "$disable_vrfy" ] && [ -f /etc/postfix/main.cf ]; then
+                disable_vrfy=$(grep -E '^[[:space:]]*disable_vrfy_command[[:space:]]*=' /etc/postfix/main.cf 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '[:space:]' || true)
+            fi
+            if [ "$disable_vrfy" = "yes" ]; then
+                details="${details}[Postfix] disable_vrfy_command=yes (expn 기본 미지원); "
+            else
+                leg_vulnerable=true
+                details="${details}[Postfix] disable_vrfy_command=${disable_vrfy:-no(기본값)} - vrfy 명령 허용 상태; "
+            fi
+        fi
+
+        # 3. 판정
+        if [ "$leg_vulnerable" = false ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="사용 중인 SMTP 서비스의 expn, vrfy 명령어가 제한되어 있습니다. (${details})"
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="사용 중인 SMTP 서비스에서 expn/vrfy 명령어 제한 설정이 미흡합니다. (${details})"
+        fi
+        command_result="${details}"
     fi
 
     command_result=$(echo "$command_result" | tr -d '\n\r')

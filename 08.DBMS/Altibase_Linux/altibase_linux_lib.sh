@@ -194,7 +194,7 @@ invoke_altibase_linux_check() {
             ;;
         D-03|D-05|D-09)
             altibase_sql_check "SELECT USER_NAME, PASSWORD_LIFE_TIME, PASSWORD_GRACE_TIME, PASSWORD_REUSE_TIME, PASSWORD_REUSE_MAX, FAILED_LOGIN_ATTEMPTS FROM system_.sys_users_;" "password and login policy" || return 0
-            if printf '%s' "${ALTIBASE_SQL_OUTPUT}" | grep -Eiq 'UNLIMITED|NULL| 0 '; then
+            if printf '%s' "${ALTIBASE_SQL_OUTPUT}" | grep -Eiq 'UNLIMITED|NULL|(^|[[:space:]])0([[:space:]]|$)'; then
                 altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase password/login policy evidence contains weak-looking values; confirm institutional policy thresholds." "${ALTIBASE_SQL_OUTPUT}" "SELECT password policy columns FROM system_.sys_users_"
             else
                 altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "Altibase password/login policy evidence was collected without obvious unlimited values." "${ALTIBASE_SQL_OUTPUT}" "SELECT password policy columns FROM system_.sys_users_"
@@ -232,7 +232,11 @@ invoke_altibase_linux_check() {
                 altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "Altibase access-control configuration evidence was found." "${lines}" "grep ACCESS_CONTROL altibase.properties"
             else
                 altibase_sql_check "SELECT NAME, VALUE1 FROM v\$property WHERE NAME LIKE 'ACCESS_CONTROL_%';" "access control by source IP" || return 0
-                [ -n "${ALTIBASE_SQL_OUTPUT}" ] && altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase access-control property evidence was collected; confirm it matches approved source IP policy." "${ALTIBASE_SQL_OUTPUT}" "SELECT ACCESS_CONTROL properties FROM v\$property"
+                if [ -n "${ALTIBASE_SQL_OUTPUT}" ]; then
+                    altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase access-control property evidence was collected; confirm it matches approved source IP policy." "${ALTIBASE_SQL_OUTPUT}" "SELECT ACCESS_CONTROL properties FROM v\$property"
+                else
+                    altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase access-control configuration/property evidence was not found; confirm approved source IP restriction policy manually." "$(altibase_evidence)" "SELECT ACCESS_CONTROL properties FROM v\$property"
+                fi
             fi
             ;;
         D-11)
@@ -250,7 +254,7 @@ invoke_altibase_linux_check() {
             altibase_acl_check "home/config" "${ALTIBASE_HOME_FOUND}" "${ALTIBASE_CONFIGS[@]}"
             ;;
         D-15)
-            altibase_acl_check "trace/log" "${ALTIBASE_LOG_DIRS[@]}"
+            altibase_set_result "N/A" "N/A" "Oracle Listener log/trace change-restriction control is not applicable to Altibase." "D-15 targets Oracle DB listener (LSNRCTL) parameter/trace protection; Altibase has no equivalent Oracle Listener." "Map Oracle Listener log/trace guideline applicability"
             ;;
         D-16)
             altibase_set_result "N/A" "N/A" "SQL Server Windows authentication mode control is not applicable to Altibase." "Altibase authentication is controlled by Altibase users, password policy, and DB/OS configuration." "Map DBMS authentication-mode guideline applicability"

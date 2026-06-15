@@ -52,21 +52,15 @@ try {
     $hasVulnerablePassword = $false
 
     # 1. Windows 계정 정책 확인 (IIS는 Windows 계정 사용)
+    #    - 복잡도(PasswordComplexity)는 'net accounts'가 출력하지 않으므로
+    #      'secedit /export'로 [System Access] 섹션의 PasswordComplexity 값을 확인한다.
+    $complexityState = "Unknown"
     try {
         $passwordPolicy = net accounts | Select-String -Pattern "Password"
         if ($passwordPolicy) {
-            $commandOutput += "=== Windows Password Policy ===`r`n"
+            $commandOutput += "=== Windows Password Policy (net accounts) ===`r`n"
             $commandOutput += $passwordPolicy | Out-String
             $commandOutput += "`r`n"
-
-            # 비밀번호 복잡도 정책 확인
-            $complexityEnabled = $passwordPolicy | Select-String -Pattern "Complexity"
-            if ($complexityEnabled -and $complexityEnabled.ToString() -match "Yes") {
-                $commandOutput += "[양호] 비밀번호 복잡도 요구사항이 활성화되어 있습니다.`r`n"
-            } else {
-                $commandOutput += "[취약] 비밀번호 복잡도 요구사항이 비활성화되어 있습니다.`r`n"
-                $hasVulnerablePassword = $true
-            }
 
             # 비밀번호 최소 길이 확인
             $minLength = $passwordPolicy | Select-String -Pattern "Minimum password length"
@@ -81,6 +75,33 @@ try {
             }
         }
         $commandExecuted += "net accounts; "
+
+        # 복잡도 정책은 secedit로 확인 (net accounts에는 존재하지 않음)
+        $seceditFile = Join-Path $env:TEMP ("web02_secpol_{0}.cfg" -f ([guid]::NewGuid().ToString('N')))
+        try {
+            $null = secedit /export /cfg "$seceditFile" /areas SECURITYPOLICY 2>&1
+            if (Test-Path $seceditFile) {
+                $secLine = Get-Content $seceditFile -ErrorAction Stop | Select-String -Pattern "PasswordComplexity"
+                if ($secLine -and $secLine.ToString() -match "PasswordComplexity\s*=\s*(\d+)") {
+                    if ([int]$matches[1] -eq 1) {
+                        $complexityState = "Enabled"
+                        $commandOutput += "[양호] 비밀번호 복잡도 요구사항이 활성화되어 있습니다. (PasswordComplexity=1)`r`n"
+                    } else {
+                        $complexityState = "Disabled"
+                        $commandOutput += "[취약] 비밀번호 복잡도 요구사항이 비활성화되어 있습니다. (PasswordComplexity=0)`r`n"
+                        $hasVulnerablePassword = $true
+                    }
+                }
+                Remove-Item $seceditFile -Force -ErrorAction SilentlyContinue
+            }
+        } catch {
+            $commandOutput += "[WARN] secedit를 통한 복잡도 정책 확인 실패: $_`r`n"
+        }
+        $commandExecuted += "secedit /export /cfg <tmp> /areas SECURITYPOLICY; "
+
+        if ($complexityState -eq "Unknown") {
+            $commandOutput += "[INFO] 비밀번호 복잡도 정책을 자동으로 확인할 수 없습니다. 수동 확인이 필요합니다.`r`n"
+        }
     } catch {
         $commandOutput += "[WARN] Windows 계정 정책 확인 실패: $_`r`n"
     }
@@ -139,9 +160,14 @@ try {
         $finalResult = "VULNERABLE"
         $summary = "Windows 비밀번호 정책이 취약합니다. 비밀번호 복잡도 요구사항을 활성화하고 최소 길이를 8자 이상으로 설정하세요."
         $status = "취약"
+    } elseif ($complexityState -eq "Unknown") {
+        # 복잡도 정책을 확인하지 못한 경우, 길이만으로 양호 판정 불가 → 수동진단
+        $finalResult = "MANUAL"
+        $summary = "비밀번호 복잡도 정책을 자동으로 확인할 수 없습니다. 로컬 보안 정책(secpol.msc) 또는 도메인 GPO에서 '암호는 복잡성을 만족해야 함' 설정을 수동으로 확인하세요."
+        $status = "수동진단"
     } else {
         $finalResult = "GOOD"
-        $summary = "Windows 비밀번호 정책이 적절하게 설정되어 있습니다. IIS는 Windows 계정 정책을 따릅니다."
+        $summary = "Windows 비밀번호 정책(복잡도 활성화, 최소 길이 8자 이상)이 적절하게 설정되어 있습니다. IIS는 Windows 계정 정책을 따릅니다."
         $status = "양호"
     }
 

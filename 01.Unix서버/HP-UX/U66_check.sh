@@ -80,10 +80,25 @@ diagnose() {
         syslog_service="sysklogd"
         service_active=true
         config_file="/etc/syslog.conf"
+    elif ps -ef 2>/dev/null | grep -E 'syslogd|syslog-ng' | grep -v grep >/dev/null 2>&1; then
+        # HP-UX 기본 syslogd 프로세스 확인 (init.d 상태 조회 실패 대비 fallback)
+        if ps -ef 2>/dev/null | grep "syslog-ng" | grep -v grep >/dev/null 2>&1; then
+            syslog_service="syslog-ng"
+            config_file="/etc/syslog-ng/syslog-ng.conf"
+        else
+            syslog_service="syslogd"
+            config_file="/etc/syslog.conf"
+        fi
+        service_active=true
     elif [ -f "/etc/rsyslog.conf" ]; then
         syslog_service="rsyslog"
         config_file="/etc/rsyslog.conf"
         # rsyslog 설치되어 있지만 비활성화된 경우
+        service_active=false
+    elif [ -f "/etc/syslog.conf" ]; then
+        # 순정 HP-UX: 기본 syslogd 설치(/etc/syslog.conf 존재)되어 있으나 데몬 중지 상태 → 취약 판정 경로
+        syslog_service="syslogd"
+        config_file="/etc/syslog.conf"
         service_active=false
     else
         diagnosis_result="MANUAL"
@@ -133,14 +148,25 @@ diagnose() {
         # 설정 파일 내용 확인 (주석 제외한 라인 수)
         local config_lines=$(grep -v "^#" "$config_file" | grep -v "^[[:space:]]*$" | wc -l)
 
-        # 3) 주요 로그 파일 기록 확인
-        local critical_logs=("/var/log/syslog" "/var/log/messages" "/var/log/auth.log" "/var/log/secure" "/var/log/kern.log")
+        # 3) 주요 로그 파일 기록 확인 (표준 경로 + 설정 파일에 정의된 로그 경로)
+        local critical_logs=("/var/log/syslog" "/var/log/messages" "/var/log/auth.log" "/var/log/secure" "/var/log/kern.log" "/var/adm/syslog/syslog.log")
+
+        local configured_logs
+        configured_logs=$(grep -v "^#" "$config_file" 2>/dev/null | awk '{t=$NF; sub(/^-/,"",t); print t}' | grep "^/" | grep -v "^/dev/" | sort -u || true)
+        local configured_log
+        for configured_log in $configured_logs; do
+            case " ${critical_logs[*]} " in
+                *" ${configured_log} "*) ;;
+                *) critical_logs+=("$configured_log") ;;
+            esac
+        done
 
         for log_file in "${critical_logs[@]}"; do
             ((total_log_files++)) || true
             if [ -f "$log_file" ]; then
                 # 로그 파일이 존재하고 최근 기록이 있는지 확인 (마지막 수정 7일 이내)
-                local last_mod=$(perl -e 'print (stat(shift))[9]' "$log_file" 2>/dev/null || echo "0")
+                local last_mod=$(perl -e 'print((stat(shift))[9])' "$log_file" 2>/dev/null || echo "0")
+                [ -n "$last_mod" ] || last_mod=0
                 local current_time=$(date +%s)
                 local days_since_mod=$(( (current_time - last_mod) / 86400 ))
 
@@ -152,17 +178,12 @@ diagnose() {
 
         command_executed="/sbin/init.d/ status ${syslog_service}; ls -l /var/log/*.log | head -10"
 
-        # 최종 판정
-        if [ "$service_active" = true ] && [ "$config_lines" -gt 0 ] && [ "$log_files_check" -ge 2 ]; then
+        # 최종 판정 (양호: 데몬 활성 + 설정 존재 + 실제 로그를 남기고 있는 경우 모두 충족)
+        if [ "$service_active" = true ] && [ "$config_lines" -gt 0 ] && [ "$log_files_check" -ge 1 ]; then
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="${syslog_service} 서비스가 활성화되어 있고, 로그 기록 정책이 설정되어 있습니다. (설정 파일: ${config_file}, 활성 로그 파일: ${log_files_check}/${total_log_files}개)"
+            inspection_summary="${syslog_service} 서비스가 활성화되어 있고, 로그 기록 정책이 설정되어 있으며, 로그를 남기고 있습니다. (설정 파일: ${config_file}, 최근 기록 로그 파일: ${log_files_check}/${total_log_files}개)"
             command_result="${syslog_service} active, config lines: ${config_lines}, log files: ${log_files_check} recording"
-        elif [ "$service_active" = true ] && [ "$config_lines" -gt 0 ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="${syslog_service} 서비스가 활성화되어 있고, 로그 기록 정책이 설정되어 있습니다. (최근 기록된 로그 파일: ${log_files_check}개)"
-            command_result="${syslog_service} active, config lines: ${config_lines}"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
@@ -176,11 +197,11 @@ diagnose() {
                 fi
                 reason="${reason}설정 파일 내용 없음"
             fi
-            if [ "$log_files_check" -lt 2 ]; then
+            if [ "$log_files_check" -lt 1 ]; then
                 if [ -n "$reason" ]; then
                     reason="${reason}, "
                 fi
-                reason="${reason}로그 파일 기록 부족 (${log_files_check}/${total_log_files}개)"
+                reason="${reason}최근 기록된 로그 파일 없음 - 로그를 남기고 있지 않은 경우 (${log_files_check}/${total_log_files}개)"
             fi
             inspection_summary="시스템 로깅 설정이 부적절합니다: ${reason}. ${syslog_service} 서비스를 활성화하고 로그 기록 정책을 설정하세요"
             command_result="${reason}"

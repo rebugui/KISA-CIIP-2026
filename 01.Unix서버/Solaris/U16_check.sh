@@ -65,7 +65,7 @@ diagnose() {
 
     # Capture raw ls -l output
     local ls_output=$(ls -l "$target_file" 2>/dev/null)
-    local stat_output=$(stat -c "%a %U:%G" "$target_file" 2>/dev/null)
+    local stat_output=$(perl -e '@s=stat($ARGV[0]); printf "%04o %s:%s", $s[2] & 07777, scalar getpwuid($s[4]), scalar getgrgid($s[5])' "$target_file" 2>/dev/null)
 
     # 파일 존재 확인
     if [ ! -f "$target_file" ]; then
@@ -75,31 +75,46 @@ diagnose() {
         command_result="[Command: ls -l $target_file]${newline}${ls_output}"
         command_executed="ls -l $target_file"
     else
-        # 파일 권한 확인
-        local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null)
-        local file_owner=$(stat -c "%U:%G" "$target_file" 2>/dev/null)
+        # 파일 권한 확인 (Solaris: stat -c 미지원, perl 사용)
+        local file_perms=$(perl -e 'printf "%04o", (stat($ARGV[0]))[2] & 07777' "$target_file" 2>/dev/null)
+        local file_owner=$(perl -e '@s=stat($ARGV[0]); printf "%s:%s", scalar getpwuid($s[4]), scalar getgrgid($s[5])' "$target_file" 2>/dev/null)
 
-        # 소유자 및 권한 확인
-        if [ "$file_owner" = "root:root" ] && [ "$file_perms" = "644" ]; then
-            is_secure=true
-            details="권한: $file_perms, 소유자: $file_owner"
+        # 소유자 및 권한 확인 (Solaris 기본 그룹 sys 허용, 권한은 644 이하 허용)
+        local stat_failed=false
+        local perm_ok=false
+        if [ -z "$file_perms" ] || [ -z "$file_owner" ]; then
+            stat_failed=true
+            details="권한/소유자 확인 불가 (stat 실패)"
         else
+            # 644에 없는 비트(그룹/기타 쓰기, 실행, setuid/setgid/sticky)가 없으면 양호 (600/640/440 등 허용)
+            if [ $(( 8#$file_perms & ~8#644 & 8#7777 )) -eq 0 ]; then
+                perm_ok=true
+            fi
+            if { [ "$file_owner" = "root:root" ] || [ "$file_owner" = "root:sys" ]; } && [ "$perm_ok" = true ]; then
+                is_secure=true
+            fi
             details="권한: $file_perms, 소유자: $file_owner"
         fi
 
         # 최종 판정
-        if [ "$is_secure" = true ]; then
+        if [ "$stat_failed" = true ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="/etc/passwd 권한/소유자를 확인하지 못함 - 수동 점검 필요 ($details)"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}"
+            command_executed="ls -l $target_file"
+        elif [ "$is_secure" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="/etc/passwd 보안 설정 적절 ($details)"
-            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a %U:%G' $target_file]${newline}${stat_output}"
-            command_executed="ls -l $target_file; stat -c '%a %U:%G' $target_file"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl stat]${newline}${stat_output}"
+            command_executed="ls -l $target_file; perl -e 'printf \"%04o %s:%s\", (stat(\$ARGV[0]))[2] & 07777, scalar getpwuid((stat(\$ARGV[0]))[4]), scalar getgrgid((stat(\$ARGV[0]))[5])' $target_file"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="/etc/passwd 보안 설정 부적절 ($details)"
-            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a %U:%G' $target_file]${newline}${stat_output}"
-            command_executed="ls -l $target_file; stat -c '%a %U:%G' $target_file"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl stat]${newline}${stat_output}"
+            command_executed="ls -l $target_file; perl -e 'printf \"%04o %s:%s\", (stat(\$ARGV[0]))[2] & 07777, scalar getpwuid((stat(\$ARGV[0]))[4]), scalar getgrgid((stat(\$ARGV[0]))[5])' $target_file"
         fi
     fi
 

@@ -10,7 +10,7 @@
 # @Platform    : IIS_Windows
 # @Severity    : 중
 # @Title       : HTTP 리디렉션
-# @Description : 동적 페이지의 요청 및 응답값을 검증하여 SQL Injection, XSS(Command Injection) 등 공격을 방지합니다. IIS Request Filtering 활성화 및 애플리케이션 레벨의 입력값 검증 로직 구현이 필요합니다.
+# @Description : HTTP 접근 시 HTTPS로의 리디렉션 활성화 여부를 점검합니다. 각 사이트의 SSL(https) 바인딩 존재 여부와 URL Rewrite 규칙(또는 httpRedirect) 설정을 확인하여, HTTPS 리디렉션이 구성되어 있으면 양호, 명확히 미설정이면 취약, 정적 판단이 어려운 경우 수동진단으로 판단합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -27,45 +27,83 @@ $ITEM_NAME = "HTTP 리디렉션"
 Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
-    # IIS Request Filtering 및 입력값 검증 확인
+    # IIS 대상: HTTP -> HTTPS 리디렉션 점검
+    # 판단 근거: (1) SSL(https) 바인딩 존재, (2) URL Rewrite 규칙 또는 httpRedirect 설정
     $sites = Get-Website
-    $filteringEnabled = $false
-    $siteInfo = @()
+    $commandExecuted = "Get-Website; Get-WebBinding; Get-WebConfiguration -Filter '/system.webServer/rewrite/rules'; Get-WebConfiguration -Filter '/system.webServer/httpRedirect'"
+    $redirectConfigured = @()
+    $noRedirect = @()
+    $details = @()
 
     foreach ($site in $sites) {
         $siteName = $site.Name
 
-        # Request Filtering 확인
-        $requestFiltering = Get-WebConfiguration -Filter "/system.webServer/security/requestFiltering" -Location $siteName -ErrorAction SilentlyContinue
-        if ($requestFiltering) {
-            $filteringEnabled = $true
-            $maxURL = $requestFiltering.requestLimits.maxUrl
-            $maxQueryString = $requestFiltering.requestLimits.maxQueryString
-            $siteInfo += "Site: $siteName, Request Filtering: Enabled, MaxURL: $maxURL, MaxQueryString: $maxQueryString"
+        # https 바인딩 존재 여부
+        $bindings = $site.Bindings.Collection
+        $hasHttps = $false
+        if ($bindings) {
+            foreach ($b in $bindings) {
+                if ("$($b.protocol)" -ieq "https") {
+                    $hasHttps = $true
+                }
+            }
+        }
+
+        # URL Rewrite 규칙 존재 여부 (HTTPS 리디렉션 추정)
+        $hasRewrite = $false
+        $rules = Get-WebConfiguration -Filter "/system.webServer/rewrite/rules" -Location $siteName -ErrorAction SilentlyContinue
+        if ($rules -and $rules.Collection) {
+            foreach ($rule in $rules.Collection) {
+                $action = "$($rule.action.type)"
+                $actionUrl = "$($rule.action.url)"
+                if ($action -ieq "Redirect" -and $actionUrl -match "https") {
+                    $hasRewrite = $true
+                }
+            }
+        }
+
+        # httpRedirect 설정 (https 대상)
+        $hasHttpRedirect = $false
+        $httpRedirect = Get-WebConfiguration -Filter "/system.webServer/httpRedirect" -Location $siteName -ErrorAction SilentlyContinue
+        if ($httpRedirect -and ("$($httpRedirect.enabled)" -ieq "true") -and ("$($httpRedirect.destination)" -match "https")) {
+            $hasHttpRedirect = $true
+        }
+
+        $details += "Site: $siteName, HTTPS바인딩: $hasHttps, URLRewrite(https): $hasRewrite, httpRedirect(https): $hasHttpRedirect"
+
+        if (($hasRewrite -or $hasHttpRedirect) -and $hasHttps) {
+            $redirectConfigured += "Site: $siteName (HTTPS 리디렉션 구성됨)"
+        } elseif (-not $hasHttps) {
+            $noRedirect += "Site: $siteName (HTTPS 바인딩 없음 - 리디렉션 불가)"
         } else {
-            $siteInfo += "Site: $siteName, Request Filtering: Not configured"
+            # https 바인딩은 있으나 리디렉션 규칙을 정적으로 확인 불가
+            $noRedirect += "Site: $siteName (HTTPS 리디렉션 규칙 미확인)"
         }
     }
 
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/security/requestFiltering'"
+    $commandOutput = $details -join "`n"
 
-    if ($filteringEnabled) {
+    if ($sites.Count -eq 0) {
         $finalResult = "MANUAL"
-        $summary = "Request Filtering이 구성되어 있지만, 애플리케이션 레벨의 입력값 검증도 필요합니다: " + ($siteInfo[0] + " 외 " + ($siteInfo.Count - 1) + "개")
+        $summary = "점검할 웹 사이트가 없습니다. 수동 확인이 필요합니다."
         $status = "수동진단"
-        $commandOutput = $siteInfo -join "`n"
+    } elseif ($noRedirect.Count -eq 0) {
+        $finalResult = "GOOD"
+        $summary = "모든 웹사이트에 HTTPS 리디렉션이 구성되어 있습니다. (보안 권고사항 준수)"
+        $status = "양호"
     } else {
+        # URL Rewrite 모듈 미설치 등으로 규칙 판단이 정적으로 어려운 경우가 포함되므로 수동진단
         $finalResult = "MANUAL"
-        $summary = "Request Filtering이 구성되지 않았습니다. 애플리케이션 레벨의 입력값 검증이 필요합니다."
+        $summary = "HTTPS 리디렉션 구성이 확인되지 않은 사이트가 있어 수동 확인이 필요합니다: " + ($noRedirect -join "; ")
         $status = "수동진단"
-        $commandOutput = "Request Filtering: Not configured on any site"
+        $commandOutput = $commandOutput + "`n`n확인 필요:`n" + ($noRedirect -join "`n")
     }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/security/requestFiltering'"
+    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/rewrite/rules'"
     $commandOutput = "진단 실패: $_"
 }
 

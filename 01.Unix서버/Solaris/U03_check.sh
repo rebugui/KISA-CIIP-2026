@@ -11,7 +11,7 @@
 # @Platform    : Solaris
 # @Severity    : 상
 # @Title       : 계정 잠금 임계값 설정
-# @Description : pam_faillock.so 또는 faillock 설정 확인
+# @Description : /etc/default/login RETRIES 및 /etc/security/policy.conf LOCK_AFTER_RETRIES 설정 확인
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==============================================================================
 
@@ -60,119 +60,55 @@ diagnose() {
     command_executed=""
 
     # 진단 로직 구현
-    # pam_faillock.so 또는 faillock 설정 확인
+    # Solaris: /etc/default/login RETRIES + /etc/security/policy.conf LOCK_AFTER_RETRIES
+    # 잠금이 실제 적용되려면 RETRIES(1~10)와 LOCK_AFTER_RETRIES=YES가 모두 필요
 
-    local is_secure=false
-    local config_details=""
-
-    # 1) /etc/pam.d/common-auth 또는 /etc/pam.d/system-auth 확인
-    local pam_auth_files=(
-        "/etc/pam.d/common-auth"
-        "/etc/pam.d/common-account"
-        "/etc/pam.d/system-auth"
-        "/etc/pam.d/password-auth"
-        "/etc/pam.d/login"
-    )
-
-    local matched_pam_file=""
-    local pam_module_name=""
-    local raw_pam_output=""
-    local deny_val=""
     local newline=$'\n'
+    local login_file="/etc/default/login"
+    local policy_file="/etc/security/policy.conf"
+    local retries_val=""
+    local lock_after=""
+    local raw_login_output=""
+    local raw_policy_output=""
+    local files_unreadable=""
 
-    for pam_file in "${pam_auth_files[@]}"; do
-        if [ -f "$pam_file" ]; then
-            # pam_faillock.so check
-            if grep -E "pam_faillock.so|pam_tally2.so" "$pam_file" | grep -v "^#" > /dev/null 2>&1; then
-                matched_pam_file="$pam_file"
-                raw_pam_output=$(grep -E "pam_faillock.so|pam_tally2.so" "$pam_file" 2>/dev/null | grep -v "^#" || echo "")
+    command_executed="grep '^RETRIES' ${login_file}; grep '^LOCK_AFTER_RETRIES' ${policy_file}"
 
-                # Determine which module
-                if echo "$raw_pam_output" | grep -q "pam_faillock.so"; then
-                    pam_module_name="pam_faillock.so"
-                elif echo "$raw_pam_output" | grep -q "pam_tally2.so"; then
-                    pam_module_name="pam_tally2.so"
-                fi
-
-                # Extract deny value
-                deny_val=$(echo "$raw_pam_output" | grep -oE 'deny=[0-9]+' | cut -d= -f2 | head -1 || echo "")
-
-                if [ -n "$deny_val" ]; then
-                    if [ "$deny_val" -le 10 ]; then
-                        is_secure=true
-                        config_details="${pam_module_name} deny=${deny_val}"
-                    else
-                        config_details="${pam_module_name} deny=${deny_val} (기준 10회 초과)"
-                    fi
-                else
-                    config_details="${pam_module_name} deny 설정 없음"
-                fi
-                break
-            fi
-        fi
-    done || true
-
-    # 2) Solaris: /etc/default/login의 RETRIES 확인 (Solaris 9 이하)
-    local conf_output=""
-    if [ -f "/etc/default/login" ]; then
-        local retries_val=$(grep "^RETRIES" /etc/default/login 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo "")
-        if [ -n "$retries_val" ]; then
-            if [ "$retries_val" -le 10 ]; then
-                is_secure=true
-                config_details="RETRIES=${retries_val} (/etc/default/login)"
-            else
-                config_details="RETRIES=${retries_val} (기준 10회 초과)"
-            fi
-            conf_output="RETRIES=${retries_val}"
-        fi
-    fi
-
-    # Solaris 9 이상: /etc/security/policy.conf 확인
-    if [ -f "/etc/security/policy.conf" ]; then
-        local lock_after=$(grep "^LOCK_AFTER_RETRIES" /etc/security/policy.conf 2>/dev/null | grep -oE 'YES|NO' | head -1 || echo "")
-        if [ -n "$lock_after" ]; then
-            conf_output="${conf_output}${newline}LOCK_AFTER_RETRIES=${lock_after}"
-        fi
-    fi
-
-    # --- 명령어 실행 및 원본 출력 캡처 ---
-    if [ -n "$matched_pam_file" ]; then
-        command_result="[FILE: ${matched_pam_file}]${newline}${raw_pam_output}${newline}"
-        command_executed="grep -E 'pam_faillock.so|pam_tally2.so' '${matched_pam_file}'"
+    # 1) /etc/default/login의 RETRIES 확인 (주석 제외)
+    if [ -r "$login_file" ]; then
+        raw_login_output=$(grep '^RETRIES' "$login_file" 2>/dev/null | tail -1 || true)
+        retries_val=$(echo "$raw_login_output" | grep -oE '[0-9]+' | head -1 || true)
+        command_result="[FILE: ${login_file}]${newline}${raw_login_output:-RETRIES 설정 없음}${newline}"
     else
-        local temp_output=""
-        for pam_file in "${pam_auth_files[@]}"; do
-            if [ -f "$pam_file" ]; then
-                local grep_result=$(grep -E "pam_faillock.so|pam_tally2.so" "$pam_file" 2>/dev/null || echo "")
-                if [ -n "$grep_result" ]; then
-                    temp_output="${temp_output}[${pam_file}]${newline}${grep_result}${newline}"
-                fi
-            fi
-        done
-        command_result="${temp_output:-[No pam_faillock.so or pam_tally2.so found in PAM configuration files]}${newline}"
-        command_executed="grep -E 'pam_faillock.so|pam_tally2.so' /etc/pam.d/{common-auth,common-account,system-auth,password-auth,login}"
+        files_unreadable="${login_file}"
+        command_result="[FILE: ${login_file}] 파일 없음 또는 읽기 불가${newline}"
     fi
 
-    if [ -n "$conf_output" ]; then
-        if [ -f "/etc/default/login" ]; then
-            command_result="${command_result}[FILE: /etc/default/login]${newline}$(grep '^RETRIES' /etc/default/login 2>/dev/null)${newline}"
-            command_executed="${command_executed}; grep '^RETRIES' /etc/default/login"
-        fi
-        if [ -f "/etc/security/policy.conf" ]; then
-            command_result="${command_result}[FILE: /etc/security/policy.conf]${newline}$(grep '^LOCK_AFTER_RETRIES' /etc/security/policy.conf 2>/dev/null)${newline}"
-            command_executed="${command_executed}; grep '^LOCK_AFTER_RETRIES' /etc/security/policy.conf"
-        fi
+    # 2) /etc/security/policy.conf의 LOCK_AFTER_RETRIES 확인 (판정에 반영)
+    if [ -r "$policy_file" ]; then
+        raw_policy_output=$(grep '^LOCK_AFTER_RETRIES' "$policy_file" 2>/dev/null | tail -1 || true)
+        lock_after=$(echo "$raw_policy_output" | cut -d= -f2 | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]' || true)
+        command_result="${command_result}[FILE: ${policy_file}]${newline}${raw_policy_output:-LOCK_AFTER_RETRIES 설정 없음}${newline}"
+    else
+        files_unreadable="${files_unreadable:+${files_unreadable}, }${policy_file}"
+        command_result="${command_result}[FILE: ${policy_file}] 파일 없음 또는 읽기 불가${newline}"
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    # - 점검 파일을 읽을 수 없으면 수동진단
+    # - RETRIES 1~10 AND LOCK_AFTER_RETRIES=YES → 양호, 그 외 취약 (0/미설정은 잠금 미적용)
+    if [ -n "$files_unreadable" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="점검 대상 파일(${files_unreadable})을 읽을 수 없어 계정 잠금 임계값을 확인하지 못함. 수동 점검 필요"
+    elif [ -n "$retries_val" ] && [ "$retries_val" -ge 1 ] && [ "$retries_val" -le 10 ] && [ "$lock_after" = "YES" ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="계정 잠금 임계값 적절히 설정됨 (${config_details})"
+        inspection_summary="계정 잠금 임계값 적절히 설정됨 (RETRIES=${retries_val}, LOCK_AFTER_RETRIES=YES)"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="계정 잠금 임계값 미설치 또는 부적절 (${config_details:-모듈 설정 없음})"
+        inspection_summary="계정 잠금 임계값 미설정 또는 부적절 (RETRIES=${retries_val:-미설정}, LOCK_AFTER_RETRIES=${lock_after:-미설정}; RETRIES 1~10 및 LOCK_AFTER_RETRIES=YES 필요)"
     fi
 
     echo "" >&2

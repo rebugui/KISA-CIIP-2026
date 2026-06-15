@@ -40,20 +40,39 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="의심스러운 숨겨진 파일이 발견되지 않았습니다."
     local command_result=""
-    local command_executed="find /tmp /var/tmp -name '.*' -type f"
+    local command_executed="find /tmp /var/tmp -name '.*' ( -type f -o -type d ); find <home> -maxdepth 1 -name '.*'"
 
-    # 1. 파일 탐색 (정상적인 파일 몇 개는 제외하는 필터 추가 가능)
+    # 1. 임시 디렉터리 탐색: 숨김 파일 + 숨김 디렉터리 모두 점검
     local hidden_files
-    hidden_files=$(find /tmp /var/tmp -name ".*" -type f 2>/dev/null | grep -vE ".X11-unix|.ICE-unix|.Test-unix" | head -n 10)
+    hidden_files=$(find /tmp /var/tmp -name ".*" \( -type f -o -type d \) 2>/dev/null | grep -vE "\.X11-unix|\.ICE-unix|\.XIM-unix|\.font-unix|\.Test-unix" | head -n 10 || true)
+
+    # 2. 사용자 홈 디렉터리 탐색: 통상적인 환경설정 dot 파일을 제외한 숨김 항목
+    local home_dirs
+    home_dirs=$(awk -F: '($3==0 || $3>=1000) && $6 ~ /^\// {print $6}' /etc/passwd 2>/dev/null | sort -u || true)
+    local home_hidden=""
+    local hd
+    for hd in $home_dirs; do
+        [ -d "$hd" ] || continue
+        local found
+        found=$(find "$hd" -maxdepth 1 -name ".*" \( -type f -o -type d \) 2>/dev/null \
+            | grep -vE "/\.(bash_history|bash_logout|bash_profile|bashrc|profile|cshrc|tcshrc|kshrc|login|logout|viminfo|vimrc|emacs|emacs\.d|lesshst|ssh|gnupg|gnupg2|cache|config|local|mozilla|pki|java|ansible|kube|docker|m2|npm|gitconfig|gitignore|wget-hsts|Xauthority|ICEauthority|selected_editor|sudo_as_admin_successful|history|sh_history|mysql_history|psql_history|rnd)$" \
+            | head -n 5 || true)
+        [ -n "$found" ] && home_hidden="${home_hidden}${found}"$'\n'
+    done
 
     if [ -n "$hidden_files" ]; then
         # 파일이 발견되면 수동 점검을 위해 '취약' 또는 '검토필요'로 변경
         status="취약" # KISA 가이드에 따라 일단 '발견' 시 취약으로 분류 후 소명
         diagnosis_result="VULNERABLE"
-        inspection_summary="임시 디렉터리 내에 숨겨진 파일이 존재합니다. 악성 여부를 수동으로 확인하십시오."
-        command_result=$(echo -e "발견된 숨김 파일 리스트:\n${hidden_files}")
+        inspection_summary="임시 디렉터리 내에 숨겨진 파일/디렉터리가 존재합니다. 악성 여부를 수동으로 확인하십시오."
+        command_result=$(echo -e "발견된 숨김 항목 리스트(/tmp,/var/tmp):\n${hidden_files}\n${home_hidden}")
+    elif [ -n "$home_hidden" ]; then
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="사용자 홈 디렉터리에 통상적이지 않은 숨김 파일/디렉터리가 존재합니다. 불필요하거나 의심스러운 항목인지 수동으로 확인하십시오."
+        command_result=$(echo -e "발견된 숨김 항목 리스트(홈 디렉터리):\n${home_hidden}")
     else
-        command_result="임시 디렉토리 내에 숨겨진 파일이 없습니다."
+        command_result="임시 디렉토리 및 홈 디렉터리 내에 의심스러운 숨겨진 파일이 없습니다."
     fi
 
     save_dual_result \

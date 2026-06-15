@@ -35,18 +35,31 @@ try {
 
     foreach ($pool in $appPools) {
         $poolName = $pool.Name
-        $identity = $pool.ProcessModel.IdentityType
-        $userName = $pool.ProcessModel.UserName
+        $identity = [string]$pool.ProcessModel.IdentityType
+        $userName = [string]$pool.ProcessModel.UserName
 
-        if ($identity -eq "LocalSystem" -or $identity -eq "0") {
-            # LocalSystem 또는 ApplicationPoolIdentity
+        # LocalSystem 은 가장 높은 권한 계정으로, 웹 프로세스 구동에 사용 시 취약(criteria_bad)
+        if ($identity -eq "LocalSystem") {
             $vulnerableFound = $true
-            $rootAppPools += "Pool: $poolName, Identity: $identity (권장 권한)"
-        } elseif ($userName -eq "Administrator" -or $userName -eq "DOMAIN\Administrator") {
+            $rootAppPools += "Pool: $poolName, Identity: LocalSystem (관리자 권한 - 취약)"
+            continue
+        }
+
+        # 사용자 지정 계정이 관리자/시스템 계정인지 확인 (도메인 접두사 포함 비교)
+        $userLeaf = if ($userName -and $userName.Contains("\")) { $userName.Split("\")[-1] } else { $userName }
+        if ($userLeaf -and ($userLeaf -match '(?i)^(Administrator|SYSTEM|LocalSystem)$' -or $userLeaf -match '(?i)^Admin')) {
             $vulnerableFound = $true
-            $rootAppPools += "Pool: $poolName, User: $userName (관리자 권한)"
+            $rootAppPools += "Pool: $poolName, User: $userName (관리자 권한 - 취약)"
+            continue
+        }
+
+        # ApplicationPoolIdentity, NetworkService, LocalService, 또는 별도 최소권한 계정은 양호
+        if ($identity -eq "ApplicationPoolIdentity" -or $identity -eq "NetworkService" -or $identity -eq "LocalService") {
+            $rootAppPools += "Pool: $poolName, Identity: $identity (최소 권한 - 적절)"
+        } elseif ($identity -eq "SpecificUser" -and $userLeaf) {
+            $rootAppPools += "Pool: $poolName, User: $userName (별도 계정 - 적절)"
         } else {
-            $rootAppPools += "Pool: $poolName, User: $userName (적절)"
+            $rootAppPools += "Pool: $poolName, Identity: $identity, User: $userName (적절)"
         }
     }
 

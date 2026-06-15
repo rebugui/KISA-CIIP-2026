@@ -107,15 +107,13 @@ diagnose() {
     if [ ${alias_count} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="alias 설정이 발견되지 않았습니다. (보안 권고사항 준수)"
-    elif [ ${alias_count} -le 3 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="alias가 ${alias_count}개 설정되어 있습니다. 최소한의 alias만 유지 권장."
+        inspection_summary="가상 디렉터리(alias) 설정이 발견되지 않았습니다. 불필요한 가상 디렉터리가 존재하지 않습니다."
     else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="다수의 alias(${alias_count}개)가 발견되었습니다. 불필요한 alias 제거 권장."
+        # 가상 디렉터리(alias)의 '불필요' 여부는 업무 필요성에 따라 결정되므로 개수만으로 정적으로 판단할 수 없다.
+        # 발견된 alias 설정을 증적으로 제시하고 수동진단으로 분류한다.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="가상 디렉터리(alias) 설정이 ${alias_count}건 발견되었습니다. 각 alias가 업무상 필요한지 수동으로 확인하고 불필요한 가상 디렉터리를 제거하세요. 발견된 설정:${alias_settings}"
     fi
 
     # Run-all 모드 확인

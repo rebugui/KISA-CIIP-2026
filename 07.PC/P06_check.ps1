@@ -72,18 +72,19 @@ try {
     }
 
     # 주요 상용 메신저 설치/실행 흔적 확인
+    # ExeNames: 포터블(레지스트리 미등록) 설치 탐지를 위한 실행 파일명 패턴
     $messengerCandidates = @(
-        @{ Name = "KakaoTalk"; DisplayPatterns = @("KakaoTalk", "카카오톡"); ProcessNames = @("KakaoTalk") },
-        @{ Name = "LINE"; DisplayPatterns = @("LINE"); ProcessNames = @("LINE") },
-        @{ Name = "Telegram"; DisplayPatterns = @("Telegram"); ProcessNames = @("Telegram") },
-        @{ Name = "WhatsApp"; DisplayPatterns = @("WhatsApp"); ProcessNames = @("WhatsApp") },
-        @{ Name = "Slack"; DisplayPatterns = @("Slack"); ProcessNames = @("slack") },
-        @{ Name = "Discord"; DisplayPatterns = @("Discord"); ProcessNames = @("Discord") },
-        @{ Name = "Skype"; DisplayPatterns = @("Skype"); ProcessNames = @("Skype", "SkypeApp") },
-        @{ Name = "Microsoft Teams"; DisplayPatterns = @("Microsoft Teams", "Teams Machine-Wide Installer"); ProcessNames = @("Teams", "ms-teams", "msteams") },
-        @{ Name = "Zoom"; DisplayPatterns = @("Zoom", "Zoom Workplace"); ProcessNames = @("Zoom") },
-        @{ Name = "NateOn"; DisplayPatterns = @("NateOn", "네이트온"); ProcessNames = @("NateOn", "NateOnMain") },
-        @{ Name = "WeChat"; DisplayPatterns = @("WeChat", "微信"); ProcessNames = @("WeChat", "WeChatAppEx") }
+        @{ Name = "KakaoTalk"; DisplayPatterns = @("KakaoTalk", "카카오톡"); ProcessNames = @("KakaoTalk"); ExeNames = @("KakaoTalk.exe") },
+        @{ Name = "LINE"; DisplayPatterns = @("LINE"); ProcessNames = @("LINE"); ExeNames = @("LINE.exe") },
+        @{ Name = "Telegram"; DisplayPatterns = @("Telegram"); ProcessNames = @("Telegram"); ExeNames = @("Telegram.exe") },
+        @{ Name = "WhatsApp"; DisplayPatterns = @("WhatsApp"); ProcessNames = @("WhatsApp"); ExeNames = @("WhatsApp.exe") },
+        @{ Name = "Slack"; DisplayPatterns = @("Slack"); ProcessNames = @("slack"); ExeNames = @("slack.exe") },
+        @{ Name = "Discord"; DisplayPatterns = @("Discord"); ProcessNames = @("Discord"); ExeNames = @("Discord.exe") },
+        @{ Name = "Skype"; DisplayPatterns = @("Skype"); ProcessNames = @("Skype", "SkypeApp"); ExeNames = @("Skype.exe") },
+        @{ Name = "Microsoft Teams"; DisplayPatterns = @("Microsoft Teams", "Teams Machine-Wide Installer"); ProcessNames = @("Teams", "ms-teams", "msteams"); ExeNames = @("Teams.exe", "ms-teams.exe") },
+        @{ Name = "Zoom"; DisplayPatterns = @("Zoom", "Zoom Workplace"); ProcessNames = @("Zoom"); ExeNames = @("Zoom.exe") },
+        @{ Name = "NateOn"; DisplayPatterns = @("NateOn", "네이트온"); ProcessNames = @("NateOn", "NateOnMain"); ExeNames = @("NateOn.exe", "NateOnMain.exe") },
+        @{ Name = "WeChat"; DisplayPatterns = @("WeChat", "微信"); ProcessNames = @("WeChat", "WeChatAppEx"); ExeNames = @("WeChat.exe") }
     )
 
     $candidateNames = $messengerCandidates | ForEach-Object { $_.Name }
@@ -100,6 +101,34 @@ try {
         $installedApps += @(Get-ItemProperty -Path $uninstallPath -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName })
     }
     $runningProcesses = @(Get-Process -ErrorAction SilentlyContinue)
+
+    # 포터블(레지스트리 미등록) 메신저 탐지를 위해 일반적인 설치 경로를 파일시스템 스캔
+    $scanRoots = @()
+    foreach ($envVar in @($env:USERPROFILE, $env:LOCALAPPDATA, $env:APPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not [string]::IsNullOrWhiteSpace($envVar) -and (Test-Path $envVar)) {
+            $scanRoots += $envVar
+        }
+    }
+    $scanSubDirs = @("Downloads", "Desktop", "Documents")
+    $scanTargets = @()
+    foreach ($root in ($scanRoots | Sort-Object -Unique)) {
+        $scanTargets += $root
+        foreach ($sub in $scanSubDirs) {
+            $candidatePath = Join-Path $root $sub
+            if (Test-Path $candidatePath) { $scanTargets += $candidatePath }
+        }
+    }
+    $scanTargets = @($scanTargets | Sort-Object -Unique)
+
+    # 깊이 제한 스캔 (성능 보호: 각 루트 하위 일정 깊이까지만)
+    $foundExeFiles = @()
+    foreach ($target in $scanTargets) {
+        try {
+            $foundExeFiles += @(Get-ChildItem -Path $target -Recurse -Depth 4 -Include *.exe -File -ErrorAction SilentlyContinue)
+        } catch {
+            # 접근 불가 경로는 무시
+        }
+    }
 
     $detectedMessengers = @()
     foreach ($candidate in $messengerCandidates) {
@@ -118,6 +147,14 @@ try {
                 $detectedMessengers += "$($candidate.Name) running process: $($proc.ProcessName) (PID $($proc.Id))"
             }
         }
+
+        # 포터블 설치 탐지: 알려진 실행 파일명이 스캔 경로에 존재하는지 확인
+        foreach ($exeName in $candidate.ExeNames) {
+            $match = $foundExeFiles | Where-Object { $_.Name -ieq $exeName } | Select-Object -First 1
+            if ($null -ne $match) {
+                $detectedMessengers += "$($candidate.Name) portable/exe detected: $($match.FullName)"
+            }
+        }
     }
 
     $detectedMessengers = @($detectedMessengers | Sort-Object -Unique)
@@ -127,12 +164,16 @@ try {
     } else {
         $outputLines += "Detected commercial messenger candidates: None"
     }
+    $outputLines += "탐지 범위: Add/Remove 레지스트리 + 실행 프로세스 + 일반 설치경로 exe 스캔(포터블 포함, 깊이 4)"
     $outputLines += "Note: 조직에서 허용한 메신저인지 여부는 기관 정책 기준으로 별도 확인 필요"
 
     if ($detectedMessengers.Count -gt 0) {
-        $finalResult = "VULNERABLE"
-        $summary = "상용 메신저 후보 탐지됨 ($($detectedMessengers.Count)건): 기관 허용 여부 확인 필요"
-        $status = "취약"
+        # 상용 메신저가 설치/실행 중으로 탐지되더라도, 해당 메신저가 기관에서 허용한 것인지 여부는
+        # 스크립트가 알 수 없다(기관 정책 의존). 따라서 자동으로 VULNERABLE로 판정하지 않고
+        # MANUAL(수동진단)로 보고하여 기관 허용 여부를 사람이 확인하도록 한다. 탐지 목록을 근거로 제시한다.
+        $finalResult = "MANUAL"
+        $summary = "상용 메신저 후보 탐지됨 ($($detectedMessengers.Count)건): 기관 허용 여부 수동 확인 필요"
+        $status = "수동진단"
     } elseif ($serviceRunning -or $policyExplicitEnabled) {
         $finalResult = "VULNERABLE"
         if ($serviceRunning) {

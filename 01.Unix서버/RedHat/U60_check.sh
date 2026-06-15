@@ -40,9 +40,7 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="SNMP Community String 복잡성 설정이 적절합니다."
     local command_result=""
-    local command_executed="grep -v '^#' /etc/snmp/snmpd.conf | grep -iE 'rocommunity|rwcommunity'"
-
-    local snmpd_conf="/etc/snmp/snmpd.conf"
+    local command_executed="grep -v '^#' /etc/snmp/snmpd.conf /etc/snmp/snmpd.local.conf /etc/snmp/snmpd.conf.d/* | grep -iE 'rocommunity|rwcommunity|com2sec'"
 
     # ==========================================================================
     # 1. SNMP 서비스 실행 여부 확인
@@ -71,9 +69,15 @@ diagnose() {
     fi
 
     # ==========================================================================
-    # 2. snmpd.conf 파일 확인
+    # 2. snmpd 설정 파일 확인 (snmpd.conf + snmpd.local.conf + conf.d 포함)
     # ==========================================================================
-    if [ ! -f "$snmpd_conf" ]; then
+    local conf_files=""
+    local cf
+    for cf in /etc/snmp/snmpd.conf /etc/snmp/snmpd.local.conf /etc/snmp/snmpd.conf.d/*; do
+        [ -f "$cf" ] && conf_files="${conf_files} ${cf}"
+    done
+
+    if [ -z "${conf_files// /}" ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
         inspection_summary="SNMP 서비스가 실행 중이나 설정 파일을 찾을 수 없습니다."
@@ -93,22 +97,30 @@ diagnose() {
     # 3. Community String 복잡성 검증
     # ==========================================================================
     local issues=""
-    local community_lines=$(grep -v "^#" "$snmpd_conf" 2>/dev/null | grep -iE "^(rocommunity|rcommunity|rwcommunity|community)" || true)
+    local community_lines=$(cat ${conf_files} 2>/dev/null | grep -v "^#" | grep -iE "^[[:space:]]*(rocommunity|rcommunity|rwcommunity|community|com2sec)" || true)
 
     if [ -z "$community_lines" ]; then
         # SNMPv3만 사용하거나 community 설정 없음
-        local v3_lines=$(grep -v "^#" "$snmpd_conf" 2>/dev/null | grep -iE "createUser|rouser|rwuser" || true)
+        local v3_lines=$(cat ${conf_files} 2>/dev/null | grep -v "^#" | grep -iE "createUser|rouser|rwuser" || true)
         if [ -n "$v3_lines" ]; then
-            inspection_summary="SNMPv3 인증 모드 사용 중 (Community String 미사용)."
-            command_result="SNMPv3 설정 감지됨"
+            # v3 인증 비밀번호 복잡도는 정적 점검 불가 → 수동진단
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            inspection_summary="SNMPv3 인증 모드 사용 중 (Community String 미사용). 인증 비밀번호의 복잡도 충족 여부는 정적 점검이 불가하므로 수동 확인이 필요합니다."
+            command_result="SNMPv3 설정 감지됨 (createUser/rouser/rwuser), 점검 파일:${conf_files}"
         else
             inspection_summary="Community String 설정이 없습니다."
-            command_result="Community String: [none]"
+            command_result="Community String: [none], 점검 파일:${conf_files}"
         fi
     else
         while IFS= read -r line; do
-            # community string 값 추출 (두 번째 필드)
-            local comm_string=$(echo "$line" | awk '{print $2}' | head -1)
+            # community string 값 추출 (com2sec: 네 번째 필드, 그 외: 두 번째 필드)
+            local comm_string
+            if echo "$line" | grep -qiE "^[[:space:]]*com2sec"; then
+                comm_string=$(echo "$line" | awk '{print $4}' | head -1)
+            else
+                comm_string=$(echo "$line" | awk '{print $2}' | head -1)
+            fi
 
             if [ -z "$comm_string" ]; then
                 continue
@@ -121,9 +133,9 @@ diagnose() {
             fi
 
             # 복잡성 검증
-            local has_alpha=$(echo "$comm_string" | grep -cE '[a-zA-Z]' || echo 0)
-            local has_digit=$(echo "$comm_string" | grep -cE '[0-9]' || echo 0)
-            local has_special=$(echo "$comm_string" | grep -cE '[^a-zA-Z0-9]' || echo 0)
+            local has_alpha=$(echo "$comm_string" | grep -cE '[a-zA-Z]' || true)
+            local has_digit=$(echo "$comm_string" | grep -cE '[0-9]' || true)
+            local has_special=$(echo "$comm_string" | grep -cE '[^a-zA-Z0-9]' || true)
             local length=${#comm_string}
 
             # 영문+숫자 10자리 이상 또는 영문+숫자+특수 8자리 이상

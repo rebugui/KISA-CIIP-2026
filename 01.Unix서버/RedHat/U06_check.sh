@@ -41,21 +41,68 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="su 기능 제한 설정이 적절히 적용되어 있습니다."
     local command_result=""
-    local command_executed="grep 'pam_wheel.so' /etc/pam.d/su && grep 'wheel' /etc/group"
+    local command_executed="grep 'pam_wheel.so' /etc/pam.d/su; stat -c '%a %G' /usr/bin/su; grep 'wheel' /etc/group"
 
-    # 1. 실제 데이터 추출: PAM 설정 및 그룹 멤버 확인
-    local pam_check=$(grep "pam_wheel.so" /etc/pam.d/su | grep -v "^#" || echo "미설정")
-    local wheel_users=$(grep "^wheel:" /etc/group | cut -d: -f4)
-
-    # 2. 판정 로직
-    if [ "$pam_check" = "미설정" ]; then
-        status="취약"
-        diagnosis_result="VULNERABLE"
-        inspection_summary="su 명령어 사용 제한(pam_wheel.so)이 설정되어 있지 않습니다."
+    # 1. PAM 설정 확인: 들여쓰기 주석 포함 제거 후 pam_wheel.so 라인 평가
+    # 강제(enforcing) 조건: control 필드가 required/requisite 이고 trust 옵션이 없는 경우
+    # (optional 또는 sufficient+trust 는 비-wheel 사용자의 su 사용을 제한하지 않음)
+    local pam_enforcing=false
+    local pam_check
+    pam_check=$(grep -vE '^[[:space:]]*#' /etc/pam.d/su 2>/dev/null | grep "pam_wheel\.so" || echo "미설정")
+    if [ "$pam_check" != "미설정" ]; then
+        while IFS= read -r pam_line; do
+            [ -z "$pam_line" ] && continue
+            local pam_control
+            pam_control=$(echo "$pam_line" | awk '{print $2}')
+            if { [ "$pam_control" = "required" ] || [ "$pam_control" = "requisite" ]; } \
+                && ! echo "$pam_line" | grep -qw "trust"; then
+                pam_enforcing=true
+                break
+            fi
+        done <<< "$pam_check"
     fi
 
-    # 3. command_result에 실제 데이터 기록
-    command_result="PAM 설정: [ ${pam_check} ] | wheel 그룹 멤버: [ ${wheel_users:-없음} ]"
+    local wheel_users
+    wheel_users=$(grep "^wheel:" /etc/group | cut -d: -f4 || true)
+
+    # 2. 파일 권한 대체 기준: su 바이너리가 전용 그룹 소유이고 4750 이하 권한인 경우
+    # (판단기준의 '허용 그룹 생성 후 su 명령어 일반 사용자 권한 제거'에 해당)
+    # stat 실패 시 해당 기준은 판단 불가(UNDETERMINED)로 처리하며 GOOD으로 간주하지 않음
+    local su_bin="/usr/bin/su"
+    [ -f "$su_bin" ] || su_bin="/bin/su"
+    local perm_state="UNDETERMINED"
+    local su_perm su_group
+    su_perm=$(stat -c "%a" "$su_bin" 2>/dev/null || echo "")
+    su_group=$(stat -c "%G" "$su_bin" 2>/dev/null || echo "")
+    if [ -n "$su_perm" ] && [ -n "$su_group" ]; then
+        if [ $(( 8#$su_perm & ~(8#4750) & 8#7777 )) -eq 0 ] && [ "$su_group" != "root" ]; then
+            perm_state="SECURE"
+        else
+            perm_state="INSECURE"
+        fi
+    fi
+
+    # 3. 판정 로직 (판단기준: PAM 모듈 설정 또는 su 허용 그룹 생성 + 일반 사용자 권한 제거)
+    if [ "$pam_enforcing" = true ]; then
+        status="양호"
+        diagnosis_result="GOOD"
+        inspection_summary="pam_wheel.so가 required/requisite(trust 미사용)로 설정되어 su 명령어 사용이 특정 그룹으로 제한되어 있습니다."
+    elif [ "$perm_state" = "SECURE" ]; then
+        status="양호"
+        diagnosis_result="GOOD"
+        inspection_summary="su 명령어(${su_bin})가 전용 그룹(${su_group}) 소유 및 ${su_perm} 권한(4750 이하)으로 제한되어 있습니다."
+    elif [ "$perm_state" = "INSECURE" ]; then
+        status="취약"
+        diagnosis_result="VULNERABLE"
+        inspection_summary="su 명령어 사용 제한이 설정되어 있지 않습니다. (pam_wheel.so 강제 설정 미적용, su 바이너리 권한 ${su_perm}/그룹 ${su_group} 미제한)"
+    else
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="pam_wheel.so 강제 설정이 없고 su 바이너리 권한 확인(stat)에 실패하여 자동 판정이 불가합니다. su 제한 설정 여부 수동 점검 필요"
+    fi
+
+    # 4. command_result에 실제 데이터 기록
+    command_result="PAM 설정: [ ${pam_check} ] | su 바이너리: [ ${su_perm:-확인불가} ${su_group:-확인불가} ${su_bin} ] | wheel 그룹 멤버: [ ${wheel_users:-없음} ]"
 
     save_dual_result \
         "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \

@@ -121,6 +121,7 @@ diagnose() {
         # ==========================================================================
         local ssh_secure=false
         local telnet_secure=false
+        local manual_required=false
         local config_details=""
         local ssh_config_output=""
 
@@ -131,11 +132,11 @@ diagnose() {
         local sshd_config_file="/etc/ssh/sshd_config"
 
         if [ ! -f "$sshd_config_file" ]; then
-            diagnosis_result="MANUAL"
-            status="수동 진단"
+            manual_required=true
             inspection_summary="SSH 설정 파일이 존재하지 않음 (${sshd_config_file})"
             ssh_config_output="[FILE NOT FOUND]"
             ssh_secure=false
+            config_details="[SSH] 설정 파일 없음 (수동 확인 필요)"
         else
             # PermitRootLogin 설정 확인
             local ssh_config_commented=$(grep -E "^\s*#\s*PermitRootLogin" "$sshd_config_file" 2>/dev/null | head -1 || true)
@@ -153,10 +154,10 @@ diagnose() {
             else
                 config_details="[SSH] PermitRootLogin ${permit_root_setting}"
                 case "$permit_root_setting" in
-                    no|prohibit-password|without-password)
+                    no)
                         ssh_secure=true
                         ;;
-                    yes)
+                    yes|prohibit-password|without-password)
                         ssh_secure=false
                         ;;
                     *)
@@ -179,22 +180,41 @@ diagnose() {
     local login_cfg_output=""
 
     if [ "$telnet_active" = true ]; then
-        # AIX는 /etc/security/login.cfg에서 체크
-        local login_cfg_file="/etc/security/login.cfg"
-        if [ -f "$login_cfg_file" ]; then
-            # ftp, tty, rlogin 등의 pts 설정 확인
-            login_cfg_output=$(grep -E "^[^#].*pts" "$login_cfg_file" 2>/dev/null || echo "")
-            if [ -n "$login_cfg_output" ]; then
-                telnet_secure=false
-                telnet_details="[Telnet] login.cfg에 pts 설정 발견 (취약)"
-            else
-                telnet_secure=true
-                telnet_details="[Telnet] login.cfg에 pts 설정 없음 (양호)"
-            fi
-        else
+        # AIX는 /etc/security/user의 root 스탠자 rlogin 속성으로 원격 root 접속 차단 여부 판단
+        local security_user_file="/etc/security/user"
+        local rlogin_val=""
+
+        # 1차: lsuser 명령으로 확인
+        if command -v lsuser >/dev/null 2>&1; then
+            rlogin_val=$(lsuser -a rlogin root 2>/dev/null | awk -F'=' '/rlogin/ {gsub(/[[:space:]]/,"",$2); print tolower($2)}' | head -1 || true)
+        fi
+
+        # 2차: /etc/security/user의 root 스탠자 직접 파싱
+        if [ -z "$rlogin_val" ] && [ -f "$security_user_file" ]; then
+            rlogin_val=$(awk '
+                /^[[:space:]]*root:[[:space:]]*$/ {in_root=1; next}
+                /^[^[:space:]#].*:[[:space:]]*$/ {in_root=0}
+                in_root && /^[[:space:]]*rlogin[[:space:]]*=/ {
+                    split($0, a, "=");
+                    gsub(/[[:space:]]/, "", a[2]);
+                    print tolower(a[2]);
+                    exit
+                }' "$security_user_file" 2>/dev/null || true)
+        fi
+
+        if [ "$rlogin_val" = "false" ]; then
+            telnet_secure=true
+            telnet_details="[Telnet] root rlogin=false (원격 root 접속 차단, 양호)"
+            login_cfg_output="root rlogin=${rlogin_val}"
+        elif [ -n "$rlogin_val" ]; then
             telnet_secure=false
-            telnet_details="[Telnet] login.cfg 파일 없음 (취약)"
-            login_cfg_output="[FILE NOT FOUND]"
+            telnet_details="[Telnet] root rlogin=${rlogin_val} (원격 root 접속 허용, 취약)"
+            login_cfg_output="root rlogin=${rlogin_val}"
+        else
+            # rlogin 속성 미확인: AIX 기본값 true → 취약
+            telnet_secure=false
+            telnet_details="[Telnet] root rlogin 설정 미확인 (기본값 true, 취약)"
+            login_cfg_output="rlogin 설정 확인 불가 (기본값: true)"
         fi
     else
         telnet_secure=true
@@ -229,8 +249,8 @@ diagnose() {
 
     # Telnet 부분 추가
     if [ "$telnet_active" = true ]; then
-        command_result="${command_result}${telnet_service_output}[/etc/security/login.cfg]${newline}${login_cfg_output}"
-        command_executed="${command_executed}; lssrc -s telnet; grep -E '^[^#].*pts' /etc/security/login.cfg"
+        command_result="${command_result}${telnet_service_output}[root rlogin attribute]${newline}${login_cfg_output}"
+        command_executed="${command_executed}; lssrc -s telnet; lsuser -a rlogin root"
     else
         local telnet_status_raw=$(lssrc -s telnet 2>/dev/null || echo "Service not found")
         command_result="${command_result}[Command: lssrc -s telnet]${newline}${telnet_status_raw}"
@@ -240,7 +260,11 @@ diagnose() {
     # -------------------------------------------------------------------------
     # 5. 최종 판정
     # -------------------------------------------------------------------------
-    if [ "$is_secure" = true ]; then
+    if [ "$manual_required" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동 진단"
+        inspection_summary="SSH 설정 파일 확인 불가, 수동 점검 필요 (${config_details})"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="root 계정 원격 접속 제한 적절 (${config_details})"

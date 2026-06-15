@@ -63,7 +63,7 @@ diagnose() {
 
     # 1) AIX lssrc로 서비스 상태 확인
     for service in "${r_services[@]}"; do
-        local state=$(lssrc -s "$service" 2>/dev/null | grep "$service" | awk '{print $2}' || echo "inoperative")
+        local state=$(lssrc -s "$service" 2>/dev/null | grep "$service" | awk '{print $NF}' || echo "inoperative")
         if [ "$state" = "active" ]; then
             is_secure=false
             active_services+=("${service} (active)")
@@ -71,10 +71,10 @@ diagnose() {
         service_status="${service_status}${service}: ${state}\\n"
     done || true
 
-    # 2) AIX inetd.conf 확인 (rsh, rlogin, rexec는 inetd에서 관리)
+    # 2) AIX inetd.conf 확인 (AIX 서비스명: shell(rshd)/login(rlogind)/exec(rexecd))
     if [ -f /etc/inetd.conf ]; then
-        for inetd_service in rsh rlogin rexec; do
-            local inetd_entry=$(grep "^${inetd_service}" /etc/inetd.conf 2>/dev/null | grep -v "^#" || echo "")
+        for inetd_service in shell login exec; do
+            local inetd_entry=$(grep -E "^${inetd_service}[[:space:]]" /etc/inetd.conf 2>/dev/null | grep -v "^#" || echo "")
             if [ -n "$inetd_entry" ]; then
                 is_secure=false
                 active_services+=("${inetd_service} (inetd enabled)")
@@ -97,7 +97,7 @@ diagnose() {
     done
     local inetd_raw=""
     if [ -f /etc/inetd.conf ]; then
-        inetd_raw=$(grep -E "^rsh|^rlogin|^rexec" /etc/inetd.conf 2>/dev/null || echo "No r-service entries in inetd.conf")
+        inetd_raw=$(grep -E "^(shell|login|exec)[[:space:]]" /etc/inetd.conf 2>/dev/null || echo "No r-service entries in inetd.conf")
     fi
 
     # 최종 판정
@@ -106,13 +106,13 @@ diagnose() {
         status="양호"
         inspection_summary="r 계열 서비스가 비활성화되어 있습니다."
         command_result="[Command: lssrc]${newline}${lssrc_raw}${newline}[Command: grep inetd.conf]${newline}${inetd_raw}"
-        command_executed="lssrc -s rsh; lssrc -s rlogin; lssrc -s rexec; grep -E '^rsh|^rlogin|^rexec' /etc/inetd.conf"
+        command_executed="lssrc -s rsh; lssrc -s rlogin; lssrc -s rexec; grep -E '^(shell|login|exec)[[:space:]]' /etc/inetd.conf"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="r 계열 서비스가 활성화되어 있습니다: ${active_services[*]}"
         command_result="[Command: lssrc]${newline}${lssrc_raw}${newline}[Command: grep inetd.conf]${newline}${inetd_raw}"
-        command_executed="lssrc -s rsh; lssrc -s rlogin; lssrc -s rexec; grep -E '^rsh|^rlogin|^rexec' /etc/inetd.conf"
+        command_executed="lssrc -s rsh; lssrc -s rlogin; lssrc -s rexec; grep -E '^(shell|login|exec)[[:space:]]' /etc/inetd.conf"
     fi
 
     save_dual_result \

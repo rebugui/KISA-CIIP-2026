@@ -11,7 +11,7 @@
 # @Platform    : Tomcat_Linux
 # @Severity    : 중
 # @Title       : 웹 서비스 경로 내 불필요한 파일 제거
-# @Description : 웹 서비스 로그 분석 및 관리 설정 여부 점검
+# @Description : 웹 서비스 경로 내 기본 생성 불필요 파일 및 디렉터리 제거 여부 점검
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 
@@ -42,8 +42,8 @@ GUIDELINE_REMEDIATION="불필요한 파일 및 디렉터리를 제거하도록 �
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
+    local diagnosis_result="MANUAL"
+    local status="수동진단"
     local inspection_summary=""
     local command_result=""
     local command_executed=""
@@ -81,53 +81,69 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
-    # 로그 파일 존재 확인
-    local log_files=(
-        "/var/log/tomcat*/localhost_access*log.txt"
-        "/var/log/tomcat*/catalina.out"
-        "/usr/share/tomcat*/logs/*"
+    # 웹 서비스 경로(webapps) 내 기본 생성 불필요 파일/디렉터리 점검
+    # 가이드라인 기준: 샘플/매뉴얼/임시/테스트/백업 파일 및 기본 디렉터리(docs, examples,
+    # manager, host-manager) 존재 여부 점검 (criteria_bad: 기본으로 생성되는 불필요한 파일
+    # 및 디렉터리가 존재하는 경우)
+    local webapp_dirs=(
+        "/var/lib/tomcat*/webapps"
+        "/usr/share/tomcat*/webapps"
+        "/opt/tomcat/webapps"
+        "/opt/tomcat*/webapps"
     )
 
-    local has_log=false
-    local log_info=""
+    # 기본 생성되는 불필요 디렉터리 (Tomcat 기본 배포 샘플/매뉴얼/관리 콘솔)
+    local default_dirs=("docs" "examples" "manager" "host-manager")
+    # 기본 생성되는 불필요 파일 (매뉴얼/릴리스 노트/안내 파일 등)
+    local default_file_globs=("*.txt" "BUILDING.*" "RELEASE-NOTES*" "RUNNING.*" "*.bak" "*~" "*.orig" "*sample*" "*example*")
 
-    for log_pattern in "${log_files[@]}"; do
-        if ls ${log_pattern} 1> /dev/null 2>&1; then
-            has_log=true
-            log_count=$(ls ${log_pattern} 2>/dev/null | wc -l)
-            log_info="${log_info}"$'\n'"${log_pattern}: ${log_count} files"
-        fi
+    local webapps_found=false
+    local unnecessary_items=""
+    local unnecessary_count=0
+
+    for dir_pattern in "${webapp_dirs[@]}"; do
+        for webapp_dir in $dir_pattern; do
+            if [ -d "${webapp_dir}" ]; then
+                webapps_found=true
+
+                # 기본 샘플/매뉴얼/관리 디렉터리 존재 확인
+                for d in "${default_dirs[@]}"; do
+                    if [ -d "${webapp_dir}/${d}" ]; then
+                        unnecessary_items="${unnecessary_items}"$'\n'"[DIR] ${webapp_dir}/${d}"
+                        unnecessary_count=$((unnecessary_count + 1))
+                    fi
+                done
+
+                # 불필요 파일(샘플/매뉴얼/백업/임시) 존재 확인 (webapps 직하위 및 ROOT/docs 내)
+                local found_files=$(find "${webapp_dir}" -maxdepth 3 -type f \
+                    \( -iname "*.bak" -o -iname "*~" -o -iname "*.orig" \
+                       -o -iname "BUILDING.*" -o -iname "RELEASE-NOTES*" -o -iname "RUNNING.*" \
+                       -o -iname "*sample*" -o -iname "*example*" \
+                       -o -iname "jndi-resources-howto*" \) 2>/dev/null | head -20 || true)
+                if [ -n "${found_files}" ]; then
+                    unnecessary_items="${unnecessary_items}"$'\n'"${found_files}"
+                    local file_hits=$(echo "${found_files}" | grep -c . || true)
+                    unnecessary_count=$((unnecessary_count + file_hits))
+                fi
+            fi
+        done
     done
 
-    # 로그 분석 도구 확인 (logrotate, logwatch 등)
-    local has_logrotate=false
-    local has_analysis_tool=false
+    command_executed="ls -d /var/lib/tomcat*/webapps/{docs,examples,manager,host-manager} 2>/dev/null; find /var/lib/tomcat*/webapps -maxdepth 3 -type f \\( -iname '*sample*' -o -iname 'BUILDING.*' -o -iname 'RELEASE-NOTES*' \\) 2>/dev/null | head -20"
+    command_result="${unnecessary_items:-No unnecessary default files or directories found}"
 
-    if command -v logrotate >/dev/null 2>&1; then
-        has_logrotate=true
-    fi
-
-    if command -v logwatch >/dev/null 2>&1 || command -v goaccess >/dev/null 2>&1; then
-        has_analysis_tool=true
-    fi
-
-    command_executed="ls -la /var/log/tomcat*/*.txt 2>/dev/null | head -5"
-    command_result="${log_info:-No logs found}"
-
-    if [ "${has_log}" = true ]; then
-        if [ "${has_logrotate}" = true ] || [ "${has_analysis_tool}" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="로그 파일이 존재하며 로그 관리 도구(logrotate 또는 logwatch)가 설치되어 있습니다. (보안 권고사항 준수)"
-        else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="로그 파일이 존재합니다. 로그 분석 도구 도입 권장."
-        fi
-    else
+    if [ "${webapps_found}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat webapps 디렉터리를 찾을 수 없습니다. 웹 서비스 경로 내 기본 생성 샘플/매뉴얼/백업 파일 및 디렉터리(docs, examples, manager, host-manager 등) 존재 여부를 수동으로 확인하세요."
+    elif [ ${unnecessary_count} -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="로그 파일이 발견되지 않았습니다. 로그 기록 및 분석 시스템 구축 권장."
+        inspection_summary="웹 서비스 경로 내 기본으로 생성되는 불필요한 파일 또는 디렉터리(${unnecessary_count}개: 샘플/매뉴얼/백업/관리 콘솔 등)가 존재합니다. 제거 권장(예: rm -rf <webapps>/docs, examples, manager, host-manager)."
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="웹 서비스 경로 내 기본으로 생성되는 불필요한 파일 및 디렉터리가 발견되지 않았습니다. (보안 권고사항 준수)"
     fi
 
     # Run-all 모드 확인

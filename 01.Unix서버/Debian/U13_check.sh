@@ -57,102 +57,116 @@ diagnose() {
     local newline=$'\n'
 
     # 진단 로직 구현
-    # SHA512 또는 더 강한 알고리즘 확인
+    # SHA-2 이상 알고리즘 사용 여부 점검 (worst-of: 약한 지표가 하나라도 있으면 취약)
+    # [Leg 1] /etc/login.defs ENCRYPT_METHOD
+    # [Leg 2] /etc/pam.d/common-password 등 pam_unix.so 해시 옵션 (실제 해시 결정 주체)
+    # [Leg 3] /etc/shadow root 계정 실해시 접두사
 
-    local is_secure=false
+    local weak_findings=""
+    local good_findings=""
     local details=""
     local raw_output=""
     local encrypt_method=""
-    local pam_algorithm=""
+    local evidence_available=false
 
-    # Capture raw output from grep commands
+    # [Leg 1] /etc/login.defs ENCRYPT_METHOD 확인
     raw_output=$(grep "^ENCRYPT_METHOD" /etc/login.defs 2>/dev/null || echo "No ENCRYPT_METHOD in /etc/login.defs")
-
-    # 1) /etc/login.defs 확인
-    if [ -f /etc/login.defs ]; then
-        encrypt_method=$(grep "^ENCRYPT_METHOD" /etc/login.defs 2>/dev/null | awk '{print $2}')
+    if [ -r /etc/login.defs ]; then
+        evidence_available=true
+        encrypt_method=$(grep "^ENCRYPT_METHOD" /etc/login.defs 2>/dev/null | awk '{print $2}' || true)
         if [ -n "$encrypt_method" ]; then
             details="login.defs ENCRYPT_METHOD: ${encrypt_method}"
+            case "$encrypt_method" in
+                SHA512|sha512|SHA256|sha256|YESCRYPT|yescrypt)
+                    good_findings="${good_findings}login.defs(${encrypt_method}) "
+                    ;;
+                MD5|md5|DES|des|CRYPT|crypt|BIGCRYPT|bigcrypt)
+                    weak_findings="${weak_findings}login.defs(${encrypt_method}) "
+                    ;;
+            esac
         fi
     fi
 
-    # 2) PAM 설정 확인 (pam_unix.so with sha512/sha256/yescrypt)
+    # [Leg 2] PAM 설정 확인 — Debian은 /etc/pam.d/common-password의 pam_unix.so 옵션이 실제 해시 결정
     local pam_files=(
-        "/etc/pam.d/common-auth"
+        "/etc/pam.d/common-password"
         "/etc/pam.d/system-auth"
         "/etc/pam.d/password-auth"
     )
-
+    local pam_file pam_lines pam_line
     for pam_file in "${pam_files[@]}"; do
-        if [ -f "$pam_file" ]; then
-            # Capture raw PAM output
-            local pam_raw=$(grep "pam_unix.so" "$pam_file" 2>/dev/null || echo "")
-            if [ -n "$pam_raw" ]; then
-                raw_output="${raw_output}${newline}[${pam_file}]${pam_raw}"
+        [ -f "$pam_file" ] || continue
+        pam_lines=$(grep -E '^[[:space:]]*password[^#]*pam_unix\.so' "$pam_file" 2>/dev/null || true)
+        [ -z "$pam_lines" ] && continue
+        evidence_available=true
+        raw_output="${raw_output}${newline}[${pam_file}]${newline}${pam_lines}"
+        while IFS= read -r pam_line; do
+            [ -z "$pam_line" ] && continue
+            if echo "$pam_line" | grep -qwE '(md5|des|bigcrypt)'; then
+                weak_findings="${weak_findings}${pam_file##*/}(약한 해시 옵션) "
+                details="${details:+${details}, }PAM ${pam_file##*/}: 약한 해시 옵션(md5/des)"
+            elif echo "$pam_line" | grep -qwE '(sha512|sha256|yescrypt)'; then
+                good_findings="${good_findings}${pam_file##*/}(안전 해시 옵션) "
+                details="${details:+${details}, }PAM ${pam_file##*/}: 안전 해시 옵션"
             fi
+        done <<< "$pam_lines"
+    done
 
-            # SHA512 확인 (우선)
-            if grep -q "pam_unix.so.*sha512" "$pam_file" 2>/dev/null; then
-                pam_algorithm="sha512"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM: ${pam_algorithm}"
-                else
-                    details="PAM pam_unix.so 알고리즘: ${pam_algorithm}"
-                fi
-                break
-            # yescrypt 확인 (더 강력함)
-            elif grep -q "pam_unix.so.*yescrypt" "$pam_file" 2>/dev/null; then
-                pam_algorithm="yescrypt"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM: ${pam_algorithm}"
-                else
-                    details="PAM pam_unix.so 알고리즘: ${pam_algorithm}"
-                fi
-                break
-            # SHA256 확인 (최소 허용)
-            elif grep -q "pam_unix.so.*sha256" "$pam_file" 2>/dev/null; then
-                pam_algorithm="sha256"
-                is_secure=true
-                if [ -n "$details" ]; then
-                    details="${details}, PAM: ${pam_algorithm}"
-                else
-                    details="PAM pam_unix.so 알고리즘: ${pam_algorithm}"
-                fi
-                break
-            fi
+    # [Leg 3] /etc/shadow root 계정 실해시 접두사 확인 (해시 원문은 증적에 미기록)
+    local root_hash=""
+    if [ -r /etc/shadow ]; then
+        root_hash=$(awk -F: '$1 == "root" { print $2; exit }' /etc/shadow 2>/dev/null || true)
+        if [ -n "$root_hash" ]; then
+            evidence_available=true
+            case "$root_hash" in
+                '!'*|'*'*)
+                    raw_output="${raw_output}${newline}[/etc/shadow] root: 잠금 계정 (해시 판정 제외)"
+                    ;;
+                '$6$'*|'$5$'*|'$y$'*|'$7$'*)
+                    good_findings="${good_findings}shadow(root: 안전 해시 ${root_hash:0:3}) "
+                    details="${details:+${details}, }root 해시: 안전(${root_hash:0:3})"
+                    raw_output="${raw_output}${newline}[/etc/shadow] root hash prefix: ${root_hash:0:3}"
+                    ;;
+                '$1$'*)
+                    weak_findings="${weak_findings}shadow(root: MD5 해시) "
+                    details="${details:+${details}, }root 해시: MD5(\$1\$)"
+                    raw_output="${raw_output}${newline}[/etc/shadow] root hash prefix: \$1\$ (MD5)"
+                    ;;
+                '$'*)
+                    raw_output="${raw_output}${newline}[/etc/shadow] root hash prefix: ${root_hash:0:3} (판정 보류)"
+                    ;;
+                *)
+                    weak_findings="${weak_findings}shadow(root: DES 추정 해시) "
+                    details="${details:+${details}, }root 해시: DES 추정(\$ 접두사 없음)"
+                    raw_output="${raw_output}${newline}[/etc/shadow] root hash: \$ 접두사 없음 (DES 추정)"
+                    ;;
+            esac
         fi
-    done || true
-
-    # 3) PAM에 sha512/sha256/yescrypt가 없더라도 login.defs에 안전한 알고리즘이 설정된 경우 양호
-    if [ "$is_secure" = false ]; then
-        # login.defs의 ENCRYPT_METHOD 확인
-        case "$encrypt_method" in
-            SHA512|SHA256|YESCRYPT|yescrypt)
-                is_secure=true
-                ;;
-        esac
     fi
 
-    # 최종 판정
-    if [ "$is_secure" = true ]; then
+    command_executed="grep '^ENCRYPT_METHOD' /etc/login.defs; grep pam_unix.so /etc/pam.d/common-password; awk -F: '\$1==\"root\"{print \$2}' /etc/shadow"
+
+    # 최종 판정 (worst-of: 약한 지표 우선)
+    if [ -n "$weak_findings" ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="약한 비밀번호 암호화 알고리즘 지표 발견: ${weak_findings% }${details:+ (${details})}"
+        command_result="${raw_output}"
+    elif [ -n "$good_findings" ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="안전한 비밀번호 암호화 알고리즘 사용됨 (${details})"
         command_result="${raw_output}"
-        command_executed="grep '^ENCRYPT_METHOD' /etc/login.defs && grep 'pam_unix.so' /etc/pam.d/common-auth"
+    elif [ "$evidence_available" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="비밀번호 암호화 알고리즘 설정 증거 수집 불가 - /etc/login.defs, /etc/pam.d/common-password, /etc/shadow를 수동으로 확인 필요"
+        command_result="${raw_output}"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        if [ -z "$details" ]; then
-            inspection_summary="비밀번호 암호화 알고리즘 미설정 또는 약한 알고리즘 사용 (MD5, DES 등)"
-            command_result="${raw_output}"
-        else
-            inspection_summary="비밀번호 암호화 알고리즘 부적절 (${details})"
-            command_result="${raw_output}"
-        fi
-        command_executed="grep '^ENCRYPT_METHOD' /etc/login.defs && grep 'pam_unix.so' /etc/pam.d/common-auth"
+        inspection_summary="비밀번호 암호화 알고리즘 미설정 (login.defs ENCRYPT_METHOD 및 PAM 해시 옵션 부재, 안전 해시 증거 없음)"
+        command_result="${raw_output}"
     fi
 
     # echo ""

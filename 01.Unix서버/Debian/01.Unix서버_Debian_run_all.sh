@@ -112,13 +112,13 @@ run_single_check() {
 
     if [ -n "$json_output" ]; then
         # JSON 필드 추출
-        item_name=$(echo "$json_output" 2>/dev/null | grep -oP '"item_name":\s*"\K[^"]+' | head -1 || echo "")
-        final_result=$(echo "$json_output" 2>/dev/null | grep -oP '"final_result":\s*"\K[^"]+' | head -1 || echo "")
+        item_name=$(json_extract_field "$json_output" "item_name")
+        final_result=$(json_extract_field "$json_output" "final_result")
 
         # inspection.summary 추출
-        summary=$(echo "$json_output" 2>/dev/null | grep -oP '"inspection":\s*\{[^}]*"summary":\s*"\K[^"]+' | head -1 || echo "")
+        summary=$(json_extract_field "$json_output" "summary")
         if [ -z "$summary" ]; then
-            summary=$(echo "$json_output" 2>/dev/null | grep -oP '"summary":\s*"\K[^"]+' | head -1 || echo "진단 실패")
+            summary="진단 실패"
         fi
 
         RESULTS_JSON+=("$json_output")

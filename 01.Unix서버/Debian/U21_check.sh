@@ -98,7 +98,7 @@ diagnose() {
         # 권한 확인 (640 이하인 경우 양호)
         local perms_num=$(echo "$file_perms" | sed 's/^0*//')
 
-        if [ "$is_valid_owner" = true ] && [ "$perms_num" -le 640 ]; then
+        if [ "$is_valid_owner" = true ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#640 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="파일: $target_file, 권한: $file_perms, 소유자: $file_owner"
         else

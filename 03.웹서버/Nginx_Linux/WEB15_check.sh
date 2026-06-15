@@ -11,7 +11,7 @@
 # @Platform    : Nginx_Linux
 # @Severity    : 상
 # @Title       : 웹 서비스의 불필요한 스크립트 매핑 제거
-# @Description : 불필요한 CGI 스크립트 핸들러 매핑 제거 여부 점검
+# @Description : 불필요한 스크립트 매핑 제거 여부 점검. 점검 대상: Tomcat, IIS, JEUS (Nginx 비대상)
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ==========================================================================
 
@@ -42,81 +42,14 @@ GUIDELINE_REMEDIATION="불필요한 스크립트 매핑 존재 여부 점검 및
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
-    local inspection_summary=""
-    local command_result=""
-    local command_executed=""
-    local mapping_count=0
-
-        # Process check (Updated for Docker)
-    if command -v pgrep >/dev/null; then
-    if ! pgrep -x "nginx" > /dev/null; then
-        diagnosis_result="N/A"
-        status="N/A"
-        inspection_summary="Nginx 웹 서버가 실행 중이 아닙니다."
-        command_result="Nginx process not found"
-        command_executed="pgrep -x nginx"
-        # Run-all 모드 확인
-        save_dual_result \
-            "${ITEM_ID}" \
-            "${ITEM_NAME}" \
-            "${status}" \
-            "${diagnosis_result}" \
-            "${inspection_summary}" \
-            "${command_result}" \
-            "${command_executed}" \
-            "${GUIDELINE_PURPOSE}" \
-            "${GUIDELINE_THREAT}" \
-            "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" \
-            "${GUIDELINE_REMEDIATION}"
-    
-        # 결과 저장 확인
-        verify_result_saved "${ITEM_ID}"
-
-        return 0
-    fi
-    else
-        echo "[INFO] pgrep command missing, skipping process check."
-    fi
-
-    local nginx_conf_locations=(
-        "/etc/nginx/nginx.conf"
-        "/etc/nginx/conf.d/*.conf"
-        "/etc/nginx/sites-enabled/*.conf"
-    )
-
-    local script_mappings=""
-
-    for conf_pattern in "${nginx_conf_locations[@]}"; do
-        for conf_file in $conf_pattern; do
-            if [ -f "${conf_file}" ]; then
-                local found_mapping=$(grep -E "^\s*(location.*\.(php|pl|cgi|py|sh|rb)|fastcgi_pass|scgi_pass|uwsgi_pass)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
-                if [ -n "${found_mapping}" ]; then
-                    script_mappings="${script_mappings}"$'\n'"${found_mapping}"
-                    mapping_count=$((mapping_count + 1))
-                fi
-            fi
-        done
-    done
-
-    command_executed="grep -E '^\\s*(location.*\\.(php|pl|cgi|py)|fastcgi_pass|scgi_pass|uwsgi_pass)' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null | grep -v '^\\s*#' | head -5"
-    command_result="${script_mappings:-No script mappings found}"
-
-    if [ ${mapping_count} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="스크립트 매핑이 발견되지 않았습니다. (정적 콘텐츠 전용 서버)"
-    elif [ ${mapping_count} -le 3 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="스크립트 매핑이 ${mapping_count}개 발견되었습니다. 최소한의 매핑만 유지 권장."
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="다수의 스크립트 매핑(${mapping_count}개)이 발견되었습니다. 불필요한 매핑 제거 권장."
-    fi
+    # WEB-15 점검 대상은 Tomcat, IIS, JEUS 이며 Nginx는 비대상(out-of-target)이다.
+    # (docs/guideline_metadata.json WEB-15 target: "Tomcat, IIS, JEUS")
+    # 따라서 Nginx_Linux에서는 N/A로 고정한다.
+    local diagnosis_result="N/A"
+    local status="N/A"
+    local inspection_summary="WEB-15는 Tomcat, IIS, JEUS를 점검 대상으로 하며 Nginx는 비대상입니다(docs/guideline_metadata.json WEB-15 target). 불필요한 스크립트 매핑 점검은 Nginx에 적용되지 않습니다."
+    local command_result="WEB-15 target: Tomcat, IIS, JEUS. Nginx is out of scope."
+    local command_executed="docs/guideline_metadata.json WEB-15 target platform review"
 
     # Run-all 모드 확인
     # 결과 저장 (run_all 모드는 라이브러리에서 판단)

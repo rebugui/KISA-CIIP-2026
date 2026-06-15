@@ -32,7 +32,7 @@ $remediation = "비밀번호 파일 권한 600 이하로 설정"
 
 try {
     $finalResult = "N/A"
-    $status = "not_applicable"
+    $status = "N/A"
     $summary = "Apache for Windows is not a target platform for WEB-03 according to docs/guideline_metadata.json."
     $commandOutput = "WEB-03 targets Tomcat, IIS, and JEUS password files. Apache .htpasswd usage is deployment-specific and not listed as the target of this guideline item."
     $commandExecuted = "guideline_metadata.json WEB-03 target platform review"
