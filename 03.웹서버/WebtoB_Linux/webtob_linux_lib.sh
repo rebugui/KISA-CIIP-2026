@@ -153,7 +153,10 @@ invoke_webtob_linux_check() {
             webtob_set_result "N/A" "N/A" "This administrator account/password item is not targeted to WebtoB in the guideline metadata." "${item_id} target excludes WebtoB." "Map WebtoB account guideline applicability"
             ;;
         WEB-04)
-            lines="$(webtob_config_grep 'Options[[:space:]]*=.*Indexes|-Indexes' || true)"
+            # Use the comment-aware grep so commented-out (inactive)
+            # `Options = "Indexes"` directives left behind after remediation do
+            # not trigger VULNERABLE; only ACTIVE directives are assessed.
+            lines="$(webtob_config_grep_active 'Options[[:space:]]*=.*Indexes|-Indexes' || true)"
             if printf '%s' "${lines}" | grep -Eiq 'Options[[:space:]]*=.*(^|[^-])Indexes'; then
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB directory indexing appears enabled." "${lines}" "grep Options/Indexes http.m"
             elif printf '%s' "${lines}" | grep -Eiq -- '-Indexes'; then
@@ -163,9 +166,18 @@ invoke_webtob_linux_check() {
             fi
             ;;
         WEB-05)
-            lines="$(webtob_config_grep 'SVRTYPE[[:space:]]*=[[:space:]]*CGI|SvrType[[:space:]]*=[[:space:]]*CGI|/cgi-bin|CGI' || true)"
+            # Oracle criteria_bad = CGI USED *and* its executable directory NOT
+            # restricted; criteria_good = CGI unused OR restricted to a
+            # designated directory. Whether an active mapping is confined to a
+            # designated directory is institution-relative and not statically
+            # derivable from http.m, so an ACTIVE CGI mapping cannot be asserted
+            # VULNERABLE here -> route to MANUAL (floor). Use the comment-aware
+            # grep and match only an ACTIVE CGI server/URI mapping; drop the
+            # comment-blind bare 'CGI'/'/cgi-bin' tokens that also matched
+            # commented examples and unrelated path substrings.
+            lines="$(webtob_config_grep_active 'SVRTYPE[[:space:]]*=[[:space:]]*CGI|Svrtype[[:space:]]*=[[:space:]]*CGI' || true)"
             if [ -n "${lines}" ]; then
-                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB CGI execution mapping evidence was found." "${lines}" "grep CGI http.m"
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB active CGI execution mapping was found; manually verify CGI is restricted to a designated executable directory (criteria_bad requires CGI in use AND its directory unrestricted)." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep CGI http.m"
             elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
                 # Installed (per webtob_is_installed) but no http.m config was
                 # actually inspected (home not derivable or config files absent):
@@ -328,6 +340,12 @@ invoke_webtob_linux_check() {
                 webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB custom error page is designated (ERRORDOCUMENT with a url= assignment)." "${lines}" "grep ERRORDOCUMENT http.m"
             elif printf '%s' "${lines}" | grep -Eiq 'ERRORDOCUMENT'; then
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB ERRORDOCUMENT section was found but no custom error page (url=) was designated." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep ERRORDOCUMENT http.m"
+            elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
+                # Installed (per webtob_is_installed) but no http.m config was
+                # actually inspected (home not derivable or config files absent):
+                # a designated error page cannot be disproved from zero evidence
+                # -> MANUAL, not a hard VULNERABLE.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its configuration (http.m) could not be inspected; manually verify a custom error page is separately designated." "$(webtob_evidence)" "grep ERRORDOCUMENT http.m"
             else
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB custom error page designation evidence was not found." "$(webtob_evidence)" "grep ERRORDOCUMENT http.m"
             fi

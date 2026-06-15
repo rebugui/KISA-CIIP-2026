@@ -88,7 +88,7 @@ diagnose() {
             tmout_line=$(grep -E '^[[:space:]]*(export[[:space:]]+)?TMOUT=' "${sh_file}" 2>/dev/null | tail -n 1 || true)
             if [ -n "${tmout_line}" ]; then
                 tmout_found=true
-                tmout_value=$(echo "${tmout_line}" | sed -e 's/^.*TMOUT=//' -e 's/[^0-9].*$//')
+                tmout_value=$(echo "${tmout_line}" | sed -e 's/^.*TMOUT=//' -e 's/["'\'' ]//g' -e 's/[^0-9].*$//')
                 tmout_source="${sh_file}"
             fi
         fi

@@ -197,10 +197,14 @@ diagnose() {
         inspection_summary="의심스러운 숨겨진 파일이 발견되지 않았습니다. (확인된 홈 디렉토리: ${checked_homedirs}개, 전체 숨겨진 파일: ${total_hidden}개)"
         command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[No suspicious files found (checked ${checked_homedirs} home directories, ${total_hidden} total hidden files)]"
     else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="의심스러운 숨겨진 파일 ${suspicious_count}개가 발견되었습니다: ${suspicious_files%, }. 해당 파일들을 검토한 후 불필요하거나 악성적인 경우 제거하세요: rm -rf <file>"
-        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Suspicious files found]${newline}${suspicious_files%, }"
+        # 화이트리스트에 없는 숨김 파일의 의심 여부는 정적으로 판정 불가
+        # (.bash_history/.sh_history/.lesshst/.Xauthority 등은 정상 셸/X 산출물).
+        # 따라서 자동 '취약' 단정 대신 수동진단으로 라우팅하여 오탐을 방지하되,
+        # 발견된 항목 목록을 근거로 제시해 백도어 미탐(false-good)도 방지한다.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="화이트리스트에 없는 숨겨진 파일 ${suspicious_count}개가 발견되었습니다: ${suspicious_files%, }. 정상 셸/환경설정 산출물(.bash_history 등)이 아닌 불필요하거나 의심스러운 파일인지 ls -al 명령어로 수동 확인 후, 악성적인 경우 제거하세요: rm -rf <file>"
+        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Non-whitelisted hidden files requiring manual review]${newline}${suspicious_files%, }"
     fi
 
     # echo ""

@@ -82,32 +82,40 @@ diagnose() {
         command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}"
         command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf 2>&1"
     else
-        stat_output=$(stat -c "%a %U:%G" "$target_file" 2>/dev/null)
-        # 파일 권한 확인
-        local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null)
-        local file_owner=$(stat -c "%U:%G" "$target_file" 2>/dev/null)
+        # 파일 권한/소유자 확인 (Solaris: perl stat 사용, GNU stat -c 미지원)
+        stat_output=$(perl -e 'if (-e $ARGV[0]) { @s = stat($ARGV[0]); $user = getpwuid($s[4]); $group = getgrgid($s[5]); printf "%04o %s:%s\n", $s[2] & 07777, $user, $group; }' "$target_file" 2>/dev/null)
+        local file_perms=$(perl -e 'if (-e $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$target_file" 2>/dev/null)
+        local file_owner=$(perl -e 'if (-e $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; $gid = (stat($ARGV[0]))[5]; $user = getpwuid($uid); $group = getgrgid($gid); print "$user:$group\n"; }' "$target_file" 2>/dev/null)
+        local file_owner_user="${file_owner%%:*}"
+        details="파일: $target_file, 권한: $file_perms, 소유자: $file_owner"
 
-        # 소유자 및 권한 확인
-        if [ "$file_owner" = "root:root" ] && [ "$file_perms" = "600" ]; then
+        # 소유자 및 권한 확인 (판단기준: 소유자가 root, 권한이 600 이하)
+        # 600 이하 = 600 초과 권한 비트(group/other 접근, 소유자 실행 등)가 없어야 양호
+        if [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$file_owner_user" = "root" ] \
+            && [ "$(( 8#$file_perms & ~8#600 & 07777 ))" -eq 0 ]; then
             is_secure=true
-            details="파일: $target_file, 권한: $file_perms, 소유자: $file_owner"
-        else
-            details="파일: $target_file, 권한: $file_perms, 소유자: $file_owner"
         fi
 
+        # 권한/소유자 정보 취득 실패 시 수동진단 (취약 오탐 방지)
+        if [ -z "$file_perms" ] || [ -z "$file_owner_user" ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="inetd.conf 권한/소유자 정보 취득 실패 - 수동 확인 필요 ($details)"
+            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: perl stat]${newline}${stat_output}"
+            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; perl -e 'printf \"%04o %s:%s\", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' $target_file"
         # 최종 판정
-        if [ "$is_secure" = true ]; then
+        elif [ "$is_secure" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="inetd.conf 보안 설정 적절 ($details)"
-            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a %U:%G' $target_file]${newline}${stat_output}"
-            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; stat -c '%a %U:%G' $target_file"
+            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: perl stat]${newline}${stat_output}"
+            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; perl -e 'printf \"%04o %s:%s\", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' $target_file"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="inetd.conf 보안 설정 부적절 ($details)"
-            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: stat -c '%a %U:%G' $target_file]${newline}${stat_output}"
-            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; stat -c '%a %U:%G' $target_file"
+            command_result="[Command: ls -l /etc/inetd.conf /etc/xinetd.conf]${newline}${ls_output}${newline}${newline}[Command: perl stat]${newline}${stat_output}"
+            command_executed="ls -l /etc/inetd.conf /etc/xinetd.conf; perl -e 'printf \"%04o %s:%s\", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' $target_file"
         fi
     fi
 

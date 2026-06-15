@@ -93,34 +93,67 @@ diagnose() {
 
     local proxy_config=""
     local has_proxy=false
+    local has_insecure_ajp=false
     local config_found=false
+
+    # XML 주석(<!-- ... -->) 영역을 다중 행 포함 제거하여 활성(주석 외) 설정만 추출한다.
+    # (라인 선두 <!-- 만 거르는 방식은 다중 행 주석의 내부 라인을 통과시켜 비활성 AJP를 오탐함)
+    strip_xml_comments() {
+        awk '{
+            line=$0; out=""
+            while (length(line)>0) {
+                if (incmt) {
+                    p=index(line,"-->")
+                    if (p==0) { line=""; break }
+                    line=substr(line,p+3); incmt=0
+                } else {
+                    p=index(line,"<!--")
+                    if (p==0) { out=out line; line=""; break }
+                    out=out substr(line,1,p-1); line=substr(line,p+4); incmt=1
+                }
+            }
+            if (length(out)>0) print out
+        }' "$1"
+    }
 
     for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
                 config_found=true
-                # proxyName / proxyPort 속성 및 AJP Connector 점검 (주석 제외)
-                local found_proxy=$(grep -iE "proxyName|proxyPort|protocol\s*=\s*\"AJP" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                # proxyName / proxyPort 속성 및 AJP Connector 점검 (다중 행 주석 영역 제외)
+                local active_xml
+                active_xml=$(strip_xml_comments "${xml_file}" 2>/dev/null || true)
+                local found_proxy
+                found_proxy=$(printf '%s\n' "${active_xml}" | grep -iE "proxyName|proxyPort|protocol\s*=\s*\"AJP" || true)
                 if [ -n "${found_proxy}" ]; then
                     proxy_config="${found_proxy}"
                     has_proxy=true
+                    # 활성 AJP Connector에 secretRequired="false"가 설정된 경우는 명백히 안전하지 않음(Ghostcat)
+                    if printf '%s\n' "${active_xml}" | grep -iqE "secretRequired\s*=\s*\"false\""; then
+                        has_insecure_ajp=true
+                    fi
                 fi
                 break 2
             fi
         done
     done
 
-    command_executed="grep -iE 'proxyName|proxyPort|protocol=\"AJP' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
+    command_executed="strip_xml_comments /etc/tomcat*/server.xml | grep -iE 'proxyName|proxyPort|protocol=\"AJP'  (다중 행 주석 제외 후 활성 설정만 점검)"
     command_result="${proxy_config:-No proxyName/proxyPort/AJP Connector configuration found}"
 
     if [ "${config_found}" = false ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
         inspection_summary="Tomcat server.xml을 찾을 수 없습니다. Connector 요소의 proxyName/proxyPort 속성 및 불필요한 AJP Connector 설정 존재 여부를 수동으로 확인하세요."
-    elif [ "${has_proxy}" = true ]; then
+    elif [ "${has_insecure_ajp}" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="server.xml에 Proxy 관련 설정(proxyName/proxyPort 또는 AJP Connector)이 존재합니다. 불필요한 경우 제거 권장."
+        inspection_summary="server.xml에 활성 AJP Connector가 secretRequired=\"false\"로 설정되어 있습니다(Ghostcat 등 위험). 불필요 시 제거하거나 secret을 설정하세요."
+    elif [ "${has_proxy}" = true ]; then
+        # 활성 Proxy/AJP 설정의 필요성(불필요 여부)은 정적으로 판정할 수 없으므로 수동진단으로 처리한다(Windows WEB-10과 동일).
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="server.xml에 활성 Proxy 관련 설정(proxyName/proxyPort 또는 AJP Connector)이 존재합니다. 해당 설정이 업무상 필요한지, 신뢰된 인터페이스에 한정되고 secret으로 보호되는지 수동으로 확인하세요."
     else
         diagnosis_result="GOOD"
         status="양호"

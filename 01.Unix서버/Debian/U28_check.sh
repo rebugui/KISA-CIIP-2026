@@ -150,10 +150,33 @@ diagnose() {
         fi
         inspection_summary="hosts.deny에 기본 차단(ALL: ALL) 정책이 설정되어 있고 hosts.allow는 특정 호스트만 허용합니다. ${details}"
     else
-        # 유효한 기본 차단(ALL: ALL) 정책 없음 (파일 부재 또는 주석/빈 줄만 존재) → 모든 접속 허용 상태
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="TCP Wrapper 기준 기본 차단(ALL: ALL) 정책이 없어 모든 접속이 허용되는 상태입니다 (설정 파일 부재 또는 유효 규칙 없음)."
+        # TCP Wrapper 기본 차단(ALL: ALL) 정책 없음 → 대체 제한 수단(방화벽) 확인
+        # glibc 2.26+ 환경에서는 TCP Wrapper가 미지원/미사용이므로 ufw/iptables/nftables 등
+        # 방화벽으로 접속 IP·포트를 제한하는 것이 정상 구성일 수 있음 (criteria_good은 수단 무관)
+        local fw_active=0
+        local fw_detail=""
+        if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qiE '^Status:[[:space:]]*active'; then
+            fw_active=1
+            fw_detail="ufw"
+        elif command -v iptables >/dev/null 2>&1 && iptables -S 2>/dev/null | grep -qvE '^-P |^-N ' && iptables -S 2>/dev/null | grep -qE '^-A '; then
+            fw_active=1
+            fw_detail="iptables"
+        elif command -v nft >/dev/null 2>&1 && nft list ruleset 2>/dev/null | grep -qE '[[:alnum:]]'; then
+            fw_active=1
+            fw_detail="nftables"
+        fi
+
+        if [ "$fw_active" -eq 1 ]; then
+            # 대체 제한 수단(방화벽) 운용 중 - 허용 IP/포트 제한 정책 적정성은 자동 검증 불가 → 수동 확인
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="TCP Wrapper 차단 정책은 없으나 방화벽(${fw_detail})이 운용 중입니다. 방화벽의 접속 허용 IP 및 포트 제한 정책을 수동으로 확인하시기 바랍니다."
+        else
+            # TCP Wrapper 기본 차단 정책도 없고 활성 방화벽도 없음 → 모든 접속 허용 상태
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="TCP Wrapper 기준 기본 차단(ALL: ALL) 정책이 없고 활성 방화벽(ufw/iptables/nftables)도 탐지되지 않아 모든 접속이 허용되는 상태입니다."
+        fi
     fi
 
     # echo ""

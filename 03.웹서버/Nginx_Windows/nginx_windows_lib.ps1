@@ -176,7 +176,17 @@ function Get-NginxWindowsConfigText {
 function Get-NginxActiveLines {
     param([string]$ConfigText)
 
-    @($ConfigText -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object {
+    # Nginx allows multiple directives and brace blocks on a single physical
+    # line (e.g. `location /pub { autoindex on; }`, common in minified or
+    # generated configs). Splitting only on newlines leaves such a directive
+    # buried mid-line where the anchored `^directive` filters in the WEB checks
+    # never see it, silently dropping a configured-but-vulnerable state to GOOD.
+    # Normalize by breaking after every `{`, `}`, and `;` (keeping the `;`
+    # attached so existing `...;$` / `\s*;` patterns still match) so each
+    # directive starts its own line, mirroring the comment/brace normalization
+    # the Linux sibling performs before matching.
+    $normalized = $ConfigText -replace '([{};])', "`$1`n"
+    @($normalized -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object {
         $_ -and $_ -notmatch '^#'
     })
 }

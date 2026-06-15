@@ -86,6 +86,25 @@ diagnose() {
         bind_conf_files=("/etc/bind/named.conf" "/etc/bind/named.conf.local" "/etc/bind/named.conf.options" "/etc/named.conf")
     fi
 
+    # include 지시자 추적 (1단계): 포함된 설정 파일도 동일 검사 대상에 추가
+    # (include 파일 미확인 상태로 GOOD을 부여하지 않도록 미해결 include는 수동진단 처리)
+    local include_unresolved=false
+    local existing_confs=()
+    for conf_file in "${bind_conf_files[@]}"; do
+        [ -f "$conf_file" ] && existing_confs+=("$conf_file")
+    done
+    if [ ${#existing_confs[@]} -gt 0 ]; then
+        local inc_path
+        while IFS= read -r inc_path; do
+            [ -z "$inc_path" ] && continue
+            if [ -f "$inc_path" ]; then
+                bind_conf_files+=("$inc_path")
+            else
+                include_unresolved=true
+            fi
+        done < <(grep -hE '^[[:space:]]*include[[:space:]]' "${existing_confs[@]}" 2>/dev/null | sed -n 's/.*"\([^"]*\)".*/\1/p' || true)
+    fi
+
     local transfer_seen=false
     for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
@@ -142,10 +161,16 @@ diagnose() {
         inspection_summary="DNS 서비스 미설치됨"
         command_result="DNS not used"
         command_executed="svcs -H -o state svc:/network/dns/server; ps -ef | grep -w named"
+    elif [ "$is_secure" = true ] && [ ${#issues[@]} -eq 0 ] && [ "$include_unresolved" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="기본 설정의 Zone Transfer 제한은 확인되었으나 include된 설정 파일을 확인할 수 없어 수동 점검 필요"
+        command_result="${dns_info}${newline}[미확인 include 설정 파일 존재]"
+        command_executed="grep -i 'allow-transfer' /etc/bind/named.conf* /etc/named.conf 2>/dev/null || true"
     elif [ "$is_secure" = true ] && [ ${#issues[@]} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="DNS Zone Transfer 제한 적절히 설정됨"
+        inspection_summary="DNS Zone Transfer 제한 적절히 설정됨 (include 설정 포함 확인)"
         command_result="${dns_info}"
         command_executed="grep -i 'allow-transfer' /etc/bind/named.conf* /etc/named.conf 2>/dev/null || true"
     else

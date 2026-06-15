@@ -125,7 +125,7 @@ diagnose() {
         fi
     fi
 
-    command_executed="grep -vE '^[[:space:]]*#|^[[:space:]]*\$' /etc/hosts.allow /etc/hosts.deny"
+    command_executed="grep -vE '^[[:space:]]*#|^[[:space:]]*\$' /etc/hosts.allow /etc/hosts.deny; grep -vE '^[[:space:]]*#|^[[:space:]]*\$' /etc/ipf/ipf.conf"
 
     # 결과 판정 (TCP Wrapper 기준: 주석 제외 유효 규칙 내용 검증)
     if [ -n "$unreadable_files" ]; then
@@ -150,10 +150,24 @@ diagnose() {
         fi
         inspection_summary="hosts.deny에 기본 차단(ALL: ALL) 정책이 설정되어 있고 hosts.allow는 특정 호스트만 허용합니다. ${details}"
     else
-        # 유효한 기본 차단(ALL: ALL) 정책 없음 (파일 부재 또는 주석/빈 줄만 존재) → 모든 접속 허용 상태
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="TCP Wrapper 기준 기본 차단(ALL: ALL) 정책이 없어 모든 접속이 허용되는 상태입니다 (설정 파일 부재 또는 유효 규칙 없음)."
+        # TCP Wrapper 기본 차단 없음 → AIX 대체 메커니즘(IPFilter /etc/ipf/ipf.conf) 확인
+        local ipf_rules=""
+        if [ -f /etc/ipf/ipf.conf ] && [ -r /etc/ipf/ipf.conf ]; then
+            ipf_rules=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/ipf/ipf.conf 2>/dev/null || true)
+        fi
+
+        if [ -n "$ipf_rules" ]; then
+            # AIX IPFilter 접근 제한 메커니즘 사용 중 → 정책 적절성은 자동 판정 불가
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="TCP Wrapper 기본 차단은 없으나 AIX IPFilter(/etc/ipf/ipf.conf) 설정이 확인됨 - 허용 대상의 적절성 수동 점검 필요"
+            command_result="${command_result}${newline}${newline}[File: /etc/ipf/ipf.conf]${newline}${ipf_rules}"
+        else
+            # 유효한 기본 차단(ALL: ALL) 정책 없음 (파일 부재 또는 주석/빈 줄만 존재) + IPFilter 규칙도 없음 → 모든 접속 허용 상태
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="TCP Wrapper 기준 기본 차단(ALL: ALL) 정책이 없고 IPFilter 설정도 없어 모든 접속이 허용되는 상태입니다 (설정 파일 부재 또는 유효 규칙 없음)."
+        fi
     fi
 
     # echo ""

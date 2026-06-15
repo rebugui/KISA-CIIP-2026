@@ -81,17 +81,27 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
+    # 확장자 없는 vhost(예: 데비안/우분투의 sites-enabled/default 심볼릭 링크)도
+    # 포함되도록 .conf 글롭과 확장자 없는 디렉터리 글롭을 함께 사용한다.
     local nginx_conf_locations=(
         "/etc/nginx/nginx.conf"
         "/etc/nginx/conf.d/*.conf"
+        "/etc/nginx/conf.d/*"
         "/etc/nginx/sites-enabled/*.conf"
+        "/etc/nginx/sites-enabled/*"
     )
 
     local redirect_settings=""
+    # 동일 파일을 두 글롭에서 중복 검사하지 않도록 추적한다.
+    local scanned_files=""
 
     for conf_pattern in "${nginx_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
             if [ -f "${conf_file}" ]; then
+                case " ${scanned_files} " in
+                    *" ${conf_file} "*) continue ;;
+                esac
+                scanned_files="${scanned_files} ${conf_file}"
                 local found_redirect=$(grep -E "^\s*(return|rewrite).*https://" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
                 if [ -n "${found_redirect}" ]; then
                     redirect_settings="${redirect_settings}"$'\n'"${found_redirect}"
@@ -101,7 +111,7 @@ diagnose() {
         done
     done
 
-    command_executed="grep -E '^\\s*(return|rewrite).*https://' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null | grep -v '^\\s*#' | head -5"
+    command_executed="grep -E '^\\s*(return|rewrite).*https://' /etc/nginx/nginx.conf /etc/nginx/conf.d/* /etc/nginx/sites-enabled/* (include 지시자로 참조되는 vhost 포함) 2>/dev/null | grep -v '^\\s*#' | head -5"
     command_result="${redirect_settings:-No HTTPS redirects found}"
 
     if [ "${has_https_redirect}" = true ]; then

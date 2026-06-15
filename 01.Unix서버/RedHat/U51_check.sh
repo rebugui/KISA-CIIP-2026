@@ -50,8 +50,9 @@ diagnose() {
         if [ -f "$conf_file" ]; then
             conf_found=true
             # 주석 제거 후 다중행 allow-update 블록을 한 줄로 평탄화하여 점검
-            local au_flat=$(grep -vE '^[[:space:]]*(//|#)' "$conf_file" 2>/dev/null | sed -n '/allow-update/,/;/p' | tr '\n' ' ' || echo "")
-            local au_blocks=$(echo "$au_flat" | grep -oiE 'allow-update[[:space:]]*\{[^};]*' || echo "")
+            # sed 범위(/allow-update/,/;/)는 첫 ';' 줄에서 끊겨 멀티라인 블록 내 any를 놓치므로 사용 금지
+            local au_flat=$(sed -e 's://.*$::' -e 's:#.*$::' "$conf_file" 2>/dev/null | tr -s '[:space:]' ' ' || echo "")
+            local au_blocks=$(echo "$au_flat" | grep -oiE 'allow-update[^{};]*\{[^}]*' || echo "")
             if [ -n "$au_blocks" ]; then
                 evidence="${evidence}${conf_file}: [ $(echo "$au_blocks" | tr '\n' ' ') ]. "
                 # none·키·특정 IP 제한은 양호(가이드 조치방법 부합), any만 취약

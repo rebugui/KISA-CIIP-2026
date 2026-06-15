@@ -42,10 +42,17 @@ try {
 
     # auditpol /r emits a native CSV header:
     #   Machine Name,Policy Target,Subcategory,Subcategory GUID,Inclusion Setting,Exclusion Setting
-    # Using a custom -Header would replace these native headers and misalign every
-    # column (machine name read as Subcategory). Let ConvertFrom-Csv use the native
-    # header row instead, and read the documented 'Inclusion Setting' column.
-    $auditPolicy = $auditOutput | ConvertFrom-Csv -Delimiter ','
+    # but `auditpol` is fully localized: on a Korean-locale host the header row
+    # itself renders as '컴퓨터 이름,정책 대상,하위 범주,하위 범주 GUID,포함 설정,제외 설정',
+    # so relying on the native header makes every property name locale-dependent
+    # ($row.Subcategory / $row.'Inclusion Setting' become $null on Korean Windows).
+    # Force locale-invariant property names with an explicit -Header and drop the
+    # (localized) native header row via -Skip 1. Column VALUES stay localized and
+    # are handled by the Korean/English keyword variants and the '없음'/'No Auditing'
+    # check below.
+    $auditPolicy = $auditOutput |
+        ConvertFrom-Csv -Delimiter ',' -Header 'MachineName','PolicyTarget','Subcategory','SubcategoryGUID','InclusionSetting','ExclusionSetting' |
+        Select-Object -Skip 1
     $out += "`n총 $($auditPolicy.Count)개의 감사 정책 확인됨`n"
 
     if ($auditPolicy) {
@@ -66,14 +73,24 @@ try {
         $allConfigured = $true
         $unconfiguredItems = @()
 
-        # Check each concept. The audit state lives in the native 'Inclusion
-        # Setting' column ('없음'/'No Auditing' means not configured). A concept
+        # Parse-health probe (locale-failure guard): a correctly parsed audit
+        # policy exposes a recognizable InclusionSetting value on at least some
+        # rows. If column mapping fails (e.g. an unforeseen locale/format that
+        # the explicit -Header does not align), every InclusionSetting is empty.
+        # Per 'cannot prove compliant -> MANUAL', degrade such a parse failure to
+        # MANUAL rather than reporting a false VULNERABLE.
+        $recognizedSettings = @($auditPolicy | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_.InclusionSetting)
+        })
+
+        # Check each concept. The audit state lives in the InclusionSetting
+        # column ('없음'/'No Auditing' means not configured). A concept
         # is configured if ANY of its language variants matches a configured row.
         foreach ($concept in $criticalAuditConcepts) {
             $found = $auditPolicy | Where-Object {
                 $row = $_
                 ($concept.Keywords | Where-Object { $row.Subcategory -like "*$_*" }) -and `
-                $row.'Inclusion Setting' -ne '없음' -and $row.'Inclusion Setting' -ne 'No Auditing'
+                $row.InclusionSetting -ne '없음' -and $row.InclusionSetting -ne 'No Auditing'
             }
 
             if (-not $found) {
@@ -88,12 +105,19 @@ try {
             $matching = $auditPolicy | Where-Object { $_.Subcategory -like "*$auditKeyword*" }
             if ($matching) {
                 foreach ($match in $matching) {
-                    $out += "  - $($match.Subcategory): $($match.'Inclusion Setting')`n"
+                    $out += "  - $($match.Subcategory): $($match.InclusionSetting)`n"
                 }
             }
         }
 
-        if ($allConfigured) {
+        if ($recognizedSettings.Count -eq 0) {
+            # No row exposed a recognizable InclusionSetting value: the CSV parsed
+            # but the column could not be read (locale/format mismatch). Avoid a
+            # false VULNERABLE; require manual verification.
+            $finalResult = "MANUAL"
+            $summary = "감사 정책 출력의 포함 설정(Inclusion Setting) 열을 해석할 수 없어 자동 판정 불가: 수동으로 감사 정책 확인 필요"
+            $status = "수동진단"
+        } elseif ($allConfigured) {
             $finalResult = "GOOD"
             $summary = "감사 정책 권고 기준에 따라 감사 설정이 됨"
             $status = "양호"

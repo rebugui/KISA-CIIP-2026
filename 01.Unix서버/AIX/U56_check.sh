@@ -81,15 +81,27 @@ diagnose() {
             fi
         fi
 
-        # 2) vsftpd.conf에서 userlist_deny, userlist_file 확인
+        # 2) vsftpd.conf에서 userlist_enable, userlist_file 확인
+        # userlist_enable=YES만으로는 접근 제어로 인정하지 않고, 실제 리스트
+        # 파일에 유효 항목(주석/공백 제외)이 있어야 설정된 것으로 판정
         if grep -q "^userlist_enable=YES" "$vsftpd_conf" 2>/dev/null; then
-            access_configured=true
-            local userlist_file=$(grep "^userlist_file" "$vsftpd_conf" 2>/dev/null | awk '{print $2}' | head -1)
-            if [ -n "$userlist_file" ] && [ -f "$userlist_file" ]; then
-                local userlist_count=$(wc -l < "$userlist_file" 2>/dev/null)
-                access_details="${access_details}, ${userlist_file}에 ${userlist_count}개 사용자"
+            local userlist_file=$(grep "^userlist_file" "$vsftpd_conf" 2>/dev/null | awk -F= '{print $2}' | head -1 | tr -d '[:space:]')
+            if [ -z "$userlist_file" ]; then
+                # vsftpd 기본 리스트 파일 경로
+                if [ -f /etc/vsftpd.user_list ]; then
+                    userlist_file="/etc/vsftpd.user_list"
+                elif [ -f /etc/vsftpd/user_list ]; then
+                    userlist_file="/etc/vsftpd/user_list"
+                fi
             fi
-            config_files="${config_files}${vsftpd_conf} "
+            if [ -n "$userlist_file" ] && [ -f "$userlist_file" ]; then
+                local userlist_count=$(grep -vcE '^[[:space:]]*#|^[[:space:]]*$' "$userlist_file" 2>/dev/null || true)
+                if [ "$userlist_count" -gt 0 ] 2>/dev/null; then
+                    access_configured=true
+                    access_details="${access_details}, ${userlist_file}에 ${userlist_count}개 사용자"
+                    config_files="${config_files}${vsftpd_conf} "
+                fi
+            fi
         fi
     fi
 

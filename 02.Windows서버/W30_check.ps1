@@ -48,8 +48,8 @@ try {
             if ($prop.Name -notmatch '^PS') {
                 $allCommunities += "$($prop.Name) (권한: $($prop.Value))"
 
-                # 기본 Community String 확인 (public, private, write, read)
-                if ($prop.Name -match 'public|private|write|read' -and $prop.Value -gt 0) {
+                # 기본 Community String 확인 (오라클 기준: public, private 정확 일치)
+                if ($prop.Name -match '^(public|private)$' -and $prop.Value -gt 0) {
                     $hasWeakCommunity = $true
                     $weakCommunities += $prop.Name
                 }

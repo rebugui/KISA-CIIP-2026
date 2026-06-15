@@ -50,7 +50,7 @@ diagnose() {
     if [ -f "$equiv" ]; then
         local equiv_owner=$(stat -c "%U" "$equiv" 2>/dev/null || echo "unknown")
         local equiv_perm=$(stat -c "%a" "$equiv" 2>/dev/null || echo "000")
-        local equiv_has_plus=$(grep -vE '^[[:space:]]*#' "$equiv" 2>/dev/null | grep -E '(^|[[:space:]])\+([[:space:]]|$)' || true)
+        local equiv_has_plus=$(grep -vE '^[[:space:]]*#' "$equiv" 2>/dev/null | grep -F '+' || true)
 
         evidence="${evidence}/etc/hosts.equiv (Owner:${equiv_owner}, Perm:${equiv_perm})"
 
@@ -90,7 +90,7 @@ diagnose() {
         if [ -f "$rhosts_file" ]; then
             local rhosts_owner=$(stat -c "%U" "$rhosts_file" 2>/dev/null || echo "unknown")
             local rhosts_perm=$(stat -c "%a" "$rhosts_file" 2>/dev/null || echo "000")
-            local rhosts_has_plus=$(grep -vE '^[[:space:]]*#' "$rhosts_file" 2>/dev/null | grep -E '(^|[[:space:]])\+([[:space:]]|$)' || true)
+            local rhosts_has_plus=$(grep -vE '^[[:space:]]*#' "$rhosts_file" 2>/dev/null | grep -F '+' || true)
 
             evidence="${evidence}${rhosts_file} (Owner:${rhosts_owner}, Perm:${rhosts_perm})"
 

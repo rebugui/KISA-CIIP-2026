@@ -85,8 +85,8 @@ diagnose() {
         local file_perms=$(perl -e '@s=stat(shift); printf "%04o", $s[2] & 07777' "$target_file" 2>/dev/null || echo "0000")
         local file_owner=$(echo "$file_info" | awk '{print $3}')
 
-        # 소유자 및 권한 확인
-        if [ "$file_owner" = "root" ] && [ "$file_perms" = "0644" ]; then
+        # 소유자 및 권한 확인 (소유자 root + 권한 644 이하)
+        if [ "$file_owner" = "root" ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#644 & 07777 ))" -eq 0 ]; then
             hosts_secure=true
             details="/etc/hosts - 권한: $file_perms, 소유자: $file_owner"
         else

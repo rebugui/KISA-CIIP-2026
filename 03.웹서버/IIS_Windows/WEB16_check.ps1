@@ -29,54 +29,96 @@ Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
     # IIS Server Header 및 Version 정보 확인
+    # 주의: Server 헤더는 web.config의 customHeaders 외에도 여러 방법으로 제거할 수 있다.
+    #  - system.webServer/security/requestFiltering @removeServerHeader="true" (IIS 10/2016+)
+    #  - URL-Rewrite outboundRules 의 RESPONSE_SERVER 제거 규칙
+    #  - 레지스트리 HKLM\SYSTEM\...\HTTP\Parameters DisableServerHeader (서버 전역)
+    # 실제 응답 헤더를 직접 읽지 않는 한, 위 정적 설정 어디에도 제거 근거가 없을 때
+    # "노출됨"이라고 단정할 수 없으므로 해당(증명 불가) 경우는 VULNERABLE이 아닌
+    # MANUAL로 분류한다. (unknowable -> MANUAL, 오탐 방지)
     $sites = Get-Website
-    $serverHeaderExposed = $false
     $siteInfo = @()
+    $headerRemovedCount = 0
+    $headerUnknownCount = 0
+
+    # 서버 전역 레지스트리 제거 설정(있으면 모든 사이트에 적용)
+    $registryHeaderRemoved = $false
+    try {
+        $httpParams = "HKLM:\SYSTEM\CurrentControlSet\Services\HTTP\Parameters"
+        $disableHeader = (Get-ItemProperty -Path $httpParams -Name "DisableServerHeader" -ErrorAction SilentlyContinue).DisableServerHeader
+        if ($null -ne $disableHeader -and [int]$disableHeader -ge 1) {
+            $registryHeaderRemoved = $true
+        }
+    } catch {
+        $registryHeaderRemoved = $false
+    }
 
     foreach ($site in $sites) {
         $siteName = $site.Name
         $path = $site.PhysicalPath
+        $serverHeaderRemoved = $registryHeaderRemoved
 
-        # web.config에서 customHeaders 확인
+        # web.config에서 제거 근거 확인 (customHeaders / requestFiltering / outboundRules)
         $webConfig = Join-Path $path "web.config"
-        if (Test-Path $webConfig) {
+        if (-not $serverHeaderRemoved -and (Test-Path $webConfig)) {
             [xml]$config = Get-Content $webConfig
-            $httpProtocol = $config.configuration.'system.webServer'.httpProtocol
+            $systemWebServer = $config.configuration.'system.webServer'
+
+            # 1) httpProtocol/customHeaders 에서 Server 값 제거
+            $httpProtocol = $systemWebServer.httpProtocol
             if ($httpProtocol) {
-                $serverHeaderRemoved = $false
                 foreach ($header in $httpProtocol.customHeaders.Collection) {
                     if ($header.name -eq "Server" -and $header.value -eq "") {
                         $serverHeaderRemoved = $true
                         break
                     }
                 }
-                if (-not $serverHeaderRemoved) {
-                    $serverHeaderExposed = $true
-                    $siteInfo += "Site: $siteName, Server Header: Exposed"
-                }
-            } else {
-                $serverHeaderExposed = $true
-                $siteInfo += "Site: $siteName, Server Header: Exposed (default)"
             }
+
+            # 2) security/requestFiltering @removeServerHeader="true"
+            if (-not $serverHeaderRemoved) {
+                $removeServerHeader = $systemWebServer.security.requestFiltering.removeServerHeader
+                if ($removeServerHeader -and $removeServerHeader.ToString().ToLower() -eq "true") {
+                    $serverHeaderRemoved = $true
+                }
+            }
+
+            # 3) rewrite/outboundRules 의 RESPONSE_SERVER 제거 규칙
+            if (-not $serverHeaderRemoved) {
+                foreach ($rule in $systemWebServer.rewrite.outboundRules.rule) {
+                    if ($rule.match.serverVariable -and $rule.match.serverVariable.ToString().ToUpper() -eq "RESPONSE_SERVER" -and $rule.action.value -eq "") {
+                        $serverHeaderRemoved = $true
+                        break
+                    }
+                }
+            }
+        }
+
+        if ($serverHeaderRemoved) {
+            $headerRemovedCount++
+            $siteInfo += "Site: $siteName, Server Header: Removed"
         } else {
-            $serverHeaderExposed = $true
-            $siteInfo += "Site: $siteName, Server Header: Exposed (no config)"
+            # 정적 설정에서 제거 근거를 찾지 못함 => 실제 노출 여부는 응답 헤더를
+            # 직접 확인해야 하므로 증명 불가(MANUAL) 상태로 분류
+            $headerUnknownCount++
+            $siteInfo += "Site: $siteName, Server Header: Removal not confirmed in static config (manual verification required)"
         }
     }
 
     # URL Rewrite 모듈 설치 확인
     $rewriteInstalled = Get-WebModule -Name "RewriteModule" -ErrorAction SilentlyContinue
 
-    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/httpProtocol/customHeaders'"
+    $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/httpProtocol/customHeaders'; Get-WebConfiguration -Filter '/system.webServer/security/requestFiltering' @removeServerHeader; Get-WebConfiguration -Filter '/system.webServer/rewrite/outboundRules'; Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\HTTP\Parameters' -Name DisableServerHeader"
 
-    if ($serverHeaderExposed) {
-        $finalResult = "VULNERABLE"
-        $summary = "Server 헤더 정보가 노출되고 있습니다: " + ($siteInfo -join ", ")
-        $status = "취약"
+    if ($headerUnknownCount -gt 0) {
+        # 일부 사이트에서 정적 설정만으로 제거 여부를 단정할 수 없음 -> 수동 확인 필요
+        $finalResult = "MANUAL"
+        $summary = "정적 설정(customHeaders/requestFiltering/outboundRules/레지스트리)에서 Server 헤더 제거 근거를 확인하지 못한 사이트가 있습니다. HTTP 응답 헤더를 직접 확인하여 노출 여부를 판단하십시오: " + ($siteInfo -join ", ")
+        $status = "수동진단"
         $commandOutput = $siteInfo -join "`n"
     } else {
         $finalResult = "GOOD"
-        $summary = "Server 헤더 정보가 제한되어 있습니다. (보안 권고사항 준수)"
+        $summary = "모든 사이트에서 Server 헤더 정보가 제한되어 있습니다. (보안 권고사항 준수)"
         $status = "양호"
         $commandOutput = "Server Header: Removed or restricted on all sites"
     }

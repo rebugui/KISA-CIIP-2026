@@ -84,8 +84,8 @@ diagnose() {
             reasons="${reasons}권한(${perms:-확인불가}) 600 초과; "
         fi
         if [ -r "$path" ]; then
-            # 주석이 아닌 행에서 '+' 토큰을 위치 무관하게 탐지 (예: 'trustedhost +')
-            if grep -vE '^[[:space:]]*#' "$path" 2>/dev/null | grep -E '(^|[[:space:]])\+([[:space:]]|$)' >/dev/null 2>&1; then
+            # 주석이 아닌 행에서 '+' 설정을 위치 무관하게 탐지 (++, +<사용자>, <호스트>+, +@netgroup 등 모든 형태)
+            if grep -vE '^[[:space:]]*#' "$path" 2>/dev/null | grep -F '+' >/dev/null 2>&1; then
                 reasons="${reasons}'+' 설정 포함; "
             fi
         else

@@ -83,7 +83,8 @@ diagnose() {
         for sudoers_file in /etc/sudoers /etc/sudoers.d/*; do
             if [ -f "$sudoers_file" ]; then
                 local perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$sudoers_file" 2>/dev/null)
-                local owner=$(perl -e '$uid=(stat(shift))[4]; print getpwuid($uid).":"; $gid=(stat(shift))[5]; print getgrgid($gid)' "$sudoers_file" "$sudoers_file" 2>/dev/null)
+                local owner=$(perl -e 'print +(getpwuid((stat shift)[4]))[0]' "$sudoers_file" 2>/dev/null || echo "unknown")
+                local group=$(perl -e 'print +(getgrgid((stat shift)[5]))[0]' "$sudoers_file" 2>/dev/null || echo "unknown")
 
                 # 권한이 640 초과인지 확인 (640을 넘는 비트가 있으면 취약)
                 if ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & ~8#640 & 07777 ))" -ne 0 ] 2>/dev/null; then
@@ -91,9 +92,10 @@ diagnose() {
                     issue_details="${issue_details}${sudoers_file} 권한 ${perms} (640 이하 권장), "
                 fi
 
-                if [ "$owner" != "root:root" ]; then
+                # 판단 기준은 소유자 root (그룹은 증적용으로만 표기)
+                if [ "$owner" != "root" ]; then
                     sudoers_issues=true
-                    issue_details="${issue_details}${sudoers_file} 소유자 ${owner} (root:root 권장), "
+                    issue_details="${issue_details}${sudoers_file} 소유자 ${owner}:${group} (root 권장), "
                 fi
             fi
         done || true
@@ -146,7 +148,7 @@ diagnose() {
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="sudoers 설정이 안전하게 구성됨 (권한 0440, root:root)"
+            inspection_summary="sudoers 설정이 안전하게 구성됨 (소유자 root, 권한 640 이하)"
             local sudoers_check=$(ls -la /etc/sudoers 2>/dev/null | head -3; perl -e 'printf "%04o\n", (stat("/etc/sudoers"))[2] & 07777' 2>/dev/null)
             command_result="sudoers secure\n${sudoers_check}"
             command_executed="perl -e 'printf \"%04o\\n\", (stat(\"/etc/sudoers\"))[2] & 07777' 2>/dev/null"

@@ -82,7 +82,7 @@ diagnose() {
         local owner_user=$(stat -c "%U" "/etc/hosts.equiv" 2>/dev/null)
         local size=$(stat -c "%s" "/etc/hosts.equiv" 2>/dev/null)
         # 주석(#)을 제외한 라인에서 '+' 단독 설정(++/+ 사용자/호스트+ 등) 존재 여부
-        local has_plus=$(grep -vE '^[[:space:]]*#' "/etc/hosts.equiv" 2>/dev/null | grep -E '(^|[[:space:]])\+' || true)
+        local has_plus=$(grep -vE '^[[:space:]]*#' "/etc/hosts.equiv" 2>/dev/null | grep -E '(^|[[:space:]])\+|\+([[:space:]]|$)' || true)
         local equiv_issue=""
 
         # 소유자가 root가 아닌 경우
@@ -121,7 +121,7 @@ diagnose() {
                 local owner=$(stat -c "%U" "$rhosts_path" 2>/dev/null)
                 local size=$(stat -c "%s" "$rhosts_path" 2>/dev/null)
                 # 주석(#)을 제외한 라인에서 '+' 설정 존재 여부
-                local has_plus=$(grep -vE '^[[:space:]]*#' "$rhosts_path" 2>/dev/null | grep -E '(^|[[:space:]])\+' || true)
+                local has_plus=$(grep -vE '^[[:space:]]*#' "$rhosts_path" 2>/dev/null | grep -E '(^|[[:space:]])\+|\+([[:space:]]|$)' || true)
                 local rhosts_issue=""
 
                 # 소유자가 해당 계정 또는 root가 아닌 경우

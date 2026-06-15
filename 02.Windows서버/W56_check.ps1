@@ -35,24 +35,39 @@ if (-not (Test-RunallMode)) {
 
 # 1. Check SMB session timeout settings
 try {
-    $secedit = secedit /export /cfg "$env:TEMP\secedit.tmp" 2>&1
-    $content = Get-Content "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
-    $enableForcedLogoff = 0
-    $autoDisconnect = 999999
+    # EnableForcedLogOff, AutoDisconnect 은 LanmanServer\Parameters 레지스트리 값(REG_DWORD)이며
+    # secedit [System Access] 에 존재하지 않으므로 레지스트리에서 직접 조회함 (분 단위)
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters"
+    $regProps = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
 
-    if ($content -match 'EnableForcedLogoff\s*=\s*(\d+)') {
-        $enableForcedLogoff = [int]$matches[1]
+    $enableForcedLogoff = $null
+    $autoDisconnect = $null
+    if ($null -ne $regProps) {
+        if ($null -ne $regProps.EnableForcedLogOff) {
+            $enableForcedLogoff = [int]$regProps.EnableForcedLogOff
+        }
+        if ($null -ne $regProps.AutoDisconnect) {
+            $autoDisconnect = [int]$regProps.AutoDisconnect
+        }
     }
 
-    # 참고: secedit에서 Autodisconnect 값은 분 단위로 보고됨
-    # 레지스트리 HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters\AutoDisconnect도 분 단위
-    if ($content -match 'Autodisconnect\s*=\s*(\d+)') {
-        $autoDisconnect = [int]$matches[1]
+    $commandExecuted = "HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters 의 EnableForcedLogOff, AutoDisconnect 값 확인"
+    $forcedLogoffStatus = switch ($enableForcedLogoff) {
+        1 { "사용" }
+        0 { "사용안함" }
+        $null { "설정값 없음" }
+        default { "알 수 없음 ($enableForcedLogoff)" }
     }
+    $forcedLogoffDisplay = if ($null -eq $enableForcedLogoff) { "미설정" } else { $enableForcedLogoff }
+    $autoDisconnectDisplay = if ($null -eq $autoDisconnect) { "미설정" } else { "$autoDisconnect 분" }
+    $commandOutput = "EnableForcedLogOff=$forcedLogoffDisplay ($forcedLogoffStatus), AutoDisconnect=$autoDisconnectDisplay"
 
-    Remove-Item "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
-
-    if ($enableForcedLogoff -eq 1 -and $autoDisconnect -le 15) {
+    if ($null -eq $enableForcedLogoff -or $null -eq $autoDisconnect) {
+        # 레지스트리 값이 없거나 읽을 수 없는 경우 정적으로 양호/취약을 단정할 수 없으므로 수동 진단
+        $finalResult = "MANUAL"
+        $summary = "SMB 세션 중단 관련 레지스트리 값(EnableForcedLogOff/AutoDisconnect)을 확인할 수 없어 수동 진단 필요"
+        $status = "수동진단"
+    } elseif ($enableForcedLogoff -eq 1 -and $autoDisconnect -le 15) {
         $finalResult = "GOOD"
         $summary = "SMB 세션 타임아웃이 적절하게 설정됨 (15분 이하)"
         $status = "양호"
@@ -62,19 +77,11 @@ try {
         $status = "취약"
     }
 
-    $commandExecuted = "secedit /export 및 EnableForcedLogoff, Autodisconnect 값 확인"
-    $forcedLogoffStatus = switch ($enableForcedLogoff) {
-        1 { "사용" }
-        0 { "사용안함" }
-        default { "알 수 없음 ($enableForcedLogoff)" }
-    }
-    $commandOutput = "EnableForcedLogoff=$enableForcedLogoff ($forcedLogoffStatus), Autodisconnect=$autoDisconnect 분"
-
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "secedit /export 및 EnableForcedLogoff, Autodisconnect 값 확인"
+    $commandExecuted = "HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters 의 EnableForcedLogOff, AutoDisconnect 값 확인"
     $commandOutput = "진단 실패: $_"
 }
 

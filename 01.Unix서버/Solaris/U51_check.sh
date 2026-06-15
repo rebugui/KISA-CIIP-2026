@@ -79,9 +79,10 @@ diagnose() {
             dns_configured=true
             dns_info="${dns_info}${conf_file} 확인:${newline}"
 
-            # allow-update 설정 확인 (주석 제거 후 멀티라인 블록 파싱)
+            # allow-update 설정 확인 (주석 제거 → 평탄화 → 블록 전체('}'까지) 추출)
+            # sed 범위(/allow-update/,/;/)는 첫 ';' 줄에서 끊겨 멀티라인 블록 내 any를 놓치므로 사용 금지
             local allow_update_block=""
-            allow_update_block=$(sed -e 's://.*$::' -e 's:#.*$::' "$conf_file" 2>/dev/null | sed -n '/allow-update/,/;/p' | tr '\n' ' ' || true)
+            allow_update_block=$(sed -e 's://.*$::' -e 's:#.*$::' "$conf_file" 2>/dev/null | tr -s '[:space:]' ' ' | grep -oiE 'allow-update[^{};]*\{[^}]*' || true)
 
             if echo "$allow_update_block" | grep -qi "allow-update"; then
                 dns_info="${dns_info}allow-update 설정: ${allow_update_block}${newline}"

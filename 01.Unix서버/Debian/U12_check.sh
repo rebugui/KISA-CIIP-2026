@@ -65,7 +65,7 @@ diagnose() {
     # 설정 파일에서 TMOUT 값 추출 (/etc/profile, /etc/bash.bashrc, /etc/profile.d/)
     for cfg_file in /etc/profile /etc/bash.bashrc; do
         if [ -f "$cfg_file" ]; then
-            local file_tmout=$(grep -E "^\s*(export\s+)?TMOUT=" "$cfg_file" 2>/dev/null | tail -1 | sed -E 's/.*TMOUT=([0-9]+).*/\1/' || echo "")
+            local file_tmout=$(grep -E "^\s*(export\s+)?TMOUT=" "$cfg_file" 2>/dev/null | tail -1 | sed -E 's/^[^=]*=//; s/[[:space:];].*$//' | tr -d "[:space:]'\"" || echo "")
             if [ -n "$file_tmout" ]; then
                 tmout_value="$file_tmout"
                 raw_output="${raw_output}[${cfg_file}] TMOUT=${file_tmout}${newline}"
@@ -77,7 +77,7 @@ diagnose() {
     if [ -d /etc/profile.d ]; then
         for pfile in /etc/profile.d/*.sh; do
             [ -f "$pfile" ] || continue
-            local file_tmout=$(grep -E "^\s*(export\s+)?TMOUT=" "$pfile" 2>/dev/null | tail -1 | sed -E 's/.*TMOUT=([0-9]+).*/\1/' || echo "")
+            local file_tmout=$(grep -E "^\s*(export\s+)?TMOUT=" "$pfile" 2>/dev/null | tail -1 | sed -E 's/^[^=]*=//; s/[[:space:];].*$//' | tr -d "[:space:]'\"" || echo "")
             if [ -n "$file_tmout" ]; then
                 tmout_value="$file_tmout"
                 raw_output="${raw_output}[${pfile}] TMOUT=${file_tmout}${newline}"
@@ -100,7 +100,7 @@ diagnose() {
 
     # 최종 판정
     if [ -n "$tmout_value" ]; then
-        if [ "$tmout_value" -ge 1 ] && [ "$tmout_value" -le 600 ] 2>/dev/null; then
+        if [[ "$tmout_value" =~ ^[0-9]+$ ]] && [ "$tmout_value" -ge 1 ] && [ "$tmout_value" -le 600 ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="세션 종료시간이 적절히 설정됨 (TMOUT=${tmout_value}초, 1~600초)"

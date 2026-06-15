@@ -295,7 +295,12 @@ invoke_jeus_linux_check() {
             fi
             ;;
         WEB-08)
-            lines="$(jeus_config_grep 'max-file-size|max-request-size|maxPostSize|multipart-config' || true)"
+            # Use the comment-stripped grep so a multipart/upload limit disabled via a
+            # MULTI-LINE <!-- ... --> comment (delimiters on their own lines) is not counted
+            # as a real limit. jeus_config_grep alone returns only the inner matching lines,
+            # so the standalone <!-- / --> lines never enter its set and the single-line sed
+            # below cannot remove them (same multi-line blind spot fixed for WEB-22).
+            lines="$(jeus_config_grep_stripped 'max-file-size|max-request-size|maxPostSize|multipart-config' || true)"
             # Strip XML/inline comments so commented-out directives do not count, then
             # require a real positive numeric limit (a size directive followed by a
             # non-zero integer). A lone <multipart-config> tag or <...>0<...> is not a limit.
@@ -331,7 +336,12 @@ invoke_jeus_linux_check() {
             [ -n "${lines}" ] && jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS web root/path evidence was found; confirm service path is separated from install/system directories." "${lines}" "Inspect JEUS web path settings" || jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS web service path evidence was not conclusive." "$(jeus_evidence)" "Inspect JEUS web path settings"
             ;;
         WEB-12)
-            lines="$(jeus_config_grep '<aliasing>|<alias>|<alias-name>|<real-path>' || true)"
+            # Use the comment-stripped grep so an aliasing/link block disabled via a
+            # MULTI-LINE <!-- ... --> comment (delimiters on their own lines) is not counted.
+            # GOOD per the guideline = links not allowed; a commented-out (inactive) alias
+            # block means aliasing is NOT in effect and must NOT drive VULNERABLE. Only an
+            # active aliasing element should flag (same multi-line fix used for WEB-22).
+            lines="$(jeus_config_grep_stripped '<aliasing>|<alias>|<alias-name>|<real-path>' || true)"
             [ -n "${lines}" ] && jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS alias/link mapping evidence was found." "${lines}" "Inspect JEUS aliasing settings" || jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS alias/link mapping evidence was found in inspected configs." "$(jeus_evidence)" "Inspect JEUS aliasing settings"
             ;;
         WEB-13)

@@ -90,9 +90,10 @@ diagnose() {
                     issue_details="${issue_details}${sudoers_file} 권한 ${perms} (640 이하 권장), "
                 fi
 
-                if [ "$owner" != "root:root" ]; then
+                # 판정 기준은 소유자(user)=root만 적용 (그룹은 참고용, 가이드라인 범위 외)
+                if [ "${owner%%:*}" != "root" ]; then
                     sudoers_issues=true
-                    issue_details="${issue_details}${sudoers_file} 소유자 ${owner} (root:root 권장), "
+                    issue_details="${issue_details}${sudoers_file} 소유자 ${owner} (소유자 root 권장), "
                 fi
             fi
         done || true

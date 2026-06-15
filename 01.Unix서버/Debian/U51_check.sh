@@ -73,9 +73,9 @@ diagnose() {
             dns_configured=true
             dns_info="${dns_info}${conf_file} 확인:${newline}"
 
-            # allow-update 설정 확인 (주석 제거 후 다중행 블록을 한 줄로 평탄화)
-            local au_flat=$(grep -vE '^[[:space:]]*(//|#)' "$conf_file" 2>/dev/null | sed -n '/allow-update/,/;/p' | tr '\n' ' ' || echo "")
-            local au_blocks=$(echo "$au_flat" | grep -oiE 'allow-update[[:space:]]*\{[^};]*' || echo "")
+            # allow-update 설정 확인 (주석 제거 → 평탄화 → 블록 전체('}'까지) 추출)
+            # sed 범위(/allow-update/,/;/)는 첫 ';' 줄에서 끊겨 멀티라인 블록 내 any를 놓치므로 사용 금지
+            local au_blocks=$(sed -e 's://.*$::' -e 's:#.*$::' "$conf_file" 2>/dev/null | tr -s '[:space:]' ' ' | grep -oiE 'allow-update[^{};]*\{[^}]*' || echo "")
             if [ -n "$au_blocks" ]; then
                 dns_info="${dns_info}${au_blocks}${newline}"
 

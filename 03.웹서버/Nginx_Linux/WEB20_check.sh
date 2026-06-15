@@ -85,10 +85,14 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
+    # SSL 설정 위치. 확장자 없는 vhost(예: 데비안/우분투의 sites-enabled/default
+    # 심볼릭 링크)에 SSL이 설정된 경우도 탐지되도록 확장자 없는 디렉터리 글롭을 함께 사용한다.
     local nginx_conf_locations=(
         "/etc/nginx/nginx.conf"
         "/etc/nginx/conf.d/*.conf"
+        "/etc/nginx/conf.d/*"
         "/etc/nginx/sites-enabled/*.conf"
+        "/etc/nginx/sites-enabled/*"
     )
 
     local ssl_settings=""
@@ -143,11 +147,13 @@ diagnose() {
         status="양호"
         inspection_summary="HTTPS(SSL/TLS)가 활성화되어 있어 SSL/TLS 활성화 기준을 충족합니다. (참고: ssl_protocols에 레거시 프로토콜(SSLv2/SSLv3/TLSv1/TLSv1.1)이 포함되어 있어 TLSv1.2 TLSv1.3 만 허용하도록 강화 권고) 설정값:${protocol_settings}"
     elif [ "${has_ssl_protocols}" != true ]; then
-        # SSL은 활성화되었으나 ssl_protocols 미지정. Nginx 기본값(1.18 이전)은 TLSv1/TLSv1.1을 포함하므로
-        # 약한 프로토콜 차단 여부를 정적으로 단정할 수 없어 수동진단으로 분류한다.
-        diagnosis_result="MANUAL"
-        status="수동진단"
-        inspection_summary="SSL/TLS는 활성화되어 있으나 ssl_protocols 지시자가 명시되어 있지 않습니다. Nginx 기본 프로토콜에는 TLSv1/TLSv1.1이 포함될 수 있으므로(버전에 따라 상이), 사용 중인 Nginx 버전의 기본 프로토콜과 실제 허용 프로토콜을 수동으로 확인하고 ssl_protocols TLSv1.2 TLSv1.3; 명시를 권장합니다."
+        # WEB-20 판단 기준은 SSL/TLS 활성화 여부(활성화↔비활성화)로 한정됨.
+        # SSL은 활성화(인증서+443/ssl 리스너 존재)되어 있으므로 합격 기준을 충족하여 양호로 판단한다.
+        # ssl_protocols 미지정에 따른 기본 프로토콜(버전별 TLSv1/TLSv1.1 포함 가능) 강화는
+        # 본 항목의 합격 기준이 아니라 권고 예시이므로 참고 안내로만 제시한다.
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="HTTPS(SSL/TLS)가 활성화되어 있어 SSL/TLS 활성화 기준을 충족합니다. (참고: ssl_protocols 지시자가 명시되어 있지 않아 Nginx 버전별 기본 프로토콜에 TLSv1/TLSv1.1이 포함될 수 있으므로, ssl_protocols TLSv1.2 TLSv1.3; 명시로 강화 권고)"
     else
         # ssl_protocols가 명시되어 있고 약한 프로토콜이 없음(현대 프로토콜 전용) → 양호
         diagnosis_result="GOOD"

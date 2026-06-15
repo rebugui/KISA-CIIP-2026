@@ -67,7 +67,7 @@ diagnose() {
 
     # 1) /etc/profile에서 TMOUT 설정 확인 (AIX grep은 -oE 미지원 → sed 사용)
     if [ -f /etc/profile ]; then
-        tmout_value=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)*TMOUT=\([0-9]*\).*/\2/p' /etc/profile 2>/dev/null | tail -1 || true)
+        tmout_value=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)*TMOUT=["'\'']*\([0-9][0-9]*\).*/\2/p' /etc/profile 2>/dev/null | tail -1 || true)
         if [ -n "$tmout_value" ]; then
             config_details="/etc/profile TMOUT: ${tmout_value}초"
         fi
@@ -87,7 +87,7 @@ diagnose() {
     # AIX에서는 사용자별 홈 디렉터리의 .profile 확인
     if [ -n "${HOME:-}" ] && [ -f "$HOME/.profile" ]; then
         local user_tmout=""
-        user_tmout=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)*TMOUT=\([0-9]*\).*/\2/p' "$HOME/.profile" 2>/dev/null | tail -1 || true)
+        user_tmout=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)*TMOUT=["'\'']*\([0-9][0-9]*\).*/\2/p' "$HOME/.profile" 2>/dev/null | tail -1 || true)
         if [ -n "$user_tmout" ]; then
             if [ -n "$config_details" ]; then
                 config_details="${config_details}, 사용자 .profile TMOUT: ${user_tmout}초"

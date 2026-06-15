@@ -11,7 +11,7 @@
 # @Platform    : Apache_Linux
 # @Severity    : 상
 # @Title       : 주기적 보안 패치 및 벤더 권고 사항 적용
-# @Description : XSS(Cross-Site Scripting) 공격으로부터 보호하기 위해 X-XSS-Protection 헤더를 설정합니다. 브라우저의 내장 XSS 필터를 활성화하여 보안을 강화해야 합니다.
+# @Description : 주기적인 최신 보안 패치를 통해 보안성 및 시스템 안정성을 확보합니다. 'httpd -v'로 현재 버전을 확인하여 벤더/ASF 권고 최신 버전과 비교하고, 주기적인 패치 적용 정책 수립 여부를 점검해야 합니다.
 # @Reference   : 2026 KISA 주요정보통신기반시설 기술적 취약점 분석·평가 상세 가이드
 # ============================================================================
 
@@ -42,24 +42,10 @@ diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
     local diagnosis_result="MANUAL"
     local status="수동진단"
-    local inspection_summary="Apache 서버의 X-XSS-Protection 헤더 설정 설정을 수동으로 확인해야 합니다. 웹 서버 설정 파일에서 해당 헤더 또는 메서드 제한을 검토하세요."
+    local inspection_summary="Apache 보안 패치 적용 상태를 수동으로 확인해야 합니다. 'httpd -v'(또는 'apachectl -v')로 현재 버전을 확인하여 벤더/ASF 보안 권고의 최신(또는 취약점이 존재하지 않는) 버전과 비교하고, 주기적인 패치 적용 정책 수립 및 이행 여부를 점검하세요."
     local command_result=""
     local command_executed=""
-    
-    if [ 25 -eq 23 ]; then
-        # HTTP Methods restriction
-        inspection_summary="HTTP 메서드 제한 설정을 확인하세요. Apache: LimitExcept, Nginx: limit_except, IIS: Request Filtering, Tomcat: security-constraint"
-    elif [ 25 -eq 24 ]; then
-        # X-Frame-Options
-        inspection_summary="X-Frame-Options 헤더 설정을 확인하세요. Apache: Header always set X-Frame-Options DENY, Nginx: add_header X-Frame-Options DENY"
-    elif [ 25 -eq 25 ]; then
-        # X-XSS-Protection
-        inspection_summary="X-XSS-Protection 헤더 설정을 확인하세요. Apache/Nginx: add_header X-XSS-Protection '1; mode=block'"
-    elif [ 25 -eq 26 ]; then
-        # X-Content-Type-Options
-        inspection_summary="X-Content-Type-Options 헤더 설정을 확인하세요. Apache/Nginx: add_header X-Content-Type-Options nosniff"
-    fi
-    
+
     # Run-all 모드 확인
     save_dual_result \
         "${ITEM_ID}" \

@@ -86,17 +86,19 @@ diagnose() {
         for sudoers_file in /etc/sudoers /etc/sudoers.d/*; do
             if [ -f "$sudoers_file" ]; then
                 local perms=$(stat -c "%a" "$sudoers_file" 2>/dev/null)
-                local owner=$(stat -c "%U:%G" "$sudoers_file" 2>/dev/null)
+                local owner=$(stat -c "%U" "$sudoers_file" 2>/dev/null)
+                local group=$(stat -c "%G" "$sudoers_file" 2>/dev/null)
 
-                # 권한이 640 이하이고 소유자가 root:root인지 확인 (640을 넘는 비트가 있으면 취약)
+                # 권한이 640 이하이고 소유자가 root인지 확인 (640을 넘는 비트가 있으면 취약)
                 if ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & ~8#640 & 07777 ))" -ne 0 ] 2>/dev/null; then
                     sudoers_issues=true
                     issue_details="${issue_details}${sudoers_file} 권한 ${perms} (640 이하 권장), "
                 fi
 
-                if [ "$owner" != "root:root" ]; then
+                # 판단 기준은 소유자 root (그룹은 증적용으로만 표기)
+                if [ "$owner" != "root" ]; then
                     sudoers_issues=true
-                    issue_details="${issue_details}${sudoers_file} 소유자 ${owner} (root:root 권장), "
+                    issue_details="${issue_details}${sudoers_file} 소유자 ${owner}:${group} (root 권장), "
                 fi
             fi
         done || true
@@ -148,7 +150,8 @@ diagnose() {
             diagnosis_result="GOOD"
             status="양호"
             local sudoers_perm=$(stat -c "%a" /etc/sudoers 2>/dev/null || echo "확인불가")
-            inspection_summary="sudoers 설정이 안전하게 구성됨 (권한 ${sudoers_perm}, root:root)"
+            local sudoers_owner=$(stat -c "%U:%G" /etc/sudoers 2>/dev/null || echo "확인불가")
+            inspection_summary="sudoers 설정이 안전하게 구성됨 (권한 ${sudoers_perm}, 소유자 ${sudoers_owner})"
             command_result="${raw_output}"
             command_executed="stat -c '%a:%U:%G' /etc/sudoers 2>/dev/null"
         fi

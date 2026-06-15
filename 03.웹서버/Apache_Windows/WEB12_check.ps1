@@ -85,18 +85,23 @@ try {
             $evidence += "Matched disabling directives:"
             $evidence += $followDisabled
         }
-        else {
+        elseif ($followDisabled.Count -gt 0 -or $ownerMatch.Count -gt 0) {
             $finalResult = "GOOD"
             $status = "양호"
-            if ($followDisabled.Count -gt 0 -or $ownerMatch.Count -gt 0) {
-                $summary = "Apache symbolic link usage is restricted with -FollowSymLinks or SymLinksIfOwnerMatch."
-                $evidence += "Matched link restriction directives:"
-                $evidence += $followDisabled
-                $evidence += $ownerMatch
-            }
-            else {
-                $summary = "No active Options FollowSymLinks directive was found."
-            }
+            $summary = "Apache symbolic link usage is restricted with -FollowSymLinks or SymLinksIfOwnerMatch."
+            $evidence += "Matched link restriction directives:"
+            $evidence += $followDisabled
+            $evidence += $ownerMatch
+        }
+        else {
+            # No Options directive governs FollowSymLinks/All and none disables it.
+            # Apache's hard-coded per-directory default includes FollowSymLinks, which on Windows
+            # still governs NTFS symbolic link / junction traversal, so the compiled default may
+            # effectively allow link usage. Static config alone cannot prove the effective Options,
+            # so route to manual review (mirrors Linux WEB-12 compiled-default guard).
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "No Options directive governing FollowSymLinks/All was found. Apache's compiled per-directory default includes FollowSymLinks (which governs NTFS symbolic link/junction traversal on Windows), so verify the effective Options of each <Directory> block manually."
         }
 
         if ($aliasDirectives.Count -gt 0) {

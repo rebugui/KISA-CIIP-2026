@@ -39,16 +39,21 @@ try {
         $commandExecuted = "Get-Acl -Path '$logDir'"
 
         # 광범위 주체(일반 사용자 그룹) 판정 함수: BUILTIN\Users 를 제외하지 않음
-        # 대상: Everyone, BUILTIN\Users, Authenticated Users, Domain Users 등
-        $broadPrincipals = @("Everyone", "BUILTIN\Users", "Authenticated Users", "Users", "Domain Users")
+        # 대상: Everyone, BUILTIN\Users, Authenticated Users, Users, Guests, Domain Users 등
+        # 한국어 로케일 Windows에서는 Get-Acl 이 잘 알려진 SID 를 번역된 이름(예: Everyone -> '모든 사람')으로
+        # 반환하므로 영문 문자열 비교만으로는 누락된다. 따라서 SID 로 변환하여 well-known SID 를 비교하고,
+        # 변환 실패 시에만 영문 이름 정규식을 보조 수단으로 사용한다.
         function Test-BroadPrincipal {
-            param([string]$IdentityName)
-            foreach ($bp in $broadPrincipals) {
-                if ($IdentityName -like "*$bp*") {
-                    return $true
-                }
+            param([System.Security.Principal.IdentityReference]$Identity)
+
+            try {
+                $sid = $Identity.Translate([System.Security.Principal.SecurityIdentifier]).Value
             }
-            return $false
+            catch {
+                $sid = [string]$Identity
+            }
+
+            return ($sid -eq 'S-1-1-0') -or ($sid -eq 'S-1-5-11') -or ($sid -eq 'S-1-5-32-545') -or ($sid -eq 'S-1-5-32-546') -or ($sid -match '-513$') -or (([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|\bUsers\b|Guests|Domain Users')
         }
 
         # ACL 분석: 모든 규칙 검사 (BUILTIN 제외 필터 제거)
@@ -58,7 +63,7 @@ try {
             $type = $rule.AccessControlType
 
             # 광범위 주체에 Allow 권한(읽기 포함 모든 접근)이 있으면 취약
-            if ($type -eq "Allow" -and (Test-BroadPrincipal $identity)) {
+            if ($type -eq "Allow" -and (Test-BroadPrincipal $rule.IdentityReference)) {
                 $permissionIssues += "ID: $identity, 권한: $rights, 타입: $type"
             }
 
@@ -73,7 +78,7 @@ try {
             try {
                 $fileAcl = Get-Acl -Path $file.FullName
                 foreach ($fr in $fileAcl.Access) {
-                    if ($fr.AccessControlType -eq "Allow" -and (Test-BroadPrincipal $fr.IdentityReference.Value)) {
+                    if ($fr.AccessControlType -eq "Allow" -and (Test-BroadPrincipal $fr.IdentityReference)) {
                         $filePermissionDetails += "파일: $($file.Name), ID: $($fr.IdentityReference), 권한: $($fr.FileSystemRights)"
                     }
                 }

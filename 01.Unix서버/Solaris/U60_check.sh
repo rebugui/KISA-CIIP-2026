@@ -206,14 +206,18 @@ diagnose() {
             inspection_summary="SNMP 설정 파일(${unreadable_confs[*]})을 읽을 수 없어 Community String 복잡성 수동 확인 필요"
             command_result="${raw_output}"
             command_executed="grep -iE 'communit|com2sec' ${existing_confs[*]}"
-        else
+        elif [ -n "$community_values" ]; then
             diagnosis_result="GOOD"
             status="양호"
-            if [ -n "$community_values" ]; then
-                inspection_summary="SNMP Community String이 안전하게 설정됨 (기본값 미사용, 복잡성 충족)"
-            else
-                inspection_summary="SNMP Community String이 설정되지 않았거나 v3만 사용 중"
-            fi
+            inspection_summary="SNMP Community String이 안전하게 설정됨 (기본값 미사용, 복잡성 충족)"
+            command_result="${raw_output}"
+            command_executed="grep -iE 'communit|com2sec' ${existing_confs[*]}"
+        else
+            # Community 값 미추출(v3 전용 포함): snmpdx는 snmpdx.acl에 'communities =' 항목이 없으면
+            # 기본 community 'public'을 적용할 수 있고, v3 USM 사용자 비밀번호 복잡성은 정적으로 검증 불가 → 수동진단
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="Community String 미확인 - snmpdx 미설정 시 기본 public 적용 가능 / v3 USM 패스워드 복잡성 정적 확인 불가, 수동 점검 필요"
             command_result="${raw_output}"
             command_executed="grep -iE 'communit|com2sec' ${existing_confs[*]}"
         fi

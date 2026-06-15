@@ -57,7 +57,9 @@ try {
             if ([string]::IsNullOrWhiteSpace($fs)) { continue }
             $checkedAny = $true
             $volDetails += "$label : $fs"
-            if ($fs -match '^FAT') {
+            # NTFS 사용 여부를 점검(criteria_good: NTFS 파일 시스템). NTFS가 아닌 모든
+            # 고정 볼륨(FAT/FAT32/exFAT 등)은 ACL/소유권 부재로 비양호 처리한다.
+            if ($fs -notmatch '^NTFS$') {
                 $fatVolumes += "$label ($fs)"
             }
         }
@@ -71,7 +73,8 @@ try {
                 if ([string]::IsNullOrWhiteSpace($fs)) { continue }
                 $checkedAny = $true
                 $volDetails += "$label : $fs"
-                if ($fs -match '^FAT') {
+                # NTFS가 아닌 모든 고정 볼륨(FAT/FAT32/exFAT 등)을 비양호 처리한다.
+                if ($fs -notmatch '^NTFS$') {
                     $fatVolumes += "$label ($fs)"
                 }
             }
@@ -85,7 +88,7 @@ try {
         $commandOutput = "고정 볼륨 정보를 가져올 수 없음"
     } elseif ($fatVolumes.Count -gt 0) {
         $finalResult = "VULNERABLE"
-        $summary = "FAT 계열 파일 시스템을 사용하는 볼륨이 존재함: $($fatVolumes -join ', ')"
+        $summary = "NTFS가 아닌 파일 시스템(FAT/FAT32/exFAT 등)을 사용하는 볼륨이 존재함: $($fatVolumes -join ', ')"
         $status = "취약"
         $commandOutput = $volDetails -join "`n"
     } else {

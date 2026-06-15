@@ -109,13 +109,24 @@ diagnose() {
         done
     done
     # 설정에서 못 읽었을 때를 대비한 기본 웹 루트 후보(잘 알려진 경로)
-    local default_roots=("/var/www/html" "/usr/local/apache2/htdocs" "/var/www")
+    # 주의: 표준 DocumentRoot의 형제 디렉터리(예: /var/www/uploads)를 웹 루트 내부로
+    #       오판하지 않도록 상위 경로 '/var/www'는 포함하지 않는다.
+    local default_roots=("/var/www/html" "/usr/local/apache2/htdocs")
 
     is_inside_web_root() {
         # $1 업로드 경로가 알려진/기본 웹 루트의 내부(또는 동일)인지 판별
+        # DocumentRoot를 설정에서 확인한 경우(web_roots 비어있지 않음)에는 실제
+        # DocumentRoot만으로 판별하고, 기본 후보(default_roots)는 설정을 읽지 못한
+        # 폴백 상황(web_roots 비어있음)에서만 사용한다.
         local up="${1%/}"
         local root
-        for root in "${web_roots[@]}" "${default_roots[@]}"; do
+        local -a roots_to_check=()
+        if [ "${#web_roots[@]}" -gt 0 ]; then
+            roots_to_check=("${web_roots[@]}")
+        else
+            roots_to_check=("${default_roots[@]}")
+        fi
+        for root in "${roots_to_check[@]}"; do
             [ -n "${root}" ] || continue
             if [ "${up}" = "${root}" ] || case "${up}/" in "${root}/"*) true;; *) false;; esac; then
                 printf '%s' "${root}"

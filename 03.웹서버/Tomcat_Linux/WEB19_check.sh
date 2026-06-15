@@ -87,10 +87,12 @@ diagnose() {
     )
 
     local ssi_config=""
+    local config_found=false
 
     for xml_pattern in "${web_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
+                config_found=true
                 # SSI Servlet 및 SSIFilter 확인 (활성 설정만; 주석 제외)
                 # 가이드라인 Step 1: SSIServlet(<servlet-name>SSIServlet</servlet-name>) 또는
                 # SSIFilter(<filter-name>SSIFilter</filter-name>) 모두 SSI 활성화 메커니즘
@@ -131,7 +133,11 @@ diagnose() {
     command_executed="awk '<!-- ... --> 주석 구간 제거' /etc/tomcat*/web.xml 2>/dev/null | grep -iE 'SSIServlet|SSIFilter|<servlet-name>\\s*ssi\\s*</servlet-name>|<filter-name>\\s*SSIFilter\\s*</filter-name>' | head -3"
     command_result="${ssi_config:-SSI Servlet/Filter not found or commented}"
 
-    if [ "${has_ssi}" = true ]; then
+    if [ "${config_found}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat web.xml을 찾을 수 없습니다. SSI 사용 설정이 활성화되어 있는지 수동으로 확인하세요."
+    elif [ "${has_ssi}" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="SSI Servlet이 활성화되어 있습니다. 코드 삽입 공격 위험으로 비활성화 권장."

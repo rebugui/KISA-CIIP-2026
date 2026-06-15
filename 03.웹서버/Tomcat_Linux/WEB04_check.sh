@@ -49,6 +49,7 @@ diagnose() {
     local command_executed=""
     local has_listings_true=false
     local listings_config=""
+    local listings_value=""
 
     # Tomcat 프로세스 확인
     if command -v pgrep >/dev/null; then
@@ -95,11 +96,28 @@ diagnose() {
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
                 found_file="${xml_file}"
-                # default servlet의 listings 설정 확인
-                listings_config=$(grep -A2 "<servlet-name>default</servlet-name>" "${xml_file}" 2>/dev/null | grep -B1 -A1 "<param-name>listings</param-name>" || echo "")
+                # default servlet의 listings init-param 값 확인
+                # 라인 윈도(-A2)는 listings 파라미터(<servlet-name>default</servlet-name> 아래
+                # 6~9줄)에 도달하지 못하므로, 파일 전체에서 공백/개행에 관대하게
+                # <param-name>listings</param-name> 다음의 <param-value>를 추출한다.
+                listings_value=$(awk '
+                    { line = line " " $0 }
+                    END {
+                        gsub(/\r/, "", line)
+                        gsub(/>[ \t]+</, "><", line)
+                        while (match(line, /<param-name>[ \t]*listings[ \t]*<\/param-name>[ \t]*<param-value>[ \t]*(true|false)[ \t]*<\/param-value>/)) {
+                            seg = substr(line, RSTART, RLENGTH)
+                            line = substr(line, RSTART + RLENGTH)
+                            if (seg ~ /<param-value>[ \t]*true[ \t]*<\/param-value>/) { print "true"; exit }
+                            val = "false"
+                        }
+                        if (val == "false") print "false"
+                    }
+                ' "${xml_file}" 2>/dev/null || echo "")
+                listings_config="listings=${listings_value:-unset}"
 
                 # listings=true 확인
-                if echo "${listings_config}" | grep -q "<param-value>true</param-value>"; then
+                if [ "${listings_value}" = "true" ]; then
                     has_listings_true=true
                 fi
                 break 2
@@ -108,7 +126,7 @@ diagnose() {
     done
 
     if [ -n "${found_file}" ]; then
-        command_executed="grep -A2 '<servlet-name>default</servlet-name>' ${found_file} 2>/dev/null | grep -B1 -A1 'listings' | head -5"
+        command_executed="awk 'parse <param-name>listings</param-name>/<param-value> pair' ${found_file}"
         command_result="${listings_config:-No listings configuration found (default: false)}"
     else
         command_executed="ls /etc/tomcat*/web.xml /var/lib/tomcat*/conf/web.xml 2>/dev/null"
@@ -142,10 +160,14 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="디렉터리 리스팅이 true로 설정되어 있습니다. listings=false로 변경 권장."
-    else
+    elif [ "${listings_value}" = "false" ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="디렉터리 리스팅이 비활성화되어 있거나 설정되지 않았습니다 (기본값: false). (보안 권고사항 준수)"
+        inspection_summary="디렉터리 리스팅이 false로 명시적으로 비활성화되어 있습니다. (보안 권고사항 준수)"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="DefaultServlet의 listings init-param이 명시되어 있지 않습니다. web.xml에서 디렉터리 리스팅 정책을 수동으로 확인하십시오."
     fi
 
     # Run-all 모드 확인

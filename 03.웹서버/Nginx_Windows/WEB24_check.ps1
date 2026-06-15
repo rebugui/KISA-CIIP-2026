@@ -64,8 +64,10 @@ try {
             }
         }
 
+        $verifiedPaths = [System.Collections.Generic.List[string]]::new()
         $broadAcl = foreach ($path in $uploadPaths) {
             if (Test-Path -LiteralPath $path) {
+                $verifiedPaths.Add($path) | Out-Null
                 Get-NginxBroadAclEvidence -Path $path -Role 'UploadPath'
             }
         }
@@ -99,10 +101,20 @@ try {
             $status = "취약"
             $summary = "Upload-related paths appear to be inside a web root or have broad local write/unknown ACL evidence."
         }
-        elseif ($uploadPaths.Count -gt 0) {
+        elseif ($uploadPaths.Count -gt 0 -and $verifiedPaths.Count -gt 0) {
             $finalResult = "GOOD"
             $status = "양호"
             $summary = "Detected Nginx upload-related paths are outside resolved web roots and no broad write ACL evidence was found."
+        }
+        elseif ($uploadPaths.Count -gt 0) {
+            # Upload paths resolved outside the web root, but none of them exist
+            # or are readable on the scan host, so their NTFS ACLs were never
+            # inspected. The criteria require BOTH a separate path AND general
+            # users lacking access; with the second conjunct unverifiable we
+            # cannot conclude GOOD (mirrors the Linux sibling's "GOOD로 단정 불가").
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Upload-related paths resolved outside the web root, but the directories do not exist or are not readable on this host, so their NTFS ACLs could not be inspected. Manually verify the upload directory's permissions (general users must not have access)."
         }
         else {
             $finalResult = "MANUAL"

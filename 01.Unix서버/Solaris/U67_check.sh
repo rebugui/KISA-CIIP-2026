@@ -115,9 +115,9 @@ diagnose() {
     )
 
     # 권한 및 소유자 확인
-    local perms=$(perl -e 'printf "%04o\n", (stat)[2] & 07777' "$log_dir" 2>/dev/null || echo "000")
-    local owner=$(perl -e 'print getpwuid((stat)[4])' "$log_dir" 2>/dev/null || echo "unknown")
-    local group=$(perl -e 'print getgrgid((stat)[5])' "$log_dir" 2>/dev/null || echo "unknown")
+    local perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$log_dir" 2>/dev/null || echo "000")
+    local owner=$(perl -e 'print getpwuid((stat(shift))[4])' "$log_dir" 2>/dev/null || echo "unknown")
+    local group=$(perl -e 'print getgrgid((stat(shift))[5])' "$log_dir" 2>/dev/null || echo "unknown")
 
     details="권한: ${perms}, 소유자: ${owner}:${group}"
 
@@ -140,7 +140,7 @@ diagnose() {
            local insecure_files=""
            while IFS= read -r f_path; do
                [ -n "${f_path:-}" ] || continue
-               local f_perms=$(perl -e 'printf "%04o\n", (stat)[2] & 07777' "$f_path" 2>/dev/null || echo "0000")
+               local f_perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$f_path" 2>/dev/null || echo "0000")
                if [[ "$f_perms" =~ ^[0-7]{3,4}$ ]] && [ $(( (8#${f_perms}) & (8#7133) )) -ne 0 ]; then
                    insecure_files="${insecure_files}${f_path}(perm:${f_perms}) "
                fi
@@ -156,8 +156,8 @@ diagnose() {
 
                 for log in "${critical_logs[@]}"; do
                     if [ -f "$log" ]; then
-                        local l_perm=$(perl -e 'printf "%04o\n", (stat)[2] & 07777' "$log" 2>/dev/null || echo "")
-                        local l_owner=$(perl -e 'print getpwuid((stat)[4])' "$log" 2>/dev/null || echo "")
+                        local l_perm=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$log" 2>/dev/null || echo "")
+                        local l_owner=$(perl -e 'print getpwuid((stat(shift))[4])' "$log" 2>/dev/null || echo "")
 
                         # Expected: 600 or 640. 644 is arguably OK if info leakage is not critical, but guideline says <= 644.
                         # If > 644 (e.g. 666), bad.

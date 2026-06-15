@@ -73,29 +73,56 @@ diagnose() {
     # 의심스러운 파일 패턴 확인 (.ssh, .bashrc 등 제외한 숨김파일)
 
     local suspicious_files=""
+    local review_files=""
     local total_hidden=0
     local suspicious_count=0
+    local review_count=0
     local checked_homedirs=0
     local unreadable_homedirs=0
     local system_uid_threshold=1000
     local raw_find_output=""  # 원본 find 명령어 결과 누적
 
     # 정상적인 숨겨진 파일 목록 (백도어 후보에서 제외)
+    # RedHat U-33과 동일한 정상 분류를 적용하고, HP-UX/CDE 및 POSIX sh 관련
+    # 통상적인 관리자 아티팩트(.sh_history, .dt, .dtprofile 등)를 추가하여
+    # 정상 상태가 취약으로 오판되지 않도록 함
     local normal_hidden_patterns=(
         "\.bashrc"
         "\.bash_profile"
         "\.bash_logout"
+        "\.bash_history"
         "\.profile"
+        "\.cshrc"
+        "\.tcshrc"
+        "\.kshrc"
+        "\.login"
+        "\.logout"
+        "\.sh_history"
+        "\.history"
+        "\.lesshst"
         "\.ssh"
+        "\.gnupg"
+        "\.gnupg2"
+        "\.pki"
+        "\.Xauthority"
+        "\.ICEauthority"
+        "\.Xdefaults"
+        "\.dt"
+        "\.dtprofile"
         "\.gitconfig"
         "\.gitignore"
         "\.vimrc"
         "\.viminfo"
+        "\.emacs"
         "\.cache"
         "\.config"
         "\.local"
         "\.mozilla"
-        "\.gnupg"
+        "\.java"
+        "\.mysql_history"
+        "\.psql_history"
+        "\.wget-hsts"
+        "\.rnd"
     )
 
     # 사용자 홈 디렉토리 확인
@@ -163,21 +190,25 @@ diagnose() {
                     filetype="symlink"
                 fi
 
-                # 실행 가능한 파일인 경우 더 의심스러움
+                # 실행 가능한 숨김 파일은 명백한 이상 징후이므로 취약으로 판정하고,
+                # 그 외(비실행 파일/디렉토리/심볼릭링크)는 정적으로 악성 여부를
+                # 단정할 수 없으므로 수동 점검(MANUAL) 대상으로 분류함
                 local perms=""
                 if [ -f "$hidden_file" ]; then
                     perms=$(perl -e '@stat=stat("'$hidden_file'"); printf "%04o\n", $stat[2] & 07777' 2>/dev/null || echo "0000")
                     if [[ "$perms" =~ ^[0-9]*[1357][0-9]*$ ]]; then
-                        # 실행 가능한 파일
+                        # 실행 가능한 파일 (명백한 이상 징후 → 취약)
                         suspicious_files="${suspicious_files}${home}/${filename}(${filetype}, executable: ${perms}), "
                         ((suspicious_count++)) || true
                     else
-                        suspicious_files="${suspicious_files}${home}/${filename}(${filetype}), "
-                        ((suspicious_count++)) || true
+                        # 비실행 일반 파일 → 수동 점검 대상
+                        review_files="${review_files}${home}/${filename}(${filetype}), "
+                        ((review_count++)) || true
                     fi
                 else
-                    suspicious_files="${suspicious_files}${home}/${filename}(${filetype}), "
-                    ((suspicious_count++)) || true
+                    # 디렉토리/심볼릭링크 등 → 수동 점검 대상
+                    review_files="${review_files}${home}/${filename}(${filetype}), "
+                    ((review_count++)) || true
                 fi
             fi
         done < <(list_hidden_entries "$home" 2>/dev/null | head -50) || true
@@ -191,16 +222,23 @@ diagnose() {
         status="수동진단"
         inspection_summary="점검 대상 홈 디렉토리 ${checked_homedirs}개를 모두 읽을 수 없어 숨겨진 파일 점검을 수행하지 못했습니다. ls -al 명령어로 각 홈 디렉토리의 숨겨진 파일을 수동으로 확인하세요."
         command_result="[Hidden files search results]${newline}[All ${checked_homedirs} home directories were unreadable; hidden file scan could not be performed]"
-    elif [ "$suspicious_count" -eq 0 ]; then
+    elif [ "$suspicious_count" -gt 0 ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="실행 가능한 의심스러운 숨겨진 파일 ${suspicious_count}개가 발견되었습니다: ${suspicious_files%, }. 해당 파일들을 검토한 후 불필요하거나 악성적인 경우 제거하세요: rm -rf <file>"
+        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Suspicious files found]${newline}${suspicious_files%, }"
+    elif [ "$review_count" -gt 0 ]; then
+        # 화이트리스트에 없는 비실행 숨김 파일/디렉토리는 정상 관리자 아티팩트일 수 있어
+        # 정적으로 취약 여부를 단정할 수 없으므로 수동 점검으로 분류 (false-positive 방지)
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="목록에 없는 숨겨진 파일/디렉토리 ${review_count}개가 발견되었습니다: ${review_files%, }. 정상적인 사용자/관리자 파일인지, 불필요하거나 의심스러운 파일인지 ls -al 명령어로 수동 확인 후 필요 시 제거하세요: rm -rf <file>"
+        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Files requiring manual review]${newline}${review_files%, }"
+    else
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="의심스러운 숨겨진 파일이 발견되지 않았습니다. (확인된 홈 디렉토리: ${checked_homedirs}개, 전체 숨겨진 파일: ${total_hidden}개)"
         command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[No suspicious files found (checked ${checked_homedirs} home directories, ${total_hidden} total hidden files)]"
-    else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="의심스러운 숨겨진 파일 ${suspicious_count}개가 발견되었습니다: ${suspicious_files%, }. 해당 파일들을 검토한 후 불필요하거나 악성적인 경우 제거하세요: rm -rf <file>"
-        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Suspicious files found]${newline}${suspicious_files%, }"
     fi
 
     # echo ""

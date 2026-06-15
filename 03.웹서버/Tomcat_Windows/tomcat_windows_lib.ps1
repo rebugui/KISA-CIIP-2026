@@ -255,7 +255,11 @@ function Invoke-TomcatWindowsCheck {
     switch ($ItemId) {
         'WEB-01' {
             if ($state.TomcatUsersXml.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Tomcat was found, but tomcat-users.xml was not located.' $evidencePrefix 'Locate tomcat-users.xml and inspect default administrator account names' }
-            $matches = @([regex]::Matches($usersText, '(?i)<user\b[^>]*username\s*=\s*"(admin|tomcat|root|manager)"[^>]*') | ForEach-Object { $_.Value.Trim() })
+            # Stock conf/tomcat-users.xml ships the tomcat/admin sample <user> entries COMMENTED OUT
+            # (<!-- -->); Tomcat ignores them so no active default account exists (criteria_good).
+            # Strip XML comments before matching to avoid a false VULNERABLE, mirroring WEB-05/15/19.
+            $usersTextActive = [regex]::Replace($usersText, '(?s)<!--.*?-->', '')
+            $matches = @([regex]::Matches($usersTextActive, '(?i)<user\b[^>]*username\s*=\s*"(admin|tomcat|root|manager)"[^>]*') | ForEach-Object { $_.Value.Trim() })
             if ($matches.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Default or easily guessed Tomcat administrator account names were found.' ($matches -join "`n") 'Parse tomcat-users.xml usernames' }
             return New-TomcatResult 'GOOD' 'No default Tomcat administrator account names were found in tomcat-users.xml.' "Files: $($state.TomcatUsersXml -join ', ')" 'Parse tomcat-users.xml usernames'
         }
@@ -289,6 +293,8 @@ function Invoke-TomcatWindowsCheck {
             $webTextActive = [regex]::Replace($webText, '(?s)<!--.*?-->', '')
             $cgi = @([regex]::Matches($webTextActive, '(?is)<servlet-name>\s*cgi\s*</servlet-name>|org\.apache\.catalina\.servlets\.CGIServlet|cgiPathPrefix|enableCmdLineArguments') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
             if ($cgi.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat CGI servlet configuration evidence was found.' ($cgi -join "`n") 'Parse web.xml CGI servlet configuration' }
+            # web.xml이 존재/판독되지 않으면(빈 WebXml) CGI 미사용/제한(criteria_good)을 증거 부재로 단정할 수 없으므로 MANUAL 처리
+            if ($state.WebXml.Count -eq 0 -or [string]::IsNullOrWhiteSpace($webText)) { return New-TomcatResult 'MANUAL' 'No readable Tomcat web.xml was found; cannot confirm CGI is unused or restricted. Verify web.xml manually.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml CGI servlet configuration' }
             return New-TomcatResult 'GOOD' 'No active Tomcat CGI servlet configuration evidence was found.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml CGI servlet configuration'
         }
         'WEB-06' {

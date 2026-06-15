@@ -96,8 +96,10 @@ diagnose() {
     local apache_conf_locations=(
         "/etc/apache2/ports.conf"
         "/etc/httpd/conf/httpd.conf"
+        "/etc/httpd/conf.d/"*.conf
         "/usr/local/apache2/conf/httpd.conf"
-        "/etc/apache2/sites-enabled/*.conf"
+        "/etc/apache2/sites-enabled/"*.conf
+        "/etc/apache2/conf-enabled/"*.conf
     )
 
     local has_https=false

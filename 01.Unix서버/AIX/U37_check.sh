@@ -219,9 +219,9 @@ diagnose() {
         inspection_summary="cron/at 관련 파일 권한을 확인할 수 없어 수동 진단 필요: ${manual_reason}"
         command_result="${evidence}확인 불가: ${manual_reason}"
     elif [ "$acl_found" -eq 0 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="cron/at 접근 제어 파일(/var/adm/cron/cron.allow·cron.deny·at.allow·at.deny)이 존재하지 않음 - 판단기준 양호 요건인 'cron 및 at 관련 파일 권한이 640 이하인 경우'를 충족하는 접근 제어 파일이 없어 일반 사용자 cron/at 사용 제한이 확인되지 않음"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="cron/at 접근 제어 파일(/var/adm/cron/cron.allow·cron.deny·at.allow·at.deny)이 존재하지 않아 일반 사용자 cron/at 사용 제한 여부를 접근 제어 파일로 확인할 수 없음 - AIX(SysV cron)에서 cron.allow·cron.deny 부재는 root 전용(기본 거부) 정책일 수 있으므로 수동 확인 필요 (권한 기준 위반 항목은 없음)"
         command_result="${evidence}"
     else
         diagnosis_result="GOOD"

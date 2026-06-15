@@ -40,11 +40,15 @@ try {
     # Export security policy to temp file
     $null = secedit /export /cfg $tempFile 2>&1
 
-    $content = Get-Content $tempFile -ErrorAction Stop
+    # NOTE: Get-Content returns a string[] array. Using the -match operator on an
+    # array FILTERS the array and does NOT populate $matches, so a scalar must be
+    # used to capture the privilege value. Join to a single string before matching.
+    $contentText = (Get-Content $tempFile -ErrorAction Stop) -join "`n"
     $remoteShutdown = 0
+    $privilege = $null
 
-    # Parse SeRemoteShutdownPrivilege
-    if ($content -match 'SeRemoteShutdownPrivilege\s*=\s*(.*)') {
+    # Parse SeRemoteShutdownPrivilege (scalar -match populates $matches)
+    if ($contentText -match 'SeRemoteShutdownPrivilege\s*=\s*(.*)') {
         $privilege = $matches[1].Trim()
 
         # Check if only Administrators (S-1-5-32-544) have this privilege
@@ -54,16 +58,23 @@ try {
         }
     }
 
-    $output = "SeRemoteShutdownPrivilege: $($matches[1])"
-
     # Clean up temp file
     Remove-Item $tempFile -ErrorAction SilentlyContinue
 
-    if ($remoteShutdown -eq 1) {
+    if ($null -eq $privilege) {
+        # SeRemoteShutdownPrivilege line not present in secedit export -> cannot
+        # judge statically; route to manual diagnosis rather than VULNERABLE.
+        $output = "SeRemoteShutdownPrivilege: (정책 항목 없음)"
+        $finalResult = "MANUAL"
+        $summary = "SeRemoteShutdownPrivilege 항목을 확인할 수 없어 수동 확인 필요"
+        $status = "수동진단"
+    } elseif ($remoteShutdown -eq 1) {
+        $output = "SeRemoteShutdownPrivilege: $privilege"
         $finalResult = "GOOD"
         $summary = "'원격시스템에서강제로시스템종료' 정책에 'Administrators'만 존재함"
         $status = "양호"
     } else {
+        $output = "SeRemoteShutdownPrivilege: $privilege"
         $finalResult = "VULNERABLE"
         $summary = "'원격시스템에서강제로시스템종료' 정책에 'Administrators' 외 다른 계정 및 그룹이 존재함"
         $status = "취약"

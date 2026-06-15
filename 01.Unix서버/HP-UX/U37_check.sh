@@ -247,9 +247,9 @@ diagnose() {
         inspection_summary="cron/at 관련 파일 권한을 확인할 수 없어 수동 진단 필요: ${manual_reason}"
         command_result="${evidence}확인 불가: ${manual_reason}"
     elif [ "$acl_found" -eq 0 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="cron/at 접근 제어 파일(/var/adm/cron 또는 /usr/lib/cron의 cron.allow·cron.deny·at.allow·at.deny)이 존재하지 않음 - 판단기준 양호 요건인 'cron 및 at 관련 파일 권한이 640 이하인 경우'를 충족하는 접근 제어 파일이 없어 일반 사용자 cron/at 사용 제한이 확인되지 않음"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="cron/at 접근 제어 파일(/var/adm/cron 또는 /usr/lib/cron의 cron.allow·cron.deny·at.allow·at.deny)이 존재하지 않음 - 명령어 및 작업 등록 파일 권한 위반은 없으나, HP-UX는 cron.allow·cron.deny가 모두 없으면 root만 cron/at 사용이 허용되는 보안 기본값이므로 접근 제어 정책을 수동으로 확인 필요"
         command_result="${evidence}"
     else
         diagnosis_result="GOOD"

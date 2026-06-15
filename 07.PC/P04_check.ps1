@@ -62,7 +62,9 @@ try {
             $line -match '명령을 (잘 )?실행했습니다' -or $line -match 'command completed successfully') {
             continue
         }
-        if ($line -match '^([A-Za-z\$][A-Za-z0-9\$\-_]*)\s+') {
+        # 공유 이름은 첫 번째 공백 구분 토큰(스크립트 무관, 유니코드 안전).
+        # 한글로 시작하는 사용자 공유도 캡처되도록 ASCII 제한을 두지 않음.
+        if ($line -match '^(\S+)\s+') {
             $shareName = $matches[1]
             $upperName = $shareName.ToUpper()
 
@@ -90,7 +92,8 @@ try {
             } catch {
                 # PowerShell 5.1 compatibility: use net share with access check
                 $shareDetail = net share $shareName 2>&1 | Out-String
-                if ($shareDetail -match 'Everyone') {
+                # 한국어 OS에서는 'Everyone'이 '모든 사람'으로 표기됨. SID(S-1-1-0)도 함께 점검.
+                if ($shareDetail -match 'Everyone' -or $shareDetail -match '모든 사람' -or $shareDetail -match 'S-1-1-0') {
                     $everyoneAccessShares += "$shareName (access suspected)"
                 }
             }

@@ -152,10 +152,10 @@ function Invoke-MySqlQuery {
 
     $user = if ($env:DB_USER) { $env:DB_USER } elseif ($env:MYSQL_USER) { $env:MYSQL_USER } else { 'root' }
     $password = if ($env:DB_PASSWORD) { $env:DB_PASSWORD } else { $env:MYSQL_PWD }
-    $host = if ($env:DB_HOST) { $env:DB_HOST } elseif ($env:MYSQL_HOST) { $env:MYSQL_HOST } else { 'localhost' }
+    $mysqlHost = if ($env:DB_HOST) { $env:DB_HOST } elseif ($env:MYSQL_HOST) { $env:MYSQL_HOST } else { 'localhost' }
     $port = if ($env:DB_PORT) { $env:DB_PORT } elseif ($env:MYSQL_TCP_PORT) { $env:MYSQL_TCP_PORT } else { '3306' }
 
-    $args = @('-N', '-B', "-u$user", "-h$host", "-P$port", '-e', $Query)
+    $args = @('-N', '-B', "-u$user", "-h$mysqlHost", "-P$port", '-e', $Query)
     $oldPwd = $env:MYSQL_PWD
     if ($password) { $env:MYSQL_PWD = $password }
     try {
@@ -169,7 +169,7 @@ function Invoke-MySqlQuery {
     [pscustomobject]@{
         Ok = ($exit -eq 0)
         Output = (($output | Out-String).Trim())
-        Command = "$($State.CliPath) -N -B -u$user -h$host -P$port -e <query>"
+        Command = "$($State.CliPath) -N -B -u$user -h$mysqlHost -P$port -e <query>"
     }
 }
 
