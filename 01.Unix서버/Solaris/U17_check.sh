@@ -64,6 +64,7 @@ diagnose() {
     local vulnerable_count=0
     local vuln_listed=0
     local total_files=0
+    local stat_fail_count=0
     local unreadable_dirs=""
     local found_dirs=""
     local raw_output=""
@@ -92,7 +93,11 @@ diagnose() {
             # (stat(shift)로 파일 인자를 반드시 소비 - U-63 형 bare (stat) 버그 방지)
             local stat_out=""
             stat_out=$(perl -e '@s=stat(shift) or exit 1; $o=getpwuid($s[4]); $o=$s[4] unless defined($o) && length($o); printf "%04o %s", $s[2] & 07777, $o' "$entry" 2>/dev/null || true)
-            [ -n "$stat_out" ] || continue
+            # stat 실패(perl 부재/파일별 오류) 시 미검사 파일로 집계 → 양호 판정 차단 (fail-closed)
+            if [ -z "$stat_out" ]; then
+                ((stat_fail_count++)) || true
+                continue
+            fi
             local perms="${stat_out%% *}"
             local owner="${stat_out#* }"
 
@@ -163,6 +168,12 @@ diagnose() {
         status="수동진단"
         inspection_summary="시작 스크립트 디렉터리 접근 불가로 수동 확인 필요: ${unreadable_dirs%, }"
         command_result="[Command: ${exec_cmd}]${newline}${raw_output}"
+        command_executed="${exec_cmd}"
+    elif [ "$stat_fail_count" -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="시작 스크립트 ${stat_fail_count}개의 권한/소유자 확인 실패(perl stat 불가) - 수동 확인 필요 (검사 대상 ${total_files}개)"
+        command_result="[Command: ${exec_cmd}]${newline}${raw_output}[STAT FAILED: ${stat_fail_count}/${total_files}]"
         command_executed="${exec_cmd}"
     elif [ -z "$found_dirs" ]; then
         diagnosis_result="GOOD"

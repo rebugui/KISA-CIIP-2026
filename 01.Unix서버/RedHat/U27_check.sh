@@ -82,8 +82,8 @@ diagnose() {
     # 2. 모든 사용자의 $HOME/.rhosts 확인
     # ==========================================================================
     while IFS=: read -r username _ uid _ _ homedir shell; do
-        # 시스템 계정 (UID < 1000, root 제외) 및 로그인 불가 쉘은 건너뜀
-        [ "$uid" -ne 0 ] 2>/dev/null && [ "$uid" -lt 1000 ] 2>/dev/null && continue
+        # 시스템 노이즈 계정 (UID < 100, root 제외)만 건너뜀 (서비스 계정 uid>=100 포함, HP-UX/Solaris와 동일 기준)
+        [ "$uid" -ne 0 ] 2>/dev/null && [ "$uid" -lt 100 ] 2>/dev/null && continue
         [ -z "$homedir" ] || [ "$homedir" = "/" ] && continue
 
         local rhosts_file="${homedir}/.rhosts"

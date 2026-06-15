@@ -42,17 +42,26 @@ try {
     $out = net accounts 2>&1 | Out-String
     $commandOutput = $out
     $maxAge = 0
+    $isUnlimited = $false
 
     if ($out -match 'Maximum password age') {
         if ($out -match 'Maximum password age\s*\(\s*days\s*\)\s*:\s*(\d+)') {
             $maxAge = [int]$matches[1]
+        } elseif ($out -match 'Maximum password age\s*\(\s*days\s*\)\s*:\s*Unlimited') {
+            $isUnlimited = $true
         }
     } elseif ($out -match '최대 암호 사용 기간') {
         if ($out -match '최대 암호 사용 기간\s*\(\s*일\s*\)\s*:\s*(\d+)') {
             $maxAge = [int]$matches[1]
+        } elseif ($out -match '최대 암호 사용 기간\s*\(\s*일\s*\)\s*:\s*제한 없음') {
+            $isUnlimited = $true
         }
     }
-    if ($maxAge -gt 0 -and $maxAge -le 90) {
+    if ($isUnlimited) {
+        $finalResult = "VULNERABLE"
+        $summary = "최대 암호 사용 기간이 제한 없음으로 설정됨"
+        $status = "취약"
+    } elseif ($maxAge -gt 0 -and $maxAge -le 90) {
         $finalResult = "GOOD"
         $summary = "최대 암호 사용 기간이 90일 이하로 설정됨"
         $status = "양호"

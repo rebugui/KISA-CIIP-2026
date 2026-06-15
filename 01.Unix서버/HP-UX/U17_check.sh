@@ -114,15 +114,29 @@ diagnose() {
                     ((vuln_listed++)) || true
                 fi
             else
-                # others 쓰기 권한: 4자리 8진수 문자열의 마지막 자리가 2,3,6,7
+                # 일반 사용자(그룹 또는 others) 쓰기 권한: 4자리 8진수 문자열에서
+                # others(마지막 자리) 또는 group(끝에서 2번째 자리)이 2,3,6,7이면 취약
                 # (산술 % 10 사용 금지 - bash가 선행 0을 8진수로 해석하여 오판)
-                case "$perms" in
-                    *[2367])
+                local others_oct="${perms: -1}"
+                local group_oct="${perms: -2:1}"
+                case "$others_oct" in
+                    2|3|6|7)
                         ((vulnerable_count++)) || true
                         if [ "$vuln_listed" -lt 20 ]; then
                             vulnerable_files="${vulnerable_files}${entry} (권한: ${perms}, others 쓰기 가능), "
                             ((vuln_listed++)) || true
                         fi
+                        ;;
+                    *)
+                        case "$group_oct" in
+                            2|3|6|7)
+                                ((vulnerable_count++)) || true
+                                if [ "$vuln_listed" -lt 20 ]; then
+                                    vulnerable_files="${vulnerable_files}${entry} (권한: ${perms}, group 쓰기 가능), "
+                                    ((vuln_listed++)) || true
+                                fi
+                                ;;
+                        esac
                         ;;
                 esac
             fi

@@ -49,31 +49,36 @@ try {
     $out += "`n총 $($auditPolicy.Count)개의 감사 정책 확인됨`n"
 
     if ($auditPolicy) {
-        # Critical audit categories to check (Korean and English)
-        $criticalAudits = @(
-            '로그온',
-            'Logon',
-            '계정 관리',
-            'Account Management',
-            '정책 변경',
-            'Policy Change',
-            '권한 사용',
-            'Privilege Use'
+        # Critical audit concepts to check. auditpol /r renders the Subcategory
+        # column in the single installed OS display language only (Korean OR
+        # English, never both), so each concept lists both variants and is
+        # satisfied if EITHER variant is found-and-configured (OR within a
+        # concept, AND across the 4 concepts).
+        $criticalAuditConcepts = @(
+            @{ Name = '로그온';     Keywords = @('로그온', 'Logon') },
+            @{ Name = '계정 관리';   Keywords = @('계정 관리', 'Account Management') },
+            @{ Name = '정책 변경';   Keywords = @('정책 변경', 'Policy Change') },
+            @{ Name = '권한 사용';   Keywords = @('권한 사용', 'Privilege Use') }
         )
+        # Flattened keyword list (used only for the detailed status dump below).
+        $criticalAudits = $criticalAuditConcepts | ForEach-Object { $_.Keywords } | Select-Object -Unique
 
         $allConfigured = $true
         $unconfiguredItems = @()
 
-        # Check each critical audit. The audit state lives in the native
-        # 'Inclusion Setting' column ('없음'/'No Auditing' means not configured).
-        foreach ($auditKeyword in $criticalAudits) {
+        # Check each concept. The audit state lives in the native 'Inclusion
+        # Setting' column ('없음'/'No Auditing' means not configured). A concept
+        # is configured if ANY of its language variants matches a configured row.
+        foreach ($concept in $criticalAuditConcepts) {
             $found = $auditPolicy | Where-Object {
-                $_.Subcategory -like "*$auditKeyword*" -and $_.'Inclusion Setting' -ne '없음' -and $_.'Inclusion Setting' -ne 'No Auditing'
+                $row = $_
+                ($concept.Keywords | Where-Object { $row.Subcategory -like "*$_*" }) -and `
+                $row.'Inclusion Setting' -ne '없음' -and $row.'Inclusion Setting' -ne 'No Auditing'
             }
 
             if (-not $found) {
                 $allConfigured = $false
-                $unconfiguredItems += $auditKeyword
+                $unconfiguredItems += $concept.Name
             }
         }
 

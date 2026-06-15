@@ -91,7 +91,7 @@ diagnose() {
         if [ -z "$perms" ] || [ $(( 8#$perms & ~8#600 & 8#7777 )) -ne 0 ]; then
             he_issues="${he_issues}권한 600 초과 "
         fi
-        if grep -qE '^[[:space:]]*\+' /etc/hosts.equiv 2>/dev/null; then
+        if grep -vE '^[[:space:]]*#' /etc/hosts.equiv 2>/dev/null | grep -qE '(^|[[:space:]])\+([[:space:]]|$)'; then
             he_issues="${he_issues}'+' 설정 존재 "
         fi
         if [ -n "$he_issues" ]; then
@@ -126,7 +126,7 @@ diagnose() {
                 if [ -z "$perms" ] || [ $(( 8#$perms & ~8#600 & 8#7777 )) -ne 0 ]; then
                     rh_issues="${rh_issues}권한 600 초과 "
                 fi
-                if grep -qE '^[[:space:]]*\+' "$rhosts_path" 2>/dev/null; then
+                if grep -vE '^[[:space:]]*#' "$rhosts_path" 2>/dev/null | grep -qE '(^|[[:space:]])\+([[:space:]]|$)'; then
                     rh_issues="${rh_issues}'+' 설정 존재 "
                 fi
                 if [ -n "$rh_issues" ]; then

@@ -164,7 +164,16 @@ invoke_webtob_linux_check() {
             ;;
         WEB-05)
             lines="$(webtob_config_grep 'SVRTYPE[[:space:]]*=[[:space:]]*CGI|SvrType[[:space:]]*=[[:space:]]*CGI|/cgi-bin|CGI' || true)"
-            [ -n "${lines}" ] && webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB CGI execution mapping evidence was found." "${lines}" "grep CGI http.m" || webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB CGI execution mapping evidence was found." "$(webtob_evidence)" "grep CGI http.m"
+            if [ -n "${lines}" ]; then
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB CGI execution mapping evidence was found." "${lines}" "grep CGI http.m"
+            elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
+                # Installed (per webtob_is_installed) but no http.m config was
+                # actually inspected (home not derivable or config files absent):
+                # GOOD cannot be asserted from zero evidence -> MANUAL.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its configuration (http.m) could not be inspected; manually verify CGI execution is unused or restricted to a designated directory." "$(webtob_evidence)" "grep CGI http.m"
+            else
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB CGI execution mapping evidence was found." "$(webtob_evidence)" "grep CGI http.m"
+            fi
             ;;
         WEB-06)
             lines="$(webtob_config_grep 'UpperDirRestrict[[:space:]]*=[[:space:]]*[NY]' || true)"
@@ -264,13 +273,15 @@ invoke_webtob_linux_check() {
             ;;
         WEB-21)
             # Oracle: GOOD only when HTTPS redirection is ACTIVE: URLRewrite=Y
-            # must be enabled AND an actual redirect to https must exist
-            # (RewriteRule -> https or URLRewriteConfig referencing the rewrite
-            # config). URLRewrite=N with a rewrite config present is not GOOD.
+            # must be enabled AND an actual redirect to https must be present in
+            # the scanned config (RewriteRule -> https:// or a literal https://
+            # redirect target). A bare URLRewriteConfig directive only NAMES an
+            # external rewrite file that is not content-scanned, so it cannot by
+            # itself prove a redirect -> that case falls through to MANUAL below.
             lines="$(webtob_config_grep_active 'URLRewrite[[:space:]]*=[[:space:]]*[NY]|URLRewriteConfig|RewriteRule|https://' || true)"
             if printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*Y' \
-                && printf '%s' "${lines}" | grep -Eiq 'URLRewriteConfig|RewriteRule.*https://|https://'; then
-                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB HTTP-to-HTTPS redirection is enabled (URLRewrite=Y with redirect configuration)." "${lines}" "grep rewrite http.m"
+                && printf '%s' "${lines}" | grep -Eiq 'RewriteRule.*https://|https://'; then
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB HTTP-to-HTTPS redirection is enabled (URLRewrite=Y with an https redirect rule)." "${lines}" "grep rewrite http.m"
             elif printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*N'; then
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB URL rewrite is disabled (URLRewrite=N); HTTPS redirection is not active." "${lines}" "grep rewrite http.m"
             elif printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*Y'; then

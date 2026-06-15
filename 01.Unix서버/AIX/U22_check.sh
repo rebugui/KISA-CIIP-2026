@@ -78,8 +78,9 @@ diagnose() {
         local file_perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$target_file" 2>/dev/null)
         local file_owner=$(perl -e '@s=stat(shift); printf "%s:%s\n", getpwuid($s[4]), getgrgid($s[5])' "$target_file" 2>/dev/null)
 
-        # 소유자 및 권한 확인 (AIX may use root:system instead of root:root)
-        if { [ "$file_owner" = "root:root" ] || [ "$file_owner" = "root:system" ]; } && [ "$file_perms" = "0644" ]; then
+        # 소유자 및 권한 확인 (소유자 root/bin/sys, 그룹 무관, 권한 644 이하)
+        local file_user="${file_owner%%:*}"
+        if [[ "$file_user" =~ ^(root|bin|sys)$ ]] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#644 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $file_perms, 소유자: $file_owner"
         else

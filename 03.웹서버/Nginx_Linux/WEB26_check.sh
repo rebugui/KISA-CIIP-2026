@@ -97,20 +97,23 @@ diagnose() {
             local dir_perm=$(stat -c "%a" "${log_dir}" 2>/dev/null || echo "")
             if [ -n "${dir_perm}" ]; then
                 log_dirs_checked="${log_dirs_checked}"$'\n'"[DIR] ${log_dir}: ${dir_perm}"
-                # Check if directory permission is too permissive (not 700 or 750)
-                if [ "${dir_perm}" != "700" ] && [ "${dir_perm}" != "750" ]; then
+                # Vulnerable iff general users (other) have any access (criteria_bad: 일반 사용자 접근 권한 존재).
+                # Low 3 bits of the octal mode are the other-bits; ignore owner/group/special(setgid 등) prefix digits.
+                if [ "$((8#${dir_perm} & 7))" -ne 0 ]; then
                     has_vulnerable_perms=true
                 fi
             fi
 
-            # Check log files in directory
-            for log_file in "${log_dir}"/*.log "${log_dir}"/*.log.*; do
+            # Check log files in directory.
+            # Enumerate ALL regular files under the log dir (not only *.log): nginx access_log/error_log
+            # 지시어는 확장자 없는 경로(예: access)도 허용하므로 *.log 글롭만으로는 world-readable 로그를 놓칠 수 있음.
+            for log_file in "${log_dir}"/*; do
                 if [ -f "${log_file}" ]; then
                     local file_perm=$(stat -c "%a" "${log_file}" 2>/dev/null || echo "")
                     if [ -n "${file_perm}" ]; then
                         log_files_checked="${log_files_checked}"$'\n'"[FILE] ${log_file}: ${file_perm}"
-                        # Check if file permission is too permissive (not 600 or 640)
-                        if [ "${file_perm}" != "600" ] && [ "${file_perm}" != "640" ]; then
+                        # Vulnerable iff general users (other) have any access; low 3 bits = other-bits.
+                        if [ "$((8#${file_perm} & 7))" -ne 0 ]; then
                             has_vulnerable_perms=true
                         fi
                     fi
@@ -119,18 +122,18 @@ diagnose() {
         fi
     done
 
-    command_executed="stat -c '%a' /var/log/nginx/*.log 2>/dev/null; stat -c '%a' /usr/local/nginx/logs/*.log 2>/dev/null; stat -c '%a' /var/log/nginx 2>/dev/null; stat -c '%a' /usr/local/nginx/logs 2>/dev/null"
+    command_executed="stat -c '%a' /var/log/nginx/* 2>/dev/null; stat -c '%a' /usr/local/nginx/logs/* 2>/dev/null; stat -c '%a' /var/log/nginx 2>/dev/null; stat -c '%a' /usr/local/nginx/logs 2>/dev/null"
     command_result="${log_files_checked}${log_dirs_checked:-No log files found}"
 
     # Determine result based on permission check
     if [ -z "${log_files_checked}" ] && [ -z "${log_dirs_checked}" ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="로그 파일 또는 디렉터리를 찾을 수 없습니다. Nginx 로그 경로(/var/log/nginx 또는 /usr/local/nginx/logs)를 확인하고 권한을 수동으로 검토하세요. 권장: 파일 600/640, 디렉터리 700/750"
+        inspection_summary="로그 파일 또는 디렉터리를 찾을 수 없습니다. Nginx 로그 경로(/var/log/nginx 또는 /usr/local/nginx/logs)를 확인하고 권한을 수동으로 검토하세요. 권장: 로그 디렉터리 및 파일에 일반 사용자(other) 접근 권한 제거(chmod o-rwx)"
     elif [ "${has_vulnerable_perms}" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="로그 파일 또는 디렉터리 권한이 기준보다 취약합니다. 로그 파일은 600 또는 640, 로그 디렉터리는 700 또는 750 권한으로 설정하세요. chmod 명령어로 권한을 수정하세요."
+        inspection_summary="로그 디렉터리 또는 파일에 일반 사용자(other)의 접근 권한이 존재하여 취약합니다. chmod o-rwx 명령으로 일반 사용자 접근 권한을 제거하세요."
     else
         diagnosis_result="GOOD"
         status="양호"

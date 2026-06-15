@@ -106,11 +106,17 @@ diagnose() {
     if [ -f /etc/ssh/sshd_config ]; then
         ssh_banner=$(grep -E "^[[:space:]]*Banner" /etc/ssh/sshd_config 2>/dev/null | grep -v "^[[:space:]]*#" | awk '{print $2}' || true)
         if [ -n "$ssh_banner" ]; then
-            if [ -f "$ssh_banner" ]; then
-                has_warning=true
-                ssh_banner="설정됨 (${ssh_banner})"
+            local ssh_banner_path="$ssh_banner"
+            if [ -f "$ssh_banner_path" ]; then
+                # 배너 파일이 존재해도 경고 메시지 키워드가 포함된 경우에만 양호로 인정
+                if grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지" "$ssh_banner_path" 2>/dev/null; then
+                    has_warning=true
+                    ssh_banner="설정됨 (${ssh_banner_path}, 경고 메시지 포함)"
+                else
+                    ssh_banner="설정됨 (${ssh_banner_path}, 경고 메시지 없음)"
+                fi
             else
-                ssh_banner="설정됨 (파일 없음: ${ssh_banner})"
+                ssh_banner="설정됨 (파일 없음: ${ssh_banner_path})"
             fi
         else
             ssh_banner="설정 안됨"

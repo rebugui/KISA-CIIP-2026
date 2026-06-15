@@ -54,52 +54,41 @@ diagnose() {
     local command_executed=""
     local newline=$'\n'
 
-    local is_secure=true
-    local orphan_files=""
+    # 진단 로직 구현
+    # 가이드 Step 1) 소유자와 그룹이 존재하지 않는 파일 및 디렉터리 확인
+    # 루트(/) 전체를 -xdev로 스캔하여 가이드 명령과 동일한 범위를 점검
+    # AIX find: -xdev, \( -nouser -o -nogroup \), -ls 모두 지원
+    command_executed="find / -xdev \\( -nouser -o -nogroup \\) -ls 2>/dev/null"
+
+    local find_output=""
+    local find_status=0
+    find_output=$(find / -xdev \( -nouser -o -nogroup \) -ls 2>/dev/null) || find_status=$?
+
+    # 증거 출력 제한(최대 50건) 전에 전체 건수를 먼저 집계
     local orphan_count=0
-
-    # /etc/passwd에 존재하는 UID 목록 추출
-    local valid_uids=$(awk -F: '{print $3}' /etc/passwd 2>/dev/null | sort -u)
-
-    # 고아 파일(소유자가 /etc/passwd에 없는 파일) 탐지
-    # AIX: find -nouser 사용 (GNU find 및 AIX find 모두 지원)
-    local search_dirs=("/etc" "/usr" "/var" "/opt" "/home" "/tmp" "/")
-
-    for search_dir in "${search_dirs[@]}"; do
-        if [ -d "$search_dir" ]; then
-            local found=$(find "$search_dir" -nouser -type f -o -nouser -type d 2>/dev/null | head -50 || echo "")
-            if [ -n "$found" ]; then
-                while IFS= read -r file_path; do
-                    [ -z "$file_path" ] && continue
-                    local file_uid=$(perl -e 'print +(stat shift)[4]' "$file_path" 2>/dev/null || echo "unknown")
-                    orphan_files="${orphan_files}${file_path} (UID: ${file_uid}), "
-                    ((orphan_count++)) || true
-                done <<< "$found"
-            fi
-        fi
-    done || true
-
-    # 결과 정리
-    if [ "$orphan_count" -eq 0 ]; then
-        is_secure=true
-    else
-        is_secure=false
+    if [ -n "$find_output" ]; then
+        orphan_count=$(printf '%s\n' "$find_output" | grep -c '.' || true)
     fi
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="소유자가 존재하지 않는 파일 및 디렉터리가 없습니다."
-        local find_raw=$(find / -nouser -type f -o -nouser -type d 2>/dev/null | head -20 || echo "No orphan files found")
-        command_result="[Command: find / -nouser]${newline}${find_raw}"
-        command_executed="find / -nouser -type f -o -nouser -type d 2>/dev/null | head -50"
-    else
+    if [ -n "$find_output" ] && [ "$orphan_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="소유자가 존재하지 않는 파일/디렉터리 ${orphan_count}개 발견: ${orphan_files%, }"
-        command_result="${orphan_files%, }"
-        command_executed="find / -nouser -type f -o -nouser -type d 2>/dev/null | head -50"
+        inspection_summary="소유자 또는 그룹이 존재하지 않는 파일 및 디렉터리 ${orphan_count}건이 발견되었습니다."
+        local capped_list=""
+        capped_list=$(printf '%s\n' "$find_output" | head -50) || true
+        command_result="[Command: ${command_executed}]${newline}발견 건수: ${orphan_count}건 (최대 50건 표시)${newline}${capped_list}"
+    elif [ "$find_status" -ne 0 ]; then
+        # find 명령 자체가 실패한 경우(권한 부족, 시간 초과 등) → 수동 진단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="find 명령 수행이 실패하여(종료코드: ${find_status}) 소유자 없는 파일 및 디렉터리 존재 여부를 자동 판정할 수 없습니다. root 권한으로 수동 확인이 필요합니다."
+        command_result="[Command: ${command_executed}]${newline}find 종료코드: ${find_status}, 출력 없음 (권한 부족 또는 시간 초과 가능성)"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="소유자 또는 그룹이 존재하지 않는 파일 및 디렉터리가 발견되지 않았습니다."
+        command_result="[Command: ${command_executed}]${newline}발견된 파일/디렉터리 없음"
     fi
 
     save_dual_result \

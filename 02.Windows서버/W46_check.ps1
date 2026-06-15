@@ -48,16 +48,42 @@ try {
         $access = $acl.AccessToString
         $hasUnauthorized = $false
 
-        foreach ($line in $access.Split("`n")) {
-            # Skip if it's BUILTIN\Administrators or NT AUTHORITY\SYSTEM
-            if ($line -match 'BUILTIN\\Administrators' -or $line -match 'NT AUTHORITY\\SYSTEM') {
+        # 기준(criteria_bad): Administrator,System 그룹 외 다른 주체에 '권한이 설정된 경우'.
+        # 권한 수준(FullControl 여부)과 무관하게 Allow ACE가 존재하면 취약.
+        # 허용 주체는 잘 알려진 SID로 비교(로케일 안전): Administrators(S-1-5-32-544),
+        # SYSTEM(S-1-5-18). 한글 로케일에서 'BUILTIN\Administrators' 등이 현지화되어
+        # 문자열 매칭이 어긋나는 문제를 방지하기 위해 SID로 식별하며, 번역 실패 시에만
+        # 이름 부분 문자열로 보조 판단한다.
+        $allowedSids = @('S-1-5-32-544', 'S-1-5-18')
+
+        foreach ($ace in $acl.Access) {
+            # Deny ACE는 권한 부여가 아니므로 판단 대상에서 제외
+            if ($ace.AccessControlType -ne 'Allow') {
                 continue
-            } else {
-                # Check if any other account has Allow + FullControl
-                if ($line -match 'Allow' -and $line -match 'FullControl') {
-                    $hasUnauthorized = $true
-                    break
+            }
+
+            $identity = $ace.IdentityReference.Value
+            $sid = $null
+            try {
+                $sid = $ace.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+            } catch {
+                $sid = $null
+            }
+
+            $isAllowedPrincipal = $false
+            if ($sid -and ($allowedSids -contains $sid)) {
+                $isAllowedPrincipal = $true
+            } elseif (-not $sid) {
+                # SID 번역 실패 시 이름 기반 보조 판단
+                if ($identity -match 'BUILTIN\\Administrators' -or $identity -match 'NT AUTHORITY\\SYSTEM') {
+                    $isAllowedPrincipal = $true
                 }
+            }
+
+            if (-not $isAllowedPrincipal) {
+                # Administrator,System 외 주체에 권한이 부여됨 -> 취약
+                $hasUnauthorized = $true
+                break
             }
         }
 

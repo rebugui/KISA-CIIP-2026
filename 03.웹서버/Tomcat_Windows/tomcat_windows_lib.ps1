@@ -152,14 +152,7 @@ function Test-TomcatBroadPrincipal {
     try { $sid = $Identity.Translate([System.Security.Principal.SecurityIdentifier]).Value }
     catch { $sid = [string]$Identity }
 
-    return @(
-        $sid -eq 'S-1-1-0',
-        $sid -eq 'S-1-5-11',
-        $sid -eq 'S-1-5-32-545',
-        $sid -eq 'S-1-5-32-546',
-        $sid -match '-513$',
-        ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users'
-    ) -contains $true
+    return ($sid -eq 'S-1-1-0') -or ($sid -eq 'S-1-5-11') -or ($sid -eq 'S-1-5-32-545') -or ($sid -eq 'S-1-5-32-546') -or ($sid -match '-513$') -or (([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users')
 }
 
 function Test-TomcatAnyRight {
@@ -377,7 +370,11 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'GOOD' 'No broad local user ACL entries were found on assessed Tomcat paths.' "Assessed paths: $($targets -join ', ')" 'Get-Acl Tomcat config and web paths'
         }
         'WEB-15' {
-            $mapping = @([regex]::Matches($webText, '(?is)<servlet-name>\s*(cgi|invoker|ssi)\s*</servlet-name>|CGIServlet|SSIServlet|InvokerServlet') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+            # Stock Tomcat conf/web.xml ships the CGI/SSI/Invoker servlet definitions COMMENTED OUT
+            # (disabled by default). Only ACTIVE (non-commented) script mappings are unnecessary
+            # mappings per the criteria, so strip XML comments before matching to avoid false VULNERABLE.
+            $webTextActive = [regex]::Replace($webText, '(?s)<!--.*?-->', '')
+            $mapping = @([regex]::Matches($webTextActive, '(?is)<servlet-name>\s*(cgi|invoker|ssi)\s*</servlet-name>|CGIServlet|SSIServlet|InvokerServlet') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
             if ($mapping.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Unnecessary Tomcat servlet/script mapping evidence was found.' ($mapping -join "`n") 'Parse web.xml script servlet mappings' }
             # web.xml이 존재/판독되지 않으면(빈 WebXml) 정상 설정과 부재/판독불가를 구분할 수 없으므로 MANUAL 처리
             if ($state.WebXml.Count -eq 0 -or [string]::IsNullOrWhiteSpace($webText)) { return New-TomcatResult 'MANUAL' 'No readable Tomcat web.xml was found; cannot confirm absence of unnecessary script mappings. Verify web.xml manually.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml script servlet mappings' }
@@ -404,7 +401,10 @@ function Invoke-TomcatWindowsCheck {
         'WEB-19' {
             # 가이드라인 Step 1: SSIServlet(<servlet-name>SSIServlet</servlet-name>)뿐 아니라
             # SSIFilter(<filter-name>SSIFilter</filter-name>)도 동등한 SSI 활성화 메커니즘이므로 함께 점검
-            $ssi = @([regex]::Matches($webText, '(?is)<servlet-name>\s*ssi\s*</servlet-name>|SSIServlet|<filter-name>\s*SSIFilter\s*</filter-name>|SSIFilter') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+            # 단, Tomcat 기본 conf/web.xml은 SSI servlet/filter 정의를 주석(<!-- -->) 처리하여 비활성 상태로 배포하므로
+            # 주석을 제거한 활성 설정만 매칭해야 비활성(criteria_good) 상태를 취약으로 오탐하지 않음
+            $webTextActive = [regex]::Replace($webText, '(?s)<!--.*?-->', '')
+            $ssi = @([regex]::Matches($webTextActive, '(?is)<servlet-name>\s*ssi\s*</servlet-name>|SSIServlet|<filter-name>\s*SSIFilter\s*</filter-name>|SSIFilter') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
             if ($ssi.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat SSI servlet/filter evidence was found.' ($ssi -join "`n") 'Parse web.xml SSI servlet/filter settings' }
             # web.xml이 존재/판독되지 않으면(빈 WebXml) 정상 설정과 부재/판독불가를 구분할 수 없으므로 MANUAL 처리
             if ($state.WebXml.Count -eq 0 -or [string]::IsNullOrWhiteSpace($webText)) { return New-TomcatResult 'MANUAL' 'No readable Tomcat web.xml was found; cannot confirm absence of SSI servlet/filter. Verify web.xml manually.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml SSI servlet/filter settings' }
@@ -436,7 +436,11 @@ function Invoke-TomcatWindowsCheck {
         'WEB-23' {
             $ldap = @([regex]::Matches($serverText, '(?is)<Realm\b[^>]*(JNDIRealm|ldap|connectionURL)[^>]*>') | ForEach-Object { $_.Value.Trim() })
             if ($ldap.Count -eq 0) { return New-TomcatResult 'N/A' 'No Tomcat LDAP/JNDI Realm evidence was found.' "server.xml files: $($state.ServerXml -join ', ')" 'Parse server.xml LDAP/JNDI Realm settings' }
-            $weak = @($ldap | Where-Object { $_ -match '(?i)digest\s*=\s*"(MD5|SHA-1|SHA1|NONE|PLAIN)"' -or $_ -notmatch '(?i)digest\s*=' })
+            # Allowlist mirror of the Linux WEB23_check.sh: a Realm is SAFE only when its digest
+            # attribute is an explicit SHA-256/384/512 (or SSHA-256/384/512) value. Any other case —
+            # a weak/aliased digest (MD5/SHA-1/SHA1/NONE/PLAIN, or the SHA-1-class aliases SHA/SSHA),
+            # or no digest attribute at all — is treated as weak/missing => VULNERABLE.
+            $weak = @($ldap | Where-Object { $_ -notmatch '(?i)digest\s*=\s*"\s*(SHA-?256|SHA-?384|SHA-?512|SSHA-?256|SSHA-?384|SSHA-?512)\s*"' })
             if ($weak.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat LDAP/JNDI Realm digest algorithm is missing or weak.' ($weak -join "`n") 'Parse server.xml LDAP/JNDI Realm digest settings' }
             return New-TomcatResult 'GOOD' 'Tomcat LDAP/JNDI Realm digest algorithm evidence was found and is not obviously weak.' ($ldap -join "`n") 'Parse server.xml LDAP/JNDI Realm digest settings'
         }

@@ -86,6 +86,7 @@ diagnose() {
         bind_conf_files=("/etc/bind/named.conf" "/etc/bind/named.conf.local" "/etc/bind/named.conf.options" "/etc/named.conf")
     fi
 
+    local transfer_seen=false
     for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
@@ -94,6 +95,7 @@ diagnose() {
             # allow-transfer 설정 확인 (멀티라인 블록 평탄화 후 판정)
             local allow_transfer=$(grep -v '^[[:space:]]*//' "$conf_file" 2>/dev/null | grep -v '^[[:space:]]*#' | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || echo "")
             if [ -n "$allow_transfer" ]; then
+                transfer_seen=true
                 dns_info="${dns_info}${allow_transfer}${newline}"
 
                 # "any" 또는 "none" 확인
@@ -108,8 +110,9 @@ diagnose() {
                     dns_info="${dns_info}allow-transfer가 특정 호스트로 제한됨${newline}"
                 fi
             else
-                # 기본값은 any이므로 명시적 제한이 필요함
-                issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
+                # 개별 파일에 allow-transfer가 없는 것은 정상일 수 있으므로 기록만 함
+                # (전체 설정에 allow-transfer가 전혀 없는 경우에만 취약으로 판정)
+                dns_info="${dns_info}allow-transfer 설정 없음${newline}"
             fi
 
             # also-notify 확인 (안전한 설정)
@@ -125,6 +128,11 @@ diagnose() {
        ps -ef 2>/dev/null | grep -w "named" | grep -v "grep" | grep -q "."; then
         dns_configured=true
         dns_info="${dns_info}${newline}DNS 서비스 실행 중${newline}"
+    fi
+
+    # 전체 설정에서 allow-transfer가 전혀 발견되지 않으면 기본값(any)이 적용되므로 취약
+    if [ "$dns_configured" = true ] && [ "$transfer_seen" = false ]; then
+        issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
     fi
 
     # 최종 판정

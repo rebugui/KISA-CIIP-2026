@@ -91,15 +91,35 @@ diagnose() {
     for xml_pattern in "${web_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                # SSI Servlet 및 SSIFilter 확인 (주석 제외)
+                # SSI Servlet 및 SSIFilter 확인 (활성 설정만; 주석 제외)
                 # 가이드라인 Step 1: SSIServlet(<servlet-name>SSIServlet</servlet-name>) 또는
                 # SSIFilter(<filter-name>SSIFilter</filter-name>) 모두 SSI 활성화 메커니즘
                 # 주의: -E(ERE) 사용. BRE에서 | 는 리터럴로 처리되어 alternation이 동작하지 않음
-                local found_ssi=$(grep -iE "SSIServlet|SSIFilter|<servlet-name>\s*ssi\s*</servlet-name>|<filter-name>\s*SSIFilter\s*</filter-name>" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                # 기본 Tomcat conf/web.xml 은 SSI 서블릿을 여러 줄 <!-- ... --> 블록 안에
+                # 비활성(주석) 상태로 배포한다. 줄 시작(^\s*<!--) 필터만으로는 블록 내부의
+                # <servlet-class>...SSIServlet</servlet-class> 줄을 제거하지 못해 비활성 SSI를
+                # VULNERABLE 로 오판한다. 따라서 awk 로 <!-- ... --> 주석 구간(여러 줄/동일 줄)을
+                # 먼저 제거한 뒤 매칭하여 활성(미주석) SSI 만 탐지한다. 후행 인라인 주석이 붙은
+                # 활성 SSI 라인은 주석 부분만 제거되고 활성 토큰은 남으므로 계속 탐지된다.
+                local found_ssi=$(awk '
+                    {
+                        line = $0; out = ""
+                        while (length(line) > 0) {
+                            if (incomment) {
+                                p = index(line, "-->")
+                                if (p == 0) { line = ""; break }
+                                line = substr(line, p + 3); incomment = 0
+                            } else {
+                                p = index(line, "<!--")
+                                if (p == 0) { out = out line; line = ""; break }
+                                out = out substr(line, 1, p - 1)
+                                line = substr(line, p + 4); incomment = 1
+                            }
+                        }
+                        print out
+                    }
+                ' "${xml_file}" 2>/dev/null | grep -iE "SSIServlet|SSIFilter|<servlet-name>\s*ssi\s*</servlet-name>|<filter-name>\s*SSIFilter\s*</filter-name>" || true)
                 if [ -n "${found_ssi}" ]; then
-                    # 줄 시작 주석(^\s*<!--)은 위 grep -v 에서 이미 제거됨.
-                    # 후행 인라인 주석이 붙은 활성 SSI 라인까지 억제하면 활성 SSI를
-                    # 놓쳐 GOOD으로 오판되므로 추가 <!-- 억제는 적용하지 않는다.
                     ssi_config="${found_ssi}"
                     has_ssi=true
                 fi
@@ -108,7 +128,7 @@ diagnose() {
         done
     done
 
-    command_executed="grep -iE 'SSIServlet|SSIFilter|<servlet-name>\\s*ssi\\s*</servlet-name>|<filter-name>\\s*SSIFilter\\s*</filter-name>' /etc/tomcat*/web.xml 2>/dev/null | grep -v '^\\s*<!--' | head -3"
+    command_executed="awk '<!-- ... --> 주석 구간 제거' /etc/tomcat*/web.xml 2>/dev/null | grep -iE 'SSIServlet|SSIFilter|<servlet-name>\\s*ssi\\s*</servlet-name>|<filter-name>\\s*SSIFilter\\s*</filter-name>' | head -3"
     command_result="${ssi_config:-SSI Servlet/Filter not found or commented}"
 
     if [ "${has_ssi}" = true ]; then

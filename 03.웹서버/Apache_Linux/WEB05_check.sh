@@ -125,44 +125,109 @@ diagnose() {
         return 0
     fi
 
+    # Build the complete set of configuration files/directories to scan.
+    # The main config plus Debian (mods-enabled/sites-available/conf-available)
+    # AND RHEL/EL drop-in dirs (conf.d/conf.modules.d), and any files pulled in
+    # via Include/IncludeOptional directives. RHEL httpd loads mod_cgi and per-app
+    # config from these drop-in dirs (httpd.conf only has `Include conf.modules.d/*.conf`),
+    # so scanning the main config alone misses genuinely unrestricted CGI.
+    local apache_root=""
+    apache_root="$(dirname "$(dirname "${apache_conf}")")"   # /etc/httpd/conf/httpd.conf -> /etc/httpd
+
+    local -a scan_targets=("${apache_conf}")
+    local -a candidate_dirs=(
+        "/etc/apache2/mods-enabled"
+        "/etc/apache2/sites-available"
+        "/etc/apache2/conf-available"
+        "/etc/apache2/sites-enabled"
+        "/etc/apache2/conf-enabled"
+        "/etc/httpd/conf.d"
+        "/etc/httpd/conf.modules.d"
+        "${apache_root}/conf.d"
+        "${apache_root}/conf.modules.d"
+    )
+    local enumeration_complete=1
+    local d="" f="" inc_path="" g=""
+    for d in "${candidate_dirs[@]}"; do
+        if [ -d "${d}" ]; then
+            while IFS= read -r f; do
+                [ -n "${f}" ] && scan_targets+=("${f}")
+            done < <(find "${d}" -type f \( -name "*.conf" -o -name "*.load" \) 2>/dev/null || true)
+        fi
+    done
+
+    # Resolve Include / IncludeOptional directives from the main config (best effort).
+    # Relative globs are resolved against the server root (dir-of-dir of the config).
+    while IFS= read -r inc_path; do
+        [ -z "${inc_path}" ] && continue
+        case "${inc_path}" in
+            /*) g="${inc_path}" ;;
+            *)  g="${apache_root}/${inc_path}" ;;
+        esac
+        local matched=0
+        for f in ${g}; do
+            if [ -f "${f}" ]; then
+                scan_targets+=("${f}")
+                matched=1
+            fi
+        done
+        # An Include target that resolved to nothing readable means the CGI
+        # configuration cannot be fully enumerated from this host context.
+        [ "${matched}" -eq 0 ] && enumeration_complete=0
+    done < <(grep -hE "^[[:space:]]*Include(Optional)?[[:space:]]+" "${apache_conf}" 2>/dev/null \
+             | grep -v "^[[:space:]]*#" \
+             | sed -E 's/^[[:space:]]*Include(Optional)?[[:space:]]+//; s/[[:space:]]*$//; s/^"//; s/"$//' || true)
+
     # Check for CGI module loaded
     local cgi_module_loaded=""
-    cgi_module_loaded=$(grep -E "LoadModule.*cgi_module|LoadModule.*cgid_module" "${apache_conf}" /etc/apache2/mods-enabled/*.load 2>/dev/null | grep -v "^\s*#" | head -3 || true)
+    cgi_module_loaded=$(grep -E "LoadModule.*cgi_module|LoadModule.*cgid_module" "${scan_targets[@]}" 2>/dev/null | grep -v "^\s*#" | head -3 || true)
 
     # Check for ScriptAlias (restricts CGI to specific directories)
     local scriptalias_found=""
-    scriptalias_found=$(grep -r "ScriptAlias" "${apache_conf}" /etc/apache2/sites-available/ /etc/apache2/conf-available/ 2>/dev/null | grep -v "^\s*#" | head -5 || true)
+    scriptalias_found=$(grep -E "ScriptAlias" "${scan_targets[@]}" 2>/dev/null | grep -v "^\s*#" | head -5 || true)
 
     # Check for Options ExecCGI (enables CGI execution in directories)
     local exec_cgi_found=""
-    exec_cgi_found=$(grep -r "Options.*ExecCGI" "${apache_conf}" /etc/apache2/sites-available/ /etc/apache2/conf-available/ 2>/dev/null | grep -v "^\s*#" | grep -v "Options.*-ExecCGI" | head -5 || true)
+    exec_cgi_found=$(grep -E "Options.*ExecCGI" "${scan_targets[@]}" 2>/dev/null | grep -v "^\s*#" | grep -v "Options.*-ExecCGI" | head -5 || true)
 
-    command_executed="grep -E 'LoadModule.*cgi' ${apache_conf}; grep -r 'ScriptAlias' ${apache_conf} /etc/apache2/sites-available/; grep -r 'Options.*ExecCGI' ${apache_conf} /etc/apache2/sites-available/"
+    # Check for AddHandler/SetHandler cgi-script (enables CGI without ScriptAlias)
+    local cgi_handler_found=""
+    cgi_handler_found=$(grep -E "(AddHandler|SetHandler).*cgi-script" "${scan_targets[@]}" 2>/dev/null | grep -v "^\s*#" | head -5 || true)
 
-    if [ -z "${cgi_module_loaded}" ] && [ -z "${exec_cgi_found}" ]; then
-        # CGI module not loaded and no ExecCGI found
+    command_executed="grep -E 'LoadModule.*cgi|ScriptAlias|Options.*ExecCGI|(Add|Set)Handler.*cgi-script' ${apache_conf} + conf.d/conf.modules.d + Include-resolved *.conf"
+
+    if [ -z "${cgi_module_loaded}" ] && [ -z "${exec_cgi_found}" ] && [ -z "${cgi_handler_found}" ]; then
+        # CGI not in use: no module loaded, no ExecCGI, no cgi-script handler.
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="CGI 모듈이 로드되지 않았으며 Options ExecCGI 설정도 없습니다. CGI 스크립트 실행이 비활성화되어 있습니다."
-        command_result="No CGI module or ExecCGI found"
-    elif [ -n "${scriptalias_found}" ] && [ -n "${exec_cgi_found}" ]; then
-        # ScriptAlias found and ExecCGI found (CGI is restricted to specific directories)
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="CGI 실행이 ScriptAlias로 지정된 디렉터리(/cgi-bin/ 등)로 제한되어 있습니다. CGI 스크립트 실행이 적절하게 제한됩니다."
-        command_result="ScriptAlias: ${scriptalias_found}"
-    elif [ -n "${exec_cgi_found}" ]; then
-        # ExecCGI found without ScriptAlias (potential unrestricted CGI execution)
+        inspection_summary="CGI 모듈이 로드되지 않았으며 Options ExecCGI 및 cgi-script 핸들러 설정도 없습니다. CGI 스크립트 실행이 비활성화되어 있습니다."
+        command_result="No CGI module, ExecCGI, or cgi-script handler found"
+    elif [ -n "${exec_cgi_found}" ] && [ -z "${scriptalias_found}" ]; then
+        # ExecCGI enabled without ScriptAlias (unrestricted CGI execution).
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="Options ExecCGI가 설정되어 있으나 ScriptAlias 제한이 없습니다. 모든 디렉터리에서 CGI 실행이 가능할 수 있어 보안 위험이 있습니다. ScriptAlias로 제한하거나 ExecCGI를 제거하세요."
-        command_result="ExecCGI found without ScriptAlias restriction"
+        command_result="ExecCGI found without ScriptAlias restriction: ${exec_cgi_found}"
+    elif [ -n "${cgi_handler_found}" ] && [ -z "${scriptalias_found}" ]; then
+        # cgi-script handler configured without ScriptAlias (unrestricted CGI execution).
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="AddHandler/SetHandler cgi-script가 설정되어 있으나 ScriptAlias 제한이 없습니다. 지정되지 않은 디렉터리에서 CGI 실행이 가능할 수 있어 보안 위험이 있습니다. ScriptAlias로 제한하거나 cgi-script 핸들러를 제거하세요."
+        command_result="cgi-script handler found without ScriptAlias restriction: ${cgi_handler_found}"
+    elif [ "${enumeration_complete}" -eq 0 ]; then
+        # CGI is in use and a ScriptAlias exists, but Include/IncludeOptional targets
+        # could not be fully resolved on this host, so we cannot prove every CGI-enabled
+        # path is restricted. Route to manual judgment rather than asserting GOOD.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="CGI가 사용 중이나 Include/IncludeOptional로 포함된 설정 파일을 모두 확인할 수 없어 CGI 실행 디렉터리 제한 여부를 자동으로 판단할 수 없습니다. 포함된 모든 설정 파일에서 Options ExecCGI 및 cgi-script 핸들러가 ScriptAlias로 지정된 디렉터리에 한정되는지 수동으로 확인하세요."
+        command_result="CGI in use but configuration could not be fully enumerated (unresolved Include directives)"
     else
-        # ScriptAlias found but no ExecCGI (CGI likely properly restricted)
+        # CGI is in use but ScriptAlias restricts execution to designated directories.
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="CGI 실행이 ScriptAlias로 지정된 디렉터리로 제한되어 있습니다. Options ExecCGI가 명시되지 않았으나 ScriptAlias가 CGI 실행 경로를 제한합니다."
-        command_result="ScriptAlias found: ${scriptalias_found}"
+        inspection_summary="CGI 실행이 ScriptAlias로 지정된 디렉터리로 제한되어 있습니다. CGI 스크립트 실행이 적절하게 제한됩니다."
+        command_result="ScriptAlias restriction found: ${scriptalias_found}"
     fi
 
     # Run-all 모드 확인

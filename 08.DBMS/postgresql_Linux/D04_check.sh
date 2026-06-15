@@ -75,33 +75,40 @@ diagnose() {
         return 0
     fi
 
-    # superuser 권한 확인
-    local superuser_query="SELECT rolname FROM pg_roles WHERE rolsuper=true;"
+    # 관리자 권한 확인 (SUPERUSER/CREATEROLE/CREATEDB)
+    # rolsuper만 보면 비-슈퍼유저의 권한 상승 권한(CREATEROLE/CREATEDB)을 놓치므로
+    # Windows 진단 로직과 동일하게 관리자급 권한을 모두 포함하여 조회한다.
+    local superuser_query="SELECT rolname FROM pg_roles WHERE rolsuper OR rolcreaterole OR rolcreatedb;"
     command_executed="psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_ADMIN_USER} -d postgres -c \"${superuser_query}\""
     command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -tAc "${superuser_query}" 2>/dev/null | grep -v '^$' || true)
 
     # 결과 분석
-    local superuser_count=0
+    local admin_count=0
+    local nondefault_admins=""
     if [ -n "$command_result" ]; then
         # 헤더 제외하고 실제 rolname만 카운트
-        superuser_count=$(echo "$command_result" | grep -v "^$" | grep -v "rolname" | wc -l)
+        admin_count=$(echo "$command_result" | grep -v "^$" | grep -v "rolname" | wc -l)
+        # 기본 관리자(postgres)를 제외한 비-기본 관리자 권한 계정만 추출
+        nondefault_admins=$(echo "$command_result" | grep -v "^$" | grep -v "rolname" | grep -vx "postgres" || true)
     fi
 
-    if [ -z "$command_result" ] || [ "$superuser_count" -eq 0 ]; then
+    if [ -z "$command_result" ] || [ "$admin_count" -eq 0 ]; then
         # 연결은 성공했으나 pg_roles 조회 결과가 비어 있음(쿼리 오류/권한 문제).
-        # SUPERUSER 계정은 최소 postgres 1개가 반환되어야 정상이므로, 0건은 증거 미확보로 간주.
+        # 관리자 권한 계정은 최소 postgres 1개가 반환되어야 정상이므로, 0건은 증거 미확보로 간주.
         # 양호(0개)로 오판하지 않도록 수동진단 처리.
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="SUPERUSER 권한 계정 조회 결과가 비어 있어 자동 판정이 불가합니다(쿼리 오류 가능). 수동으로 관리자 권한 부여 계정을 확인하세요."
-    elif [ "$superuser_count" -le 1 ]; then
+        inspection_summary="관리자 권한 계정 조회 결과가 비어 있어 자동 판정이 불가합니다(쿼리 오류 가능). 수동으로 관리자 권한 부여 계정을 확인하세요."
+    elif [ -z "$nondefault_admins" ]; then
+        # SUPERUSER/CREATEROLE/CREATEDB 보유 계정이 기본 관리자(postgres) 뿐인 경우
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="SUPERUSER 권한 계정 ${superuser_count}개 (양호 - postgres만 보유)"
+        inspection_summary="관리자 권한(SUPERUSER/CREATEROLE/CREATEDB) 계정 ${admin_count}개 (양호 - postgres만 보유)"
     else
+        # postgres 외에 관리자급 권한(SUPERUSER/CREATEROLE/CREATEDB)을 보유한 비-기본 계정 존재
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="SUPERUSER 권한 계정 ${superuser_count}개 (취약 - 최소화 권장): $(echo "$command_result" | grep -v "rolname" | tr '\n' ', ')"
+        inspection_summary="관리자 권한(SUPERUSER/CREATEROLE/CREATEDB)이 불필요한 계정에 부여됨 (취약 - 최소화 권장): $(echo "$nondefault_admins" | tr '\n' ', ')"
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

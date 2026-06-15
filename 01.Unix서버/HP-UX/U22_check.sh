@@ -78,13 +78,21 @@ diagnose() {
         local file_perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$target_file" 2>/dev/null)
         local file_owner=$(perl -e '@s=lstat(shift); printf "%s:%s\n", getpwuid($s[4]), getgrgid($s[5])' "$target_file" 2>/dev/null)
 
-        # 소유자 및 권한 확인
-        if [ "$file_owner" = "root:root" ] && [ "$file_perms" = "0644" ]; then
-            is_secure=true
-            details="권한: $file_perms, 소유자: $file_owner"
-        else
-            details="권한: $file_perms, 소유자: $file_owner"
+        # 소유자 및 권한 확인 (가이드: 소유자 root/bin/sys, 권한 644 이하)
+        # 644에 없는 비트(그룹/기타 쓰기, 실행, setuid 등)가 없으면 양호 (444/640/600 등 허용)
+        local owner_user="${file_owner%%:*}"
+        local owner_ok=false
+        local perm_ok=false
+        case "$owner_user" in
+            root|bin|sys) owner_ok=true ;;
+        esac
+        if [ -n "$file_perms" ] && [ $(( 8#$file_perms & ~8#644 & 8#7777 )) -eq 0 ]; then
+            perm_ok=true
         fi
+        if [ "$owner_ok" = true ] && [ "$perm_ok" = true ]; then
+            is_secure=true
+        fi
+        details="권한: $file_perms, 소유자: $file_owner"
 
         # 최종 판정
         if [ "$is_secure" = true ]; then

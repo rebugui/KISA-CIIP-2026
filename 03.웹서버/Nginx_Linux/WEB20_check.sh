@@ -136,10 +136,12 @@ diagnose() {
             inspection_summary="HTTPS가 활성화되어 있지 않습니다. SSL/TLS 설정 권장."
         fi
     elif [ "${has_weak_protocols}" = true ]; then
-        # ssl_protocols에 약한 프로토콜(SSLv2/SSLv3/TLSv1/TLSv1.1)이 포함됨 → 취약
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="SSL/TLS는 활성화되어 있으나 ssl_protocols에 취약한 프로토콜(SSLv2/SSLv3/TLSv1/TLSv1.1)이 포함되어 있습니다. TLSv1.2 TLSv1.3 만 허용하도록 설정하세요. 설정값:${protocol_settings}"
+        # WEB-20 판단 기준은 SSL/TLS 활성화 여부(활성화↔비활성화)로 한정됨.
+        # 프로토콜 버전 강화(TLSv1.2/1.3 전용)는 본 항목의 합격 기준이 아니라 권고 예시이므로,
+        # SSL/TLS가 활성화된 상태(인증서+443/ssl 리스너 존재)는 약한 프로토콜 포함 여부와 무관하게 양호로 판단한다.
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="HTTPS(SSL/TLS)가 활성화되어 있어 SSL/TLS 활성화 기준을 충족합니다. (참고: ssl_protocols에 레거시 프로토콜(SSLv2/SSLv3/TLSv1/TLSv1.1)이 포함되어 있어 TLSv1.2 TLSv1.3 만 허용하도록 강화 권고) 설정값:${protocol_settings}"
     elif [ "${has_ssl_protocols}" != true ]; then
         # SSL은 활성화되었으나 ssl_protocols 미지정. Nginx 기본값(1.18 이전)은 TLSv1/TLSv1.1을 포함하므로
         # 약한 프로토콜 차단 여부를 정적으로 단정할 수 없어 수동진단으로 분류한다.

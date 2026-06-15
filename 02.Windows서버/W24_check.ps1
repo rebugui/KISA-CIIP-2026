@@ -68,15 +68,21 @@ try {
 
             foreach ($site in $ftpSites) {
                 $ipSecurity = Get-WebConfiguration -Filter 'system.ftpServer/security/ipSecurity' -PSPath 'IIS:\' -Location $site.Name -ErrorAction SilentlyContinue
-                # 명시적 허용 규칙이 있거나 미등록 클라이언트 접근을 거부(AllowUnlisted=false)하면 제한된 것으로 본다.
+                # '특정 IP에서만 접속 허용'은 미등록 클라이언트 접근 거부(AllowUnlisted=false)가 전제이며
+                # 허용할 IP에 대한 명시적 Allow 규칙이 하나 이상 있어야 한다(거부-우선 모델).
+                # AllowUnlisted=true(IIS 기본값=전체 개방)이면 Allow 규칙이 있어도 미등록 클라이언트가 그대로 접속되므로 취약.
                 $ruleCount = 0
                 if ($ipSecurity -and $ipSecurity.Collection) { $ruleCount = @($ipSecurity.Collection).Count }
+                $allowRuleCount = 0
+                if ($ipSecurity -and $ipSecurity.Collection) {
+                    $allowRuleCount = @($ipSecurity.Collection | Where-Object { $_.allowed -eq $true }).Count
+                }
                 $allowUnlisted = if ($ipSecurity) { $ipSecurity.allowUnlisted } else { $true }
 
-                if ($ipSecurity -and ($allowUnlisted -eq $false -or $ruleCount -gt 0)) {
-                    $restricted += "$($site.Name) (AllowUnlisted=$allowUnlisted, Rules=$ruleCount)"
+                if ($ipSecurity -and ($allowUnlisted -eq $false) -and ($allowRuleCount -gt 0)) {
+                    $restricted += "$($site.Name) (AllowUnlisted=$allowUnlisted, Rules=$ruleCount, AllowRules=$allowRuleCount)"
                 } else {
-                    $unrestricted += "$($site.Name) (AllowUnlisted=$allowUnlisted, Rules=$ruleCount)"
+                    $unrestricted += "$($site.Name) (AllowUnlisted=$allowUnlisted, Rules=$ruleCount, AllowRules=$allowRuleCount)"
                 }
             }
 

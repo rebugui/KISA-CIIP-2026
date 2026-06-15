@@ -42,12 +42,34 @@ try {
         $deniedExts = @()
 
         # 1) 처리기 매핑에서 *.asa / *.asax 확인
+        # 주의: Get-WebConfiguration 은 병합된(상속 포함) 처리기 컬렉션을 반환한다.
+        # ASP.NET 역할이 설치된 기본 IIS 는 .NET 루트 web.config 의 보호용 매핑
+        # (path='*.asax' -> System.Web.HttpForbiddenHandler)을 모든 사이트에 상속시키는데,
+        # 이는 global.asax 직접 노출을 차단하는 "권고된 보안 상태(criteria_good)"이지 노출형 매핑이 아니다.
+        # 따라서 (a) 상속된 항목(IsInherited)은 제외하고, (b) 실행되지 않는 차단 핸들러
+        # (HttpForbiddenHandler/HttpNotFoundHandler 등, scriptProcessor 미지정)는 제외하여,
+        # 실제로 실행 가능한(노출형) *.asa/*.asax 스크립트 매핑이 존재할 때에만 취약으로 판정한다.
         $handlers = Get-WebConfiguration -Filter "/system.webServer/handlers" -Location $siteName -ErrorAction SilentlyContinue
         if ($handlers) {
             foreach ($handler in $handlers.Collection) {
                 $hPath = "$($handler.path)"
                 foreach ($ext in $dangerousExts) {
                     if ($hPath -like "*$ext") {
+                        # 상속된 전역 기본 매핑은 사이트별 명시 설정이 아니므로 제외
+                        $hInherited = $false
+                        try {
+                            if (($handler.PSObject.Properties.Name -contains 'IsInherited') -and ($handler.IsInherited)) {
+                                $hInherited = $true
+                            }
+                        } catch { $hInherited = $false }
+                        if ($hInherited) { continue }
+
+                        # 실행되지 않는 차단/거부 핸들러는 노출형 매핑이 아니므로 제외
+                        $hType = "$($handler.type)"
+                        $hScriptProcessor = "$($handler.scriptProcessor)"
+                        $isForbidden = ($hType -match 'HttpForbiddenHandler' -or $hType -match 'HttpNotFoundHandler')
+                        if ($isForbidden -and [string]::IsNullOrWhiteSpace($hScriptProcessor)) { continue }
+
                         $activeMappings += "$hPath -> $($handler.name)"
                     }
                 }

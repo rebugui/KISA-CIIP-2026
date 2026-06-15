@@ -64,6 +64,8 @@ diagnose() {
     local hosts_equiv_exists=0
     local hosts_equiv_details=""
     local details=""
+    # 보안 위반 카운트(소유자 불일치/권한 초과/'+' 설정). 0 이면 양호.
+    local insecure_count=0
 
     # Capture raw find output for .rhosts files
     local rhosts_find=$(find /home -name '.rhosts' 2>/dev/null)
@@ -77,9 +79,29 @@ diagnose() {
         ((hosts_equiv_exists++)) || true
         local perms=$(stat -c "%a" "/etc/hosts.equiv" 2>/dev/null)
         local owner=$(stat -c "%U:%G" "/etc/hosts.equiv" 2>/dev/null)
+        local owner_user=$(stat -c "%U" "/etc/hosts.equiv" 2>/dev/null)
         local size=$(stat -c "%s" "/etc/hosts.equiv" 2>/dev/null)
+        # 주석(#)을 제외한 라인에서 '+' 단독 설정(++/+ 사용자/호스트+ 등) 존재 여부
+        local has_plus=$(grep -vE '^[[:space:]]*#' "/etc/hosts.equiv" 2>/dev/null | grep -E '(^|[[:space:]])\+' || true)
+        local equiv_issue=""
 
-        hosts_equiv_details="/etc/hosts.equiv 파일 존재 (권한: ${perms}, 소유자: ${owner}, 크기: ${size}bytes)"
+        # 소유자가 root가 아닌 경우
+        if [ "$owner_user" != "root" ]; then
+            ((insecure_count++)) || true
+            equiv_issue="${equiv_issue} [소유자 불일치]"
+        fi
+        # 권한이 600 초과인 경우 (600을 넘는 비트가 있으면 취약)
+        if ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & ~8#600 & 07777 ))" -ne 0 ] 2>/dev/null; then
+            ((insecure_count++)) || true
+            equiv_issue="${equiv_issue} [권한 초과]"
+        fi
+        # '+' 설정이 있는 경우
+        if [ -n "$has_plus" ]; then
+            ((insecure_count++)) || true
+            equiv_issue="${equiv_issue} [+설정 존재]"
+        fi
+
+        hosts_equiv_details="/etc/hosts.equiv 파일 존재 (권한: ${perms}, 소유자: ${owner}, 크기: ${size}bytes)${equiv_issue}"
     fi
 
     # 사용자 홈 디렉터리에서 .rhosts 파일 검색
@@ -98,17 +120,54 @@ diagnose() {
                 local perms=$(stat -c "%a" "$rhosts_path" 2>/dev/null)
                 local owner=$(stat -c "%U" "$rhosts_path" 2>/dev/null)
                 local size=$(stat -c "%s" "$rhosts_path" 2>/dev/null)
+                # 주석(#)을 제외한 라인에서 '+' 설정 존재 여부
+                local has_plus=$(grep -vE '^[[:space:]]*#' "$rhosts_path" 2>/dev/null | grep -E '(^|[[:space:]])\+' || true)
+                local rhosts_issue=""
 
-                rhosts_files="${rhosts_files}${rhosts_path} (권한: ${perms}, 소유자: ${owner}, 크기: ${size}bytes), "
+                # 소유자가 해당 계정 또는 root가 아닌 경우
+                if [ "$owner" != "root" ] && [ "$owner" != "$username" ]; then
+                    ((insecure_count++)) || true
+                    rhosts_issue="${rhosts_issue} [소유자 불일치]"
+                fi
+                # 권한이 600 초과인 경우 (600을 넘는 비트가 있으면 취약)
+                if ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & ~8#600 & 07777 ))" -ne 0 ] 2>/dev/null; then
+                    ((insecure_count++)) || true
+                    rhosts_issue="${rhosts_issue} [권한 초과]"
+                fi
+                # '+' 설정이 있는 경우
+                if [ -n "$has_plus" ]; then
+                    ((insecure_count++)) || true
+                    rhosts_issue="${rhosts_issue} [+설정 존재]"
+                fi
+
+                rhosts_files="${rhosts_files}${rhosts_path} (권한: ${perms}, 소유자: ${owner}, 크기: ${size}bytes)${rhosts_issue}, "
             fi
         fi
     done < /etc/passwd || true
 
     # 결과 판정
+    # 파일이 없거나(첫 분기), 존재하더라도 소유자 root/계정 + 권한<=600 + '+' 없음을
+    # 모두 만족하면(insecure_count==0) 가이드라인상 양호. 하나라도 위반 시에만 취약.
     if [ "$hosts_equiv_exists" -eq 0 ] && [ "$rhosts_count" -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary=".rhosts 및 hosts.equiv 파일 없음 (r 계정 사용 제어 양호)"
+        # 실제 수집 증거(command_result, L73 구성)를 그대로 유지
+        command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
+    elif [ "$insecure_count" -eq 0 ]; then
+        diagnosis_result="GOOD"
+        status="양호"
+        details=""
+
+        if [ "$hosts_equiv_exists" -gt 0 ]; then
+            details="${details}${hosts_equiv_details}. "
+        fi
+
+        if [ "$rhosts_count" -gt 0 ]; then
+            details="${details}.rhosts 파일 ${rhosts_count}개 발견: ${rhosts_files%, }. "
+        fi
+
+        inspection_summary="양호: 파일이 존재하나 소유자/권한(600 이하)/'+' 미설정 기준을 모두 만족함. ${details}"
         # 실제 수집 증거(command_result, L73 구성)를 그대로 유지
         command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
     else

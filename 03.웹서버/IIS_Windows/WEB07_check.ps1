@@ -29,45 +29,79 @@ Write-Host "진단 항목: $ITEM_ID - $ITEM_NAME"
 
 try {
     # IIS 불필요한 파일 확인 (sample, backup, test 파일 등)
-    $unnecessaryFiles = @()
+    # Tier A: 확장자로 명확히 식별되는 백업/임시 파일 (기본 생성 불필요 파일과 1:1 대응) -> 취약
+    $definiteFiles = @()
+    # Tier B: 정상 업무/애플리케이션 콘텐츠와 충돌할 수 있는 모호한 패턴
+    #         (예: robots.txt, license.txt, test.aspx, example.js) -> 수동진단
+    #         기본 설치 산출물(샘플/매뉴얼/테스트)인지 분석가 확인 필요
+    $ambiguousFiles = @()
     $sites = Get-Website
 
     foreach ($site in $sites) {
         $path = $site.PhysicalPath
         if (Test-Path $path) {
-            # 검색할 파일 패턴
-            $patterns = @(
+            # Tier A 패턴: 확장자로 명확한 백업/임시 파일
+            $definitePatterns = @(
                 "*.bak",
                 "*.backup",
                 "*.old",
+                "*.orig",
+                "*.save",
+                "*.swp",
                 "*.tmp",
                 "*.temp",
-                "*~*",
+                "*.dump"
+            )
+            # Tier B 패턴: 이름/확장자만으로 출처(설치 기본 vs 애플리케이션)를 정적으로 판별할 수 없는 파일
+            $ambiguousPatterns = @(
+                "*~",
                 "test.*",
                 "sample.*",
                 "example.*",
+                "*sample*",
+                "*example*",
+                "*readme*",
                 "*.txt"
             )
 
-            foreach ($pattern in $patterns) {
+            foreach ($pattern in $definitePatterns) {
+                $files = Get-ChildItem -Path $path -Filter $pattern -Recurse -ErrorAction SilentlyContinue
+                foreach ($file in $files) {
+                    if ($file.Name -ne "web.config") {
+                        $definiteFiles += "$($file.Name) in $path"
+                    }
+                }
+            }
+
+            foreach ($pattern in $ambiguousPatterns) {
                 $files = Get-ChildItem -Path $path -Filter $pattern -Recurse -ErrorAction SilentlyContinue
                 foreach ($file in $files) {
                     # IIS 구성 파일 제외
                     if ($file.Name -ne "web.config") {
-                        $unnecessaryFiles += "$($file.Name) in $path"
+                        $ambiguousFiles += "$($file.Name) in $path"
                     }
                 }
             }
         }
     }
 
-    $commandExecuted = "Get-ChildItem -Path {webroot} -Filter {*.bak,*.backup,*.old,*.tmp, test.*} -Recurse"
+    $commandExecuted = "Get-ChildItem -Path {webroot} -Filter {[definite] *.bak,*.backup,*.old,*.orig,*.tmp; [ambiguous] *.txt,test.*,sample.*} -Recurse"
 
-    if ($unnecessaryFiles.Count -gt 0) {
+    if ($definiteFiles.Count -gt 0) {
+        # Tier A — 확장자로 명확한 백업/임시 파일 존재 -> 취약
         $finalResult = "VULNERABLE"
-        $summary = "불필요한 파일이 $($unnecessaryFiles.Count)개 발견되었습니다: " + ($unnecessaryFiles[0] + " 등")
+        $summary = "불필요한 백업/임시 파일이 $($definiteFiles.Count)개 발견되었습니다: " + ($definiteFiles[0] + " 등")
         $status = "취약"
-        $commandOutput = $unnecessaryFiles -join "`n"
+        $commandOutput = $definiteFiles -join "`n"
+        if ($ambiguousFiles.Count -gt 0) {
+            $commandOutput += "`n[수동 확인 필요 - 출처 확인]`n" + ($ambiguousFiles -join "`n")
+        }
+    } elseif ($ambiguousFiles.Count -gt 0) {
+        # Tier B — 정상 업무/애플리케이션 콘텐츠와 충돌 가능한 모호한 매칭 -> 수동진단
+        $finalResult = "MANUAL"
+        $summary = "이름/확장자가 sample/example/test/readme 또는 .txt 인 파일이 $($ambiguousFiles.Count)개 발견되었습니다(예: robots.txt). 정상 애플리케이션 파일과 겹칠 수 있으므로, 해당 파일이 웹 서버 기본 설치 시 생성된 불필요한 샘플/매뉴얼/테스트 파일인지 직접 확인하여 양호/취약을 판정하세요."
+        $status = "수동진단"
+        $commandOutput = $ambiguousFiles -join "`n"
     } else {
         $finalResult = "GOOD"
         $summary = "웹 디렉터리에서 불필요한 파일(백업, 샘플, 테스트 파일 등)이 발견되지 않았습니다. (보안 권고사항 준수)"

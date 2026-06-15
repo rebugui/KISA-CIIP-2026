@@ -126,14 +126,22 @@ diagnose() {
            && [[ ! "$dir_other_digit" =~ [2367] ]]; then  # 그룹/기타 쓰기 권한 없음 (700/750 허용)
         # Guideline says 644 for files. For Dir, it implies access control.
 
-           # Check for group/world writable files (AIX: find -perm 지원)
-           local insecure_files=$(find "$log_dir" -type f \( -perm -o+w -o -perm -g+w \) 2>/dev/null | head -5)
+           # 권한이 644를 초과하는 파일(644 외 비트 보유: 추가 exec/SUID/SGID/group·other write 등) 탐지
+           # → 십진 비교가 아닌 비트 마스크(~644 = 7133)로 판정 (RedHat 형제 스크립트와 동일, 예: 755/4755/2644/666 모두 취약)
+           local insecure_files=""
+           while IFS= read -r f_path; do
+               [ -n "${f_path:-}" ] || continue
+               local f_perms=$(perl -le 'printf "%04o\n", (stat shift)[2] & 07777' "$f_path" 2>/dev/null || echo "0000")
+               if [[ "$f_perms" =~ ^[0-7]{3,4}$ ]] && [ $(( (8#${f_perms}) & (8#7133) )) -ne 0 ]; then
+                   insecure_files="${insecure_files}${f_path}(perm:${f_perms}) "
+               fi
+           done <<< "$(find "$log_dir" -type f 2>/dev/null | head -50)"
            # Check for files not owned by root (syslog 데몬 소유는 허용)
            local nonroot_files=$(find "$log_dir" -type f ! -user root ! -user syslog 2>/dev/null | head -5)
 
            if [ -n "$insecure_files" ]; then
                 is_secure=false
-                details="${details}, Group/World-writable files found: ${insecure_files}..."
+                details="${details}, 권한 644 초과 파일: ${insecure_files}..."
            elif [ -n "$nonroot_files" ]; then
                 is_secure=false
                 details="${details}, Non-root owned files found: ${nonroot_files}..."
@@ -156,10 +164,10 @@ diagnose() {
                             details="${details}, ${log} owner invalid ($l_owner)"
                         fi
                         
-                        # Check if group/others writable (쓰기 비트 포함 자릿수: 2,3,6,7 — 마지막 두 자리만 검사, 4자리 perl 출력 호환)
-                        if [[ "$l_perm" =~ [2367].$ ]] || [[ "$l_perm" =~ [2367]$ ]]; then
+                        # 권한 644 초과 여부(644 외 비트: group/other write, 추가 exec, SUID/SGID)를 비트 마스크(~644 = 7133)로 판정
+                        if [[ "$l_perm" =~ ^[0-7]{3,4}$ ]] && [ $(( (8#${l_perm}) & (8#7133) )) -ne 0 ]; then
                              crit_issue=true
-                             details="${details}, ${log} writable by group/others ($l_perm)"
+                             details="${details}, ${log} 권한 644 초과 ($l_perm)"
                         fi
                     fi
                 done || true

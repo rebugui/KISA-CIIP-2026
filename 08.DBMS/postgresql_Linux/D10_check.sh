@@ -56,6 +56,7 @@ diagnose() {
     local command_result=""
     local command_executed=""
     local vulnerabilities_found=0
+    local needs_manual=0
 
     # Initialize PostgreSQL connection variables
     init_postgresql_vars
@@ -80,18 +81,19 @@ diagnose() {
     local pg_hba_path=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -t -c "SHOW hba_file;" 2>/dev/null | xargs || echo "")
 
     if [ -n "$pg_hba_path" ] && [ -f "$pg_hba_path" ]; then
-        # 원격 접속 설정 확인 (0.0.0.0/0 또는 ::/0)
-        local remote_access=$(grep -E "^\s*host\s+all\s+all\s+0\.0\.0\.0/0\s+" "$pg_hba_path" 2>/dev/null || echo "")
-        local remote_access_cidr=$(grep -E "^\s*host\s+all\s+all\s+::/0\s+" "$pg_hba_path" 2>/dev/null || echo "")
+        # 원격 접속 설정 확인 (모든 host 계열 연결 유형 + 0.0.0.0/0 또는 ::/0, DATABASE/USER 무관)
+        local remote_access=$(grep -E "^\s*host(ssl|nossl|gssenc|nogssenc)?\s+\S+\s+\S+\s+(0\.0\.0\.0/0|::/0)(\s|$)" "$pg_hba_path" 2>/dev/null || echo "")
 
-        if [ -n "$remote_access" ] || [ -n "$remote_access_cidr" ]; then
+        if [ -n "$remote_access" ]; then
             ((vulnerabilities_found++)) || true
             inspection_summary="취약: 모든 원격 호스트 접속 허용됨 (0.0.0.0/0 또는 ::/0)"
         else
-            # 특정 호스트만 허용되는지 확인
-            local remote_host_access=$(grep -E "^\s*host\s+" "$pg_hba_path" | grep -v "127\.0\.0\.1" | grep -v "::1" | grep -v "localhost" || echo "")
+            # 로컬 외 원격 host 규칙 존재 여부 확인 (host 계열 연결 유형 포함)
+            local remote_host_access=$(grep -E "^\s*host(ssl|nossl|gssenc|nogssenc)?\s+" "$pg_hba_path" | grep -v "127\.0\.0\.1" | grep -v "::1" | grep -v "localhost" || echo "")
             if [ -n "$remote_host_access" ]; then
-                inspection_summary="양호: 특정 원격 호스트만 접속 허용됨"
+                # 지정 IP 제한 여부는 기관 허용 IP 정책 대비 판단이 필요하므로 수동진단으로 분류
+                needs_manual=1
+                inspection_summary="수동진단: 원격 host 규칙 존재 - 지정된 IP로 제한되었는지 수동 확인 필요"
             else
                 inspection_summary="양호: 원격 접속 제한됨 (로컬만 허용)"
             fi
@@ -110,7 +112,7 @@ diagnose() {
         done
 
         if [ $found_conf -eq 1 ] && [ -f "$pg_hba_path" ]; then
-            local remote_access=$(grep -E "^\s*host\s+all\s+all\s+0\.0\.0\.0/0\s+" "$pg_hba_path" 2>/dev/null || echo "")
+            local remote_access=$(grep -E "^\s*host(ssl|nossl|gssenc|nogssenc)?\s+\S+\s+\S+\s+(0\.0\.0\.0/0|::/0)(\s|$)" "$pg_hba_path" 2>/dev/null || echo "")
             if [ -n "$remote_access" ]; then
                 ((vulnerabilities_found++)) || true
                 inspection_summary="취약: 모든 원격 호스트 접속 허용됨"
@@ -118,6 +120,7 @@ diagnose() {
                 inspection_summary=" 원격 접속 제한됨"
             fi
         else
+            needs_manual=1
             inspection_summary="수동진단: pg_hba.conf 파일 위치 확인 필요"
         fi
     fi
@@ -125,6 +128,9 @@ diagnose() {
     if [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
+    elif [ $needs_manual -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
     else
         diagnosis_result="GOOD"
         status="양호"

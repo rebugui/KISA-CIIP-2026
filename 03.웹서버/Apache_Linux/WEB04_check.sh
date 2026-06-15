@@ -127,13 +127,29 @@ diagnose() {
         return 0
     fi
 
+    # Apache directory listing config can live beyond the main conf via
+    # Include/IncludeOptional (e.g. RHEL/CentOS stock httpd.conf loads conf.d/*.conf).
+    # Scan the standard active include directories for both RHEL and Debian layouts so a
+    # `Options Indexes` placed in an included vhost/app file is not silently missed.
+    # Non-existent directories are harmlessly skipped (grep stderr suppressed below).
+    local apache_scan_paths=(
+        "${apache_conf}"
+        "/etc/httpd/conf.d/"
+        "/etc/httpd/conf.modules.d/"
+        "/etc/apache2/sites-enabled/"
+        "/etc/apache2/conf-enabled/"
+        "/etc/apache2/sites-available/"
+        "/etc/apache2/conf-available/"
+    )
+    local apache_scan_paths_display="${apache_scan_paths[*]}"
+
     # Check for Options Indexes (enabled)
-    indexes_found=$(grep -r "Options.*Indexes" "${apache_conf}" /etc/apache2/sites-available/ /etc/apache2/conf-available/ 2>/dev/null | grep -v "^\s*#" | grep -v "Options.*-Indexes" || true)
+    indexes_found=$(grep -r "Options.*Indexes" "${apache_scan_paths[@]}" 2>/dev/null | grep -v "^\s*#" | grep -v "Options.*-Indexes" || true)
 
     # Check for Options -Indexes (explicitly disabled)
-    indexes_disabled=$(grep -r "Options.*-Indexes" "${apache_conf}" /etc/apache2/sites-available/ /etc/apache2/conf-available/ 2>/dev/null | grep -v "^\s*#" | head -5 || true)
+    indexes_disabled=$(grep -r "Options.*-Indexes" "${apache_scan_paths[@]}" 2>/dev/null | grep -v "^\s*#" | head -5 || true)
 
-    command_executed="grep -r 'Options.*Indexes' ${apache_conf} /etc/apache2/sites-available/ /etc/apache2/conf-available/ 2>/dev/null | grep -v '^\\s*#'"
+    command_executed="grep -r 'Options.*Indexes' ${apache_scan_paths_display} 2>/dev/null | grep -v '^\\s*#'"
 
     if [ -n "${indexes_disabled}" ] && [ -z "${indexes_found}" ]; then
         # Indexes explicitly disabled

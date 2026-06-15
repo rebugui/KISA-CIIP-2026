@@ -97,8 +97,14 @@ diagnose() {
     local has_redirect=false
     local matched_line=""
     local scanned_files=""
-    # RewriteRule 기반 리디렉션은 'RewriteEngine On'이 적용된 경우에만 유효하다.
-    # (Redirect/RedirectMatch 지시어는 RewriteEngine 없이도 동작하므로 별도 처리)
+    # RewriteRule 기반 리디렉션은 'RewriteEngine On'이 적용된 컨텍스트에서만 유효하다.
+    # RewriteEngine 지시어는 <VirtualHost>/<Directory> 컨텍스트별로 적용되며 서로 다른
+    # vhost 간에 상속되지 않으므로, 전역 grep 만으로는 특정 RewriteRule 이 위치한 컨텍스트에서
+    # 엔진이 켜져 있는지 정적으로 단정할 수 없다. 따라서 RewriteRule 기반 https 리디렉션이
+    # 발견되면(Redirect/RedirectMatch 로 확정되지 않은 경우) GOOD 으로 단정하지 않고 수동진단으로
+    # 라우팅한다. (Redirect/RedirectMatch 지시어는 RewriteEngine 없이도 동작하므로 별도 처리)
+    local rewrite_redirect_found=false
+    local rewrite_matched_line=""
     local rewrite_engine_on=false
     for conf_pattern in "${apache_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
@@ -124,13 +130,20 @@ diagnose() {
                     matched_line="${conf_file}: ${hit}"
                     break 2
                 fi
-                # RewriteRule 기반 https 리디렉션은 RewriteEngine On일 때만 유효로 간주
-                if [ "${rewrite_engine_on}" = true ]; then
+                # RewriteRule 기반 https 리디렉션 탐지.
+                # RewriteEngine 은 컨텍스트(vhost/Directory)별로 적용되고 vhost 간 상속되지 않으므로,
+                # 해당 RewriteRule 이 위치한 컨텍스트에서 엔진이 실제로 켜져 있는지는 정적 grep 으로
+                # 단정할 수 없다. 따라서 GOOD 으로 확정(has_redirect)하지 않고, 수동진단 신호만 기록한다.
+                # (Redirect/RedirectMatch 가 별도로 발견되면 위 분기에서 우선 GOOD 확정됨)
+                if [ "${rewrite_redirect_found}" = false ]; then
                     hit=$(grep -niE '^[[:space:]]*RewriteRule[[:space:]]+.*https://' "${conf_file}" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' | head -1 || true)
                     if [ -n "${hit}" ]; then
-                        has_redirect=true
-                        matched_line="${conf_file}: ${hit} (RewriteEngine On)"
-                        break 2
+                        rewrite_redirect_found=true
+                        if [ "${rewrite_engine_on}" = true ]; then
+                            rewrite_matched_line="${conf_file}: ${hit} (RewriteEngine On 지시어가 일부 파일에 존재하나 적용 컨텍스트 확인 필요)"
+                        else
+                            rewrite_matched_line="${conf_file}: ${hit} (RewriteEngine On 미확인)"
+                        fi
                     fi
                 fi
             fi
@@ -149,6 +162,11 @@ diagnose() {
         status="양호"
         inspection_summary="HTTP 접근 시 HTTPS로의 Redirection이 활성화되어 있습니다. (${matched_line})"
         command_result="HTTPS redirection directive found: ${matched_line}"
+    elif [ "${rewrite_redirect_found}" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="https:// 로의 RewriteRule 이 발견되었으나, RewriteEngine 은 <VirtualHost>/<Directory> 컨텍스트별로 적용되고 vhost 간 상속되지 않아 해당 규칙이 실제로 적용되는지 정적으로 확정할 수 없습니다. 80 포트 vhost 컨텍스트에서 RewriteEngine On 적용 및 리디렉션 동작 여부를 수동으로 확인하세요. (${rewrite_matched_line})"
+        command_result="RewriteRule https redirect found; RewriteEngine context not statically verifiable: ${rewrite_matched_line}"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

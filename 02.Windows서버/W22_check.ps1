@@ -86,7 +86,15 @@ try {
                 if ($acl) {
                     foreach ($access in $acl.Access) {
                         # 권한 종류(읽기/쓰기 등)와 무관하게 Everyone에 대한 모든 Allow 권한을 취약으로 간주.
-                        if ($access.AccessControlType -eq 'Allow' -and $access.IdentityReference -match 'Everyone') {
+                        # Everyone 계정은 로케일에 따라 현지화됨(한국어: '모든 사람')되므로 이름 매칭은
+                        # 신뢰할 수 없음. well-known SID S-1-1-0으로 변환해 비교한다(W-43/W-58과 동일).
+                        $sid = $null
+                        try {
+                            $sid = $access.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
+                        } catch {
+                            $sid = $null
+                        }
+                        if ($access.AccessControlType -eq 'Allow' -and ($sid -eq 'S-1-1-0' -or $access.IdentityReference.Value -like '*Everyone*')) {
                             $hasEveryone = $true
                             $everyonePermissions += "$($root.Name) [$($root.Path)] $($access.IdentityReference): $($access.FileSystemRights)"
                         }

@@ -77,34 +77,39 @@ diagnose() {
                 [[ "$line" =~ ^#.*$ ]] && continue
                 [[ -z "$line" ]] && continue
 
-                # 취약한 옵션 확인
-                if ! echo "$line" | grep -q "ro"; then
-                    if echo "$line" | grep -q "rw"; then
+                # 옵션 부분만 추출 (첫 필드는 공유 경로 - 경로 문자열 'ro' 오탐 방지)
+                local opts_part=$(echo "$line" | awk '{$1=""; print $0}')
+
+                # 모든 호스트('*') 공유 확인 (호스트 접근 통제 없음 → 취약)
+                if echo "$opts_part" | grep -Eq '(^|[[:space:]])\*|=\*' ; then
+                    is_secure=false
+                    issues+=("모든 호스트(*)에 공유 허용(접근 통제 없음): $line")
+                fi
+
+                # 취약한 옵션 확인 (정확한 토큰 매칭: no_root_squash 내 'ro' 오탐 방지)
+                if ! echo "$opts_part" | grep -Eq '(^|[(,[:space:]])-?ro($|[),[:space:]])'; then
+                    if echo "$opts_part" | grep -Eq '(^|[(,[:space:]])-?rw($|[),=[:space:]])'; then
                         is_secure=false
                         issues+=("쓰기 권한(rw) 허용됨: $line")
                     fi
                 fi
 
-                # root_squash 확인 (없으면 취약)
-                if ! echo "$line" | grep -q "root_squash"; then
-                    if echo "$line" | grep -q "no_root_squash"; then
-                        is_secure=false
-                        issues+=("root 권한 승급 가능(no_root_squash): $line")
-                    else
-                        # 기본값은 root_squash지만 명시적인 것이 좋음
-                        issues+=("root_squash 옵션 미명시: $line")
-                    fi
+                # root_squash 확인 (no_root_squash 정확 토큰 매칭 우선)
+                if echo "$opts_part" | grep -Eq '(^|[(,[:space:]])no_root_squash($|[),[:space:]])'; then
+                    is_secure=false
+                    issues+=("root 권한 승급 가능(no_root_squash): $line")
+                elif ! echo "$opts_part" | grep -Eq '(^|[(,[:space:]])root_squash($|[),[:space:]])'; then
+                    # 기본값은 root_squash지만 명시적인 것이 좋음
+                    issues+=("root_squash 옵션 미명시: $line")
                 fi
 
-                # sync 확인
-                if ! echo "$line" | grep -q "sync"; then
-                    if echo "$line" | grep -q "async"; then
-                        issues+=("비동기 모드(async) 사용: $line")
-                    fi
+                # sync 확인 (async 정확 토큰 매칭)
+                if echo "$opts_part" | grep -Eq '(^|[(,[:space:]])async($|[),[:space:]])'; then
+                    issues+=("비동기 모드(async) 사용: $line")
                 fi
 
                 # insecure 옵션 확인 (1024 이상 포트 허용)
-                if echo "$line" | grep -q "insecure"; then
+                if echo "$opts_part" | grep -Eq '(^|[(,[:space:]])insecure($|[),[:space:]])'; then
                     is_secure=false
                     issues+=("insecure 옵션 사용: $line")
                 fi

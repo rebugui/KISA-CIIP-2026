@@ -38,14 +38,7 @@ function Test-Web14BroadPrincipal {
         $sid = [string]$Identity
     }
 
-    return @(
-        $sid -eq 'S-1-1-0',           # Everyone
-        $sid -eq 'S-1-5-11',          # Authenticated Users
-        $sid -eq 'S-1-5-32-545',      # BUILTIN\Users
-        $sid -eq 'S-1-5-32-546',      # Guests
-        $sid -match '-513$',          # Domain Users
-        ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|\bUsers\b|Guests|Domain Users'
-    ) -contains $true
+    return ($sid -eq 'S-1-1-0') -or ($sid -eq 'S-1-5-11') -or ($sid -eq 'S-1-5-32-545') -or ($sid -eq 'S-1-5-32-546') -or ($sid -match '-513$') -or (([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|\bUsers\b|Guests|Domain Users')
 }
 
 function Test-Web14AnyRight {

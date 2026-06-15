@@ -78,6 +78,18 @@ diagnose() {
                 snmp_running=true
             fi
         fi
+        # 프로세스 폴백: systemctl이 없거나(sysvinit/Devuan) 비활성으로 보고해도
+        # snmpd가 수동 기동(예: /usr/sbin/snmpd ...)으로 살아있으면 실행 중으로 판정
+        # (다른 U-59 스크립트 및 Debian U-58과 동일하게 pgrep/ps 폴백 적용)
+        if [ "$snmp_running" = false ]; then
+            if command -v pgrep >/dev/null 2>&1; then
+                if pgrep -x snmpd >/dev/null 2>&1; then
+                    snmp_running=true
+                fi
+            elif ps -ef 2>/dev/null | grep -E '[s]nmpd' | grep -v grep >/dev/null 2>&1; then
+                snmp_running=true
+            fi
+        fi
     fi
 
     if [ "$snmpd_installed" = false ]; then

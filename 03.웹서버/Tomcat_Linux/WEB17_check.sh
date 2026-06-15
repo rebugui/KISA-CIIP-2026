@@ -106,7 +106,10 @@ diagnose() {
                     context_count=$(echo "${found_context}" | grep -c "<Context" || true)
 
                     # 예제/테스트 가상 디렉터리 확인 (examples, docs, sample, test, manager 등)
-                    if echo "${found_context}" | grep -iqE "examples|docs|sample|test|manager|host-manager"; then
+                    # path 속성 값의 첫 세그먼트가 기본 예제 디렉터리명과 정확히 일치하는 경우만 취약 판정.
+                    # docBase 등 다른 속성에 우연히 포함된 부분 문자열(/contest, /latest, /data/test-stage 등)은
+                    # 사용자 정의 Context이므로 오탐 방지를 위해 제외(MANUAL 경로로 처리).
+                    if echo "${found_context}" | grep -iqE 'path[[:space:]]*=[[:space:]]*"/?(examples|docs|sample|test|manager|host-manager)(/|")'; then
                         example_contexts=$((example_contexts + 1))
                     fi
                 fi

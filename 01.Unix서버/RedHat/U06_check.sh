@@ -44,8 +44,9 @@ diagnose() {
     local command_executed="grep 'pam_wheel.so' /etc/pam.d/su; stat -c '%a %G' /usr/bin/su; grep 'wheel' /etc/group"
 
     # 1. PAM 설정 확인: 들여쓰기 주석 포함 제거 후 pam_wheel.so 라인 평가
-    # 강제(enforcing) 조건: control 필드가 required/requisite 이고 trust 옵션이 없는 경우
+    # 강제(enforcing) 조건: control 필드가 required/requisite 이고 trust/deny 옵션이 없는 경우
     # (optional 또는 sufficient+trust 는 비-wheel 사용자의 su 사용을 제한하지 않음)
+    # (deny 옵션은 동작을 반전시켜 해당 그룹만 거부하고 그 외 전원 허용하므로 그룹 제한 효과가 없음)
     local pam_enforcing=false
     local pam_check
     pam_check=$(grep -vE '^[[:space:]]*#' /etc/pam.d/su 2>/dev/null | grep "pam_wheel\.so" || echo "미설정")
@@ -55,7 +56,8 @@ diagnose() {
             local pam_control
             pam_control=$(echo "$pam_line" | awk '{print $2}')
             if { [ "$pam_control" = "required" ] || [ "$pam_control" = "requisite" ]; } \
-                && ! echo "$pam_line" | grep -qw "trust"; then
+                && ! echo "$pam_line" | grep -qw "trust" \
+                && ! echo "$pam_line" | grep -qw "deny"; then
                 pam_enforcing=true
                 break
             fi

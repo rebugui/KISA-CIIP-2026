@@ -177,14 +177,7 @@ function Test-MySqlBroadPrincipal {
     param([System.Security.Principal.IdentityReference]$Identity)
     try { $sid = $Identity.Translate([System.Security.Principal.SecurityIdentifier]).Value }
     catch { $sid = [string]$Identity }
-    return @(
-        $sid -eq 'S-1-1-0',
-        $sid -eq 'S-1-5-11',
-        $sid -eq 'S-1-5-32-545',
-        $sid -eq 'S-1-5-32-546',
-        $sid -match '-513$',
-        ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users'
-    ) -contains $true
+    return ($sid -eq 'S-1-1-0') -or ($sid -eq 'S-1-5-11') -or ($sid -eq 'S-1-5-32-545') -or ($sid -eq 'S-1-5-32-546') -or ($sid -match '-513$') -or (([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users')
 }
 
 function Test-MySqlAnyRight {
@@ -241,7 +234,7 @@ function Invoke-MySqlWindowsCheck {
     $evidence = Get-MySqlWindowsEvidence -State $state
 
     switch ($ItemId) {
-        'D-01' { return Invoke-MySqlSqlCheck $state "SELECT user,host,IF(authentication_string IS NULL OR authentication_string='', 'EMPTY','SET') FROM mysql.user WHERE user IN ('root','mysql','admin','test') OR user='';" { param($r) if ($r.Output -match '(?m)\bEMPTY\b|^\s*\t') { New-MySqlResult 'VULNERABLE' 'Default, anonymous, or empty-password MySQL account evidence was found.' $r.Output $r.Command } else { New-MySqlResult 'GOOD' 'No default empty-password MySQL account evidence was found.' $r.Output $r.Command } } 'default account password policy' }
+        'D-01' { return Invoke-MySqlSqlCheck $state "SELECT user,host,IF(authentication_string IS NULL OR authentication_string='', 'EMPTY','SET') FROM mysql.user WHERE user IN ('root','mysql','admin','test') OR user='';" { param($r) if ($r.Output -match '(?m)\bEMPTY\b|^\s*\t') { New-MySqlResult 'VULNERABLE' 'Default, anonymous, or empty-password MySQL account evidence was found.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-MySqlResult 'MANUAL' 'A default MySQL account exists with a non-empty password, but static evidence cannot prove the initial/vendor password was changed or the account locked; verify the initial password was changed or the account is locked/removed (Linux D-01 parity).' $r.Output $r.Command } else { New-MySqlResult 'GOOD' 'No default or anonymous MySQL accounts were found.' 'No rows returned.' $r.Command } } 'default account password policy' }
         'D-02' { return Invoke-MySqlSqlCheck $state "SELECT user,host,account_locked FROM mysql.user WHERE user IN ('test','anonymous','') OR user LIKE 'test%';" { param($r) if ($r.Output -match '(?m)\S') { New-MySqlResult 'VULNERABLE' 'Unnecessary MySQL accounts were found.' $r.Output $r.Command } else { New-MySqlResult 'GOOD' 'No obvious unnecessary MySQL accounts were found.' 'No rows returned.' $r.Command } } 'unnecessary account removal' }
         'D-03' { return Invoke-MySqlSqlCheck $state "SHOW VARIABLES WHERE Variable_name IN ('default_password_lifetime','validate_password.policy','validate_password.length');" { param($r) if ($r.Output -match 'default_password_lifetime\s+(0|NULL)' -or $r.Output -notmatch 'validate_password') { New-MySqlResult 'MANUAL' 'MySQL password lifetime/complexity evidence is missing or weak; confirm institutional policy.' $r.Output $r.Command } else { New-MySqlResult 'GOOD' 'MySQL password lifetime/complexity variables were found.' $r.Output $r.Command } } 'password lifetime and complexity' }
         'D-04' { return Invoke-MySqlSqlCheck $state "SELECT user,host FROM mysql.user WHERE Super_priv='Y' OR Grant_priv='Y' OR Create_user_priv='Y';" { param($r) if ($r.Output -match '(?m)^(root|mysql)\b') { New-MySqlResult 'MANUAL' 'Administrative MySQL privileges exist; verify they are limited to approved DBA accounts.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-MySqlResult 'VULNERABLE' 'Non-default accounts with high MySQL privileges were found.' $r.Output $r.Command } else { New-MySqlResult 'GOOD' 'No excessive MySQL administrative privilege evidence was returned.' 'No rows returned.' $r.Command } } 'administrator privilege restriction' }

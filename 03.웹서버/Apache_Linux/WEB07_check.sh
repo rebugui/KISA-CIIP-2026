@@ -128,7 +128,8 @@ diagnose() {
     fi
 
     # Patterns for unnecessary files
-    local patterns=(
+    # Tier A: 확장자로 명확히 식별되는 백업/임시 파일 (기본 생성 불필요 파일과 1:1 대응) → 취약
+    local definite_patterns=(
         "*.bak"
         "*.backup"
         "*.old"
@@ -138,15 +139,20 @@ diagnose() {
         "*.swp"
         "*.tmp"
         "*.temp"
-        "*.sql"
+        "*.dump"
+    )
+    # Tier B: 정상 업무 콘텐츠와 부분 문자열이 충돌할 수 있는 모호한 패턴
+    #         (예: testimonials.html→*test*, example-pricing.html→*example*) → 수동진단
+    #         기본 설치 산출물(샘플/매뉴얼/테스트)인지 분석가 확인 필요
+    local ambiguous_patterns=(
         "*sample*"
         "*example*"
         "*test*"
         "*install*"
         "*setup*"
         "*readme*"
+        "*.sql"
         "*.log"
-        "*.dump"
     )
 
     # Search for unnecessary files
@@ -166,35 +172,57 @@ diagnose() {
         return 0
     fi
 
-    # Build find command
-    local find_cmd="find ${search_paths} -type f"
-    local first=true
-    for pattern in "${patterns[@]}"; do
-        if [ "${first}" = true ]; then
-            find_cmd="${find_cmd} -name \"${pattern}\""
-            first=false
-        else
-            find_cmd="${find_cmd} -o -name \"${pattern}\""
-        fi
-    done
-    find_cmd="${find_cmd} 2>/dev/null | head -20"
+    # Build find command for a given pattern set
+    build_find_cmd() {
+        local _cmd="find ${search_paths} -type f"
+        local _first=true
+        local _pat
+        for _pat in "$@"; do
+            if [ "${_first}" = true ]; then
+                _cmd="${_cmd} -name \"${_pat}\""
+                _first=false
+            else
+                _cmd="${_cmd} -o -name \"${_pat}\""
+            fi
+        done
+        _cmd="${_cmd} 2>/dev/null | head -20"
+        echo "${_cmd}"
+    }
 
-    command_executed="${find_cmd}"
+    local definite_cmd
+    definite_cmd="$(build_find_cmd "${definite_patterns[@]}")"
+    local ambiguous_cmd
+    ambiguous_cmd="$(build_find_cmd "${ambiguous_patterns[@]}")"
 
-    # Execute find command
-    local found_files=$(eval "${find_cmd}" || true)
+    command_executed="[definite] ${definite_cmd}"$'\n'"[ambiguous] ${ambiguous_cmd}"
 
-    if [ -n "${found_files}" ]; then
-        command_result="${found_files}"
-        local file_count=$(echo "${found_files}" | wc -l)
+    # Execute find commands (Tier A: definite backup/temp, Tier B: ambiguous substring)
+    local definite_files
+    definite_files=$(eval "${definite_cmd}" || true)
+    local ambiguous_files
+    ambiguous_files=$(eval "${ambiguous_cmd}" || true)
+
+    if [ -n "${definite_files}" ]; then
+        # Tier A — 확장자로 명확한 백업/임시 파일 존재 → 취약
+        local file_count
+        file_count=$(echo "${definite_files}" | wc -l)
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="웹 디렉터리에서 ${file_count}개의 불필요한 파일이 발견되었습니다. 백업 파일 bak, 샘플 파일, 테스트 파일 등은 삭제하세요. 보안 위험: 소스 코드 노출, 설정 정보 유출."
+        command_result="${definite_files}"
+        inspection_summary="웹 디렉터리에서 ${file_count}개의 불필요한 백업/임시 파일(.bak, .old, .orig, ~ 등)이 발견되었습니다. 해당 파일은 삭제하세요. 보안 위험: 소스 코드 노출, 설정 정보 유출."
+    elif [ -n "${ambiguous_files}" ]; then
+        # Tier B — 정상 업무 콘텐츠와 충돌 가능한 모호한 매칭 → 수동진단 (분석가 확인)
+        local amb_count
+        amb_count=$(echo "${ambiguous_files}" | wc -l)
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        command_result="${ambiguous_files}"
+        inspection_summary="웹 디렉터리에서 이름이 sample/example/test/install/setup/readme 또는 .sql/.log 를 포함하는 파일 ${amb_count}개가 발견되었습니다. 정상 업무 콘텐츠(예: testimonials.html)와 부분 문자열이 겹칠 수 있으므로, 해당 파일이 웹 서버 기본 설치 시 생성된 불필요한 샘플/매뉴얼/테스트 파일인지 직접 확인하여 양호/취약을 판정하세요."
     else
         command_result="No unnecessary files found"
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="웹 디렉터리에서 불필요한 파일 백업, 샘플, 테스트 파일 등이 발견되지 않았습니다. 보안 권고사항 준수"
+        inspection_summary="웹 디렉터리에서 기본 생성되는 불필요한 파일(백업, 샘플, 테스트 파일 등)이 발견되지 않았습니다. 보안 권고사항 준수"
     fi
 
     # Run-all 모드 확인

@@ -39,14 +39,7 @@ function Test-BroadUploadPrincipal {
     catch {
         $sid = [string]$Identity
     }
-    return @(
-        $sid -eq 'S-1-1-0',
-        $sid -eq 'S-1-5-11',
-        $sid -eq 'S-1-5-32-545',
-        $sid -eq 'S-1-5-32-546',
-        $sid -match '-513$',
-        ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users'
-    ) -contains $true
+    return ($sid -eq 'S-1-1-0') -or ($sid -eq 'S-1-5-11') -or ($sid -eq 'S-1-5-32-545') -or ($sid -eq 'S-1-5-32-546') -or ($sid -match '-513$') -or (([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users')
 }
 
 function Test-UploadWriteRight {
@@ -108,7 +101,7 @@ try {
             try {
                 $acl = Get-Acl -LiteralPath $path -ErrorAction Stop
                 foreach ($rule in $acl.Access) {
-                    if ($rule.AccessControlType -eq 'Allow' -and (Test-BroadUploadPrincipal -Identity $rule.IdentityReference) -and (Test-UploadWriteRight -Rights $rule.FileSystemRights)) {
+                    if ($rule.AccessControlType -eq 'Allow' -and (Test-BroadUploadPrincipal -Identity $rule.IdentityReference)) {
                         "$path => $($rule.IdentityReference) $($rule.FileSystemRights)"
                     }
                 }
@@ -135,7 +128,12 @@ try {
         elseif ($docRootUpload.Count -gt 0 -or $aclEvidence.Count -gt 0) {
             $finalResult = "VULNERABLE"
             $status = "취약"
-            $summary = "Upload path evidence indicates DocumentRoot placement or broad write permissions."
+            $summary = "Upload path evidence indicates DocumentRoot placement or broad access permissions."
+        }
+        elseif ($uploadPaths.Count -gt 0 -and $docRoots.Count -eq 0) {
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Upload paths were found, but DocumentRoot could not be resolved from Apache configuration, so separation from the web root cannot be confirmed. Verify the upload path is outside DocumentRoot and restricted from general-user access manually."
         }
         elseif ($uploadPaths.Count -gt 0) {
             $finalResult = "GOOD"

@@ -121,21 +121,39 @@ diagnose() {
             inspection_summary+="취약: 비밀번호 최소 길이가 ${password_length}로 8미만; "
         fi
 
-        if [ "${policy_mismatch:-0}" != "1" ] && [ "${policy_mismatch:-0}" != "MEDIUM" ]; then
+        if [ "${policy_mismatch:-0}" != "1" ] && [ "${policy_mismatch:-0}" != "MEDIUM" ] && [ "${policy_mismatch:-0}" != "2" ] && [ "${policy_mismatch:-0}" != "STRONG" ]; then
             ((vulnerabilities_found++)) || true
             inspection_summary+="취약: 비밀번호 정책 수준이 낮음 (${policy_mismatch}); "
         fi
     fi
 
-    command_executed="mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p*** -e \"SHOW PLUGINS; SHOW VARIABLES LIKE 'validate_password%';\""
+    # 비밀번호 사용 기간(LifeTime) 정책 확인 - default_password_lifetime
+    # 0/미설정이면 비밀번호 만료 정책 없음 -> 기관 정책 기준 수동 판단 필요
+    local lifetime_vars="SHOW VARIABLES LIKE 'default_password_lifetime';"
+    local lifetime_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${lifetime_vars}" 2>/dev/null || echo "")
+    local password_lifetime=$(echo "$lifetime_result" | grep "default_password_lifetime" | awk '{print $2}')
+    local lifetime_unset=0
+    if [ -z "${password_lifetime}" ] || [ "${password_lifetime}" = "0" ]; then
+        lifetime_unset=1
+        inspection_summary+="비밀번호 사용 기간(default_password_lifetime) 미설정(0); "
+    else
+        inspection_summary+="비밀번호 사용 기간(default_password_lifetime)=${password_lifetime}일; "
+    fi
+
+    command_executed="mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p*** -e \"SHOW PLUGINS; SHOW VARIABLES LIKE 'validate_password%'; SHOW VARIABLES LIKE 'default_password_lifetime';\""
 
     if [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
+    elif [ "${lifetime_unset}" -eq 1 ]; then
+        # 복잡 도 정책은 충족되었으나 사용 기간(만료) 정책이 미설정 -> 기관 정책 기준 수동 판단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary+="복잡 도 정책은 충족되었으나 비밀번호 사용 기간 정책이 미설정되어 기관 정책 기준 수동 판단 필요"
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="비밀번호 정책이 적절히 설정됨"
+        inspection_summary="비밀번호 사용 기간 및 복잡 도 정책이 적절히 설정됨"
     fi
 
     # Save results (only if library function exists)

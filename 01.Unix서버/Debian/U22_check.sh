@@ -77,9 +77,10 @@ diagnose() {
         local stat_output=$(stat -c "Permissions: %a, Owner: %U, Group: %G" "$target_file" 2>/dev/null)
         local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null)
         local file_owner=$(stat -c "%U:%G" "$target_file" 2>/dev/null)
+        local file_user=$(stat -c "%U" "$target_file" 2>/dev/null)
 
-        # 소유자 및 권한 확인
-        if [ "$file_owner" = "root:root" ] && [ "$file_perms" = "644" ]; then
+        # 소유자 및 권한 확인 (소유자 root/bin/sys, 권한 644 이하)
+        if [[ "$file_user" =~ ^(root|bin|sys)$ ]] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#644 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $file_perms, 소유자: $file_owner"
         else

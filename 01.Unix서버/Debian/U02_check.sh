@@ -103,12 +103,23 @@ diagnose() {
         # PAM 설정의 raw output 저장
         pam_output=$(grep -E "^[\s]*password.*${pam_module}" "$active_pam_file" 2>/dev/null || echo "")
 
-        # 각 설정값 추출
+        # 각 설정값 추출 (인라인 PAM 인자 우선)
         local minlen=$(echo "$pam_output" | grep -oP 'minlen=\K[0-9]+' | head -1)
         local ucredit=$(echo "$pam_output" | grep -oP 'ucredit=\K-?[0-9]+' | head -1)
         local lcredit=$(echo "$pam_output" | grep -oP 'lcredit=\K-?[0-9]+' | head -1)
         local dcredit=$(echo "$pam_output" | grep -oP 'dcredit=\K-?[0-9]+' | head -1)
         local ocredit=$(echo "$pam_output" | grep -oP 'ocredit=\K-?[0-9]+' | head -1)
+
+        # 인라인 인자가 없으면 /etc/security/pwquality.conf 에서 보완
+        # (KISA Debian 가이드: pwquality.conf 또는 common-password 중 하나라도 정책 설정 시 양호)
+        local pwquality_conf="/etc/security/pwquality.conf"
+        if [ -f "$pwquality_conf" ]; then
+            [ -z "$minlen" ]  && minlen=$(grep -oP '^\s*minlen\s*=\s*\K[0-9]+' "$pwquality_conf" 2>/dev/null | tail -1)
+            [ -z "$ucredit" ] && ucredit=$(grep -oP '^\s*ucredit\s*=\s*\K-?[0-9]+' "$pwquality_conf" 2>/dev/null | tail -1)
+            [ -z "$lcredit" ] && lcredit=$(grep -oP '^\s*lcredit\s*=\s*\K-?[0-9]+' "$pwquality_conf" 2>/dev/null | tail -1)
+            [ -z "$dcredit" ] && dcredit=$(grep -oP '^\s*dcredit\s*=\s*\K-?[0-9]+' "$pwquality_conf" 2>/dev/null | tail -1)
+            [ -z "$ocredit" ] && ocredit=$(grep -oP '^\s*ocredit\s*=\s*\K-?[0-9]+' "$pwquality_conf" 2>/dev/null | tail -1)
+        fi
 
         config_details="[PAM 복잡성] ${pam_module}: "
         config_details="${config_details}minlen=${minlen:-미설정}, "

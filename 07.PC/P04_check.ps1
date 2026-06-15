@@ -52,7 +52,14 @@ try {
     $everyoneAccessShares = @()
 
     foreach ($line in $lines) {
-        if ([string]::IsNullOrWhiteSpace($line) -or $line -match '[가-힣]' -or $line -match '^-{10,}') {
+        # 헤더/구분선/푸터 행만 제외 (공유 이름/리소스 경로/설명에 한글이 포함된 사용자 공유는 절대 건너뛰지 않음).
+        #  - 헤더 행: '공유 이름' (영문 'Share name' 포함)
+        #  - 구분선: '----------'
+        #  - 푸터 행: '명령을 잘 실행했습니다' (영문 'command completed successfully' 포함)
+        if ([string]::IsNullOrWhiteSpace($line) -or
+            $line -match '^-{10,}' -or
+            $line -match '공유 이름' -or $line -match 'Share name' -or
+            $line -match '명령을 (잘 )?실행했습니다' -or $line -match 'command completed successfully') {
             continue
         }
         if ($line -match '^([A-Za-z\$][A-Za-z0-9\$\-_]*)\s+') {

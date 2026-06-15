@@ -84,7 +84,8 @@ diagnose() {
     local nginx_conf_locations=(
         "/etc/nginx/nginx.conf"
         "/etc/nginx/conf.d/*.conf"
-        "/etc/nginx/sites-enabled/*.conf"
+        "/etc/nginx/sites-enabled/*"
+        "/etc/nginx/sites-available/*"
     )
 
     local dav_settings=""

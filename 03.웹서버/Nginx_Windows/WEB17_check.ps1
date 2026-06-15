@@ -51,7 +51,7 @@ try {
     else {
         $aliases = @(Get-NginxAliasPaths -State $state)
         $unnecessaryAliases = @($aliases | Where-Object {
-            $_.Directive -match '(?i)(manual|docs?|examples?|samples?|test|tmp|backup|old)' -or
+            $_.Directive -match '(?i)[\\/](manual|docs?|examples?|samples?|test|tmp|backup|old)([\\/;]|\s|$)' -or
             $_.Path -match '(?i)\\(manual|docs?|examples?|samples?|test|tmp|backup|old)(\\|$)'
         })
 

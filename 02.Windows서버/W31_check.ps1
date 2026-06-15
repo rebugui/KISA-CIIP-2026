@@ -39,13 +39,20 @@ try {
     $ErrorActionPreference = 'SilentlyContinue'
     $service = Get-Service -Name 'SNMP' -ErrorAction SilentlyContinue
 
-    if (-not $service) {
-        # SNMP 서비스 미설치/미사용 = 양호 (가이드라인 양호 기준 1).
+    if (-not $service -or $service.Status -ne 'Running') {
+        # SNMP 서비스 미설치/미실행(중지·사용 안 함) = 미사용 = 양호 (가이드라인 양호 기준 1).
+        # 취약 기준('모든 호스트로부터 SNMP 패킷 받아들이기')은 SNMP가 실제로 동작(Running)하여
+        # 패킷을 수락하는 상태를 전제로 하므로, 실행 중이 아닌 SNMP는 PermittedManagers 평가 전에 양호 처리한다.
         $finalResult = "GOOD"
         $status = "양호"
-        $summary = "SNMP 서비스를 사용하지 않음"
+        if (-not $service) {
+            $summary = "SNMP 서비스를 사용하지 않음 (서비스 미설치)"
+            $commandOutput = "SNMP service not found"
+        } else {
+            $summary = "SNMP 서비스를 사용하지 않음 (서비스 상태: $($service.Status))"
+            $commandOutput = "SNMP service present but not running. Status: $($service.Status)"
+        }
         $commandExecuted = "Get-Service -Name 'SNMP'"
-        $commandOutput = "SNMP service not found"
     } else {
         # 가이드라인: 양호 = SNMP 미사용 또는 '특정 호스트로부터 SNMP 패킷 받아들이기'가 설정된 경우.
         #             취약 = 모든 호스트로부터 SNMP 패킷 받아들이기가 설정된 경우.

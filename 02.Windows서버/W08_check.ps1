@@ -41,22 +41,35 @@ try {
     $duration = 0
     $reset = 0
 
-    # Try Korean patterns first
+    $durationParsed = $false
+    $resetParsed = $false
+
+    # Try Korean patterns first (real `net accounts` label: '잠금 기간(분):')
     if ($output -match '잠금 기간.*:\s*(\d+)') {
         $duration = [int]$matches[1]
+        $durationParsed = $true
     }
-    elseif ($output -match 'LockoutDuration.*:\s*(\d+)') {
+    elseif ($output -match 'Lockout duration.*:\s*(\d+)') {
         $duration = [int]$matches[1]
+        $durationParsed = $true
     }
 
-    if ($output -match '잠금 카운터 재설정.*:\s*(\d+)') {
+    # Reset window (KO: '다음 시간 후 잠금 수를 다시 설정합니다(분):', EN: 'Lockout observation window (minutes):')
+    if ($output -match '잠금 수.*다시 설정.*:\s*(\d+)') {
         $reset = [int]$matches[1]
+        $resetParsed = $true
     }
-    elseif ($output -match 'ResetTime.*:\s*(\d+)') {
+    elseif ($output -match 'Lockout observation window.*:\s*(\d+)') {
         $reset = [int]$matches[1]
+        $resetParsed = $true
     }
 
-    if ($duration -ge 60 -and $reset -ge 60) {
+    if (-not $durationParsed -or -not $resetParsed) {
+        $finalResult = "MANUAL"
+        $summary = "계정 잠금 정책 출력을 파싱할 수 없어 수동 확인 필요 (계정 잠금 기간/잠금 수 재설정 기간 미확인)"
+        $status = "수동진단"
+        $commandOutput = "정책 파싱 실패. 원본 출력: $($output.Substring(0, [Math]::Min(500, $output.Length)))"
+    } elseif ($duration -ge 60 -and $reset -ge 60) {
         $finalResult = "GOOD"
         $summary = "계정 잠금 기간 및 잠금 카운터 재설정 시간이 60분 이상으로 적절히 설정됨"
         $status = "양호"

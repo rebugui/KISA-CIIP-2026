@@ -44,13 +44,13 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="시스템 시작 스크립트의 소유자 및 권한 설정이 적절합니다."
     local command_result=""
-    local command_executed="find /etc/rc.d/ /etc/init.d/ -type f -perm /022; find /etc/rc.d/ /etc/init.d/ -type f ! -user root"
+    local command_executed="find /etc/rc.d/ /etc/init.d/ /etc/systemd/system/ -type f -perm /022; find /etc/rc.d/ /etc/init.d/ /etc/systemd/system/ -type f ! -user root"
 
     # 1. 실제 데이터 추출: 일반 사용자(그룹 또는 타인) 쓰기 권한 또는 소유자가 root가 아닌 파일 검색
     # criteria_bad: 일반 사용자(그룹 OR 타인)의 쓰기 권한 부여 → -perm /022 (그룹쓰기 020 또는 타인쓰기 002 중 하나라도)
-    # 주요 경로: /etc/rc.d, /etc/init.d 등
-    local writable_files=$(find /etc/rc.d/ /etc/init.d/ -type f -perm /022 2>/dev/null | head -n 5 || true)
-    local nonroot_files=$(find /etc/rc.d/ /etc/init.d/ -type f ! -user root 2>/dev/null | head -n 5 || true)
+    # 주요 경로 (가이드 LINUX 절: [init] + [systemd]): /etc/rc.d, /etc/init.d, /etc/systemd/system 등
+    local writable_files=$(find /etc/rc.d/ /etc/init.d/ /etc/systemd/system/ -type f -perm /022 2>/dev/null | head -n 5 || true)
+    local nonroot_files=$(find /etc/rc.d/ /etc/init.d/ /etc/systemd/system/ -type f ! -user root 2>/dev/null | head -n 5 || true)
 
     # 2. 판정 로직: 일반 사용자 쓰기 권한 또는 비root 소유 파일이 하나라도 발견되면 취약
     if [ -n "$writable_files" ] || [ -n "$nonroot_files" ]; then

@@ -112,7 +112,7 @@ diagnose() {
     fi
 
     # 비밀번호 Profile 확인
-    local profile_check="SELECT profile FROM dba_profiles WHERE resource_name='PASSWORD_VERIFY_FUNCTION';"
+    local profile_check="SELECT limit FROM dba_profiles WHERE profile='DEFAULT' AND resource_name='PASSWORD_VERIFY_FUNCTION';"
     command_result=$(echo "${profile_check}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
 
     if [ -z "$command_result" ] || echo "$command_result" | grep -q "NULL"; then

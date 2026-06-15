@@ -52,7 +52,10 @@ try {
                 $everyoneAccess = $false
 
                 foreach ($ace in $descriptor.Descriptor.DACL) {
-                    if ($ace.Trustee.Name -eq 'Everyone' -or $ace.Trustee.Name -eq 'S-1-1-0') {
+                    # Win32_Trustee.Name은 LookupAccountSid 결과라 로케일에 따라 현지화됨
+                    # (ko-KR: '모든 사람'). well-known SID(S-1-1-0)로 비교하고,
+                    # 현지화된 계정명은 보조 문자열 매칭으로 처리 (W-43/W-58과 동일 패턴).
+                    if ($ace.Trustee.SIDString -eq 'S-1-1-0' -or $ace.Trustee.Name -eq 'Everyone' -or $ace.Trustee.Name -like '*Everyone*' -or $ace.Trustee.Name -eq '모든 사람') {
                         $everyoneAccess = $true
                         break
                     }

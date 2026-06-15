@@ -156,11 +156,23 @@ diagnose() {
         command_result+="$file_info\n"
 
         # 취약성 판단
-        # oracle/root 소유가 아니거나, 640 을 초과하는 권한 비트가 있는 경우 취약
-        # (8진수 권한을 비트 연산으로 비교: 640 이하면 ~640 마스크에 걸리는 비트가 없어야 함)
+        # oracle/root 소유가 아니거나, 일반 사용자의 수정(쓰기) 권한이 남아있는 경우 취약
+        # (판단기준: 일반 사용자의 수정 권한 제거 여부)
+        # - network/admin 설정 파일(tnsnames/protocol/sqlnet 등)은 가이드 권장값이 644 이므로
+        #   group/other 쓰기 비트(022)와 특수 비트(7000)만 취약으로 판단 (read-only 는 양호).
+        # - 비밀번호 파일(orapw*), 파라미터 파일(spfile*.ora)은 더 엄격하게 640 초과(~640) 비트를 취약으로 판단.
+        local perm_mask
+        case "$file" in
+            */network/admin/*)
+                perm_mask=$(( 8#7022 ))
+                ;;
+            *)
+                perm_mask=$(( ~8#640 & 07777 ))
+                ;;
+        esac
         if [ "$owner" != "oracle" ] && [ "$owner" != "root" ]; then
             vulnerable_files+=("$file (owner=$owner)")
-        elif ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & ~8#640 & 07777 ))" -ne 0 ]; then
+        elif ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & perm_mask ))" -ne 0 ]; then
             vulnerable_files+=("$file (perms=$perms)")
         else
             good_files+=("$file")

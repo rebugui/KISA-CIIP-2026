@@ -152,19 +152,23 @@ diagnose() {
         local ftpusers_content=$(cat "$found_file" 2>/dev/null || echo "File not found")
         command_result="[Command: cat ${found_file}]\${newline}${ftpusers_content}"
 
-        if [ ${#missing_accounts[@]} -eq 0 ]; then
+        # 판정 기준: root 계정 FTP 접속 차단 여부 (가이드라인 criteria_good="root 계정 접속을 차단한 경우")
+        local missing_list=""
+        for acc in "${missing_accounts[@]}"; do
+            missing_list="${missing_list}${acc}, "
+        done || true
+        if echo "$file_content" | grep -qx "root"; then
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="ftpusers 파일에 주요 시스템 계정이 적절하게 등록되어 있습니다(${found_file})."
+            inspection_summary="ftpusers 파일에 root 계정이 등록되어 root FTP 직접 접속이 차단되어 있습니다(${found_file})."
+            if [ ${#missing_accounts[@]} -ne 0 ]; then
+                command_result="${command_result}\${newline}[참고: 미등록 시스템 계정] ${missing_list%, }"
+            fi
         else
             diagnosis_result="VULNERABLE"
             status="취약"
-            local missing_list=""
-            for acc in "${missing_accounts[@]}"; do
-                missing_list="${missing_list}${acc}, "
-            done || true
-            inspection_summary="ftpusers 파일에 일부 시스템 계정이 미등록되어 있습니다(${found_file}): ${missing_list%, }"
-            command_result="${command_result}\${newline}[Unregistered accounts:] ${missing_list%, }"
+            inspection_summary="ftpusers 파일에 root 계정이 등록되어 있지 않아 root FTP 직접 접속이 허용됩니다(${found_file})."
+            command_result="${command_result}\${newline}[root: NOT blocked]"
         fi
     fi
 

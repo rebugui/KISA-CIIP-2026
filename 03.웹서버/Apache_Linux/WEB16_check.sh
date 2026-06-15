@@ -174,9 +174,9 @@ diagnose() {
         status="취약"
         inspection_summary="ServerTokens가 Full(또는 미설정 기본값)입니다. 서버 버전 정보가 노출됩니다. ServerTokens Prod로 설정을 권장합니다."
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="ServerTokens가 ${server_tokens_value}로 설정되어 있습니다. 추가 보안 강화를 위해 ServerTokens Prod 설정을 권장합니다."
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="ServerTokens가 ${server_tokens_value}로 설정되어 있어 HTTP 응답 헤더에 서버 버전(또는 OS) 정보가 노출됩니다. ServerTokens Prod로 설정을 권장합니다."
     fi
 
     # Run-all 모드 확인

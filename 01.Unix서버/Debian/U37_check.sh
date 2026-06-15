@@ -45,6 +45,20 @@ GUIDELINE_REMEDIATION="crontab 및 at 명령어 파일 권한 750 이하,cron �
 # 진단 함수
 # ============================================================================
 
+# 권한에 640(rw-r-----) 초과 비트가 있는지 비트 단위 검사 (10진 비교 아님)
+perm_exceeds_640() {
+    local p="$1"
+    while [ "${#p}" -lt 3 ]; do p="0${p}"; done
+    p="${p: -3}"
+    local o="${p:0:1}" g="${p:1:1}" t="${p:2:1}"
+    case "$o" in 1|3|5|7) return 0 ;; esac
+    case "$g" in 1|2|3|5|6|7) return 0 ;; esac
+    if [ "$t" != "0" ]; then
+        return 0
+    fi
+    return 1
+}
+
 # 권한에 750(rwxr-x---) 초과 비트가 있는지 비트 단위 검사 (crontab/at 명령어용)
 perm_exceeds_750() {
     local p="$1"
@@ -113,11 +127,11 @@ diagnose() {
 
             file_info="${file_info}${file}: 권한=${perms}, 소유자=${owner}${newline}"
 
-            # /etc/crontab, cron.deny, at.deny는 600 이하 권장
+            # /etc/crontab, cron.deny, at.deny는 640 이하 권장
             if [[ "$file" =~ (crontab|cron.deny|at.deny)$ ]]; then
-                if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
+                if perm_exceeds_640 "$perms"; then
                     is_secure=false
-                    issues+=("${file} 권한=${perms} (600 권장)")
+                    issues+=("${file} 권한=${perms} (640 이하 권장)")
                 fi
                 # root 소유여부 확인
                 if [ "$owner" != "root" ]; then
@@ -126,11 +140,11 @@ diagnose() {
                 fi
             fi
 
-            # cron.allow, at.allow는 600 권장
+            # cron.allow, at.allow는 640 이하 권장
             if [[ "$file" =~ (cron.allow|at.allow)$ ]]; then
-                if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
+                if perm_exceeds_640 "$perms"; then
                     is_secure=false
-                    issues+=("${file} 권한=${perms} (600 권장)")
+                    issues+=("${file} 권한=${perms} (640 이하 권장)")
                 fi
                 if [ "$owner" != "root" ]; then
                     is_secure=false
@@ -148,7 +162,7 @@ diagnose() {
             local owner=$(stat -c "%U" "$file" 2>/dev/null || echo "unknown")
             file_info="${file_info}  $(basename "$file"): ${perms}, ${owner}${newline}"
 
-            if [ "$perms" != "600" ] && [ "$perms" != "400" ]; then
+            if perm_exceeds_640 "$perms"; then
                 is_secure=false
                 issues+=("cron.d/$(basename "$file") 권한=${perms}")
             fi

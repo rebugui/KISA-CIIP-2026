@@ -57,6 +57,25 @@ try {
         }
         if ($httpServerHeaderDeclared) {
             $bannerFindings += "HTTP: Server response header is present"
+        } else {
+            # IIS 기본 응답 배너('Server: Microsoft-IIS/x.x')는 IIS 코어가 생성하며 customHeaders에 존재하지 않는다.
+            # 기본 배너 제거가 확인되는 유일한 정적 경로는 requestFiltering의 removeServerHeader(IIS10+) 뿐이다.
+            # 이 값이 $true이면 기본 배너가 제거된 것으로 본다. 그렇지 않으면 기본 배너 노출이 기본값이지만,
+            # URL Rewrite 아웃바운드 규칙으로도 제거될 수 있어 정적으로 단정할 수 없으므로 수동 확인으로 라우팅한다.
+            $removeServerHeader = Get-WebConfigurationProperty -Filter 'system.webServer/security/requestFiltering' -Name 'removeServerHeader' -ErrorAction SilentlyContinue
+            $defaultHeaderStripped = $false
+            if ($null -ne $removeServerHeader) {
+                $rshValue = $removeServerHeader
+                if ($removeServerHeader.PSObject -and ($removeServerHeader.PSObject.Properties.Name -contains 'Value')) {
+                    $rshValue = $removeServerHeader.Value
+                }
+                if ($rshValue -eq $true -or "$rshValue" -eq 'True') {
+                    $defaultHeaderStripped = $true
+                }
+            }
+            if (-not $defaultHeaderStripped) {
+                $manualNotes += "HTTP: default IIS Server banner not confirmed removed (removeServerHeader not enabled); verify outbound stripping (URL Rewrite RESPONSE_SERVER) manually"
+            }
         }
 
         # --- FTP: 설치 시 기본 배너 노출 여부는 자동 단정 불가 → MANUAL로 라우팅 ---
@@ -81,10 +100,10 @@ try {
             $commandOutput = ($bannerFindings -join '; ')
             if ($manualNotes.Count -gt 0) { $commandOutput += "; (also: " + ($manualNotes -join '; ') + ")" }
         } elseif ($manualNotes.Count -gt 0) {
-            # HTTP 배너는 미탐지지만 FTP/SMTP 배너를 자동 단정할 수 없으면 GOOD으로 단정하지 않는다.
+            # 명시적 Server 헤더는 미탐지지만 HTTP 기본 배너/FTP/SMTP 배너 노출 여부를 자동 단정할 수 없으면 GOOD으로 단정하지 않는다.
             $finalResult = "MANUAL"
             $status = "수동진단"
-            $summary = "HTTP 배너는 미탐지이나 FTP/SMTP 배너 노출 여부를 자동으로 확인할 수 없어 수동 확인 필요"
+            $summary = "명시적 배너 헤더는 미탐지이나 HTTP 기본 배너/FTP/SMTP 배너 노출 여부를 자동으로 확인할 수 없어 수동 확인 필요"
             $commandOutput = ($manualNotes -join '; ')
         } else {
             $finalResult = "GOOD"

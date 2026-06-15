@@ -116,13 +116,22 @@ altibase_acl_check() {
     local checked=""
     local mode
     local target
+    local octal
+    local world_digit
+    local group_digit
     for target in "${targets[@]}"; do
         [ -e "${target}" ] || continue
         checked+="${target}"$'\n'
         if command -v stat >/dev/null 2>&1; then
             mode="$(stat -c '%a %U:%G %n' "${target}" 2>/dev/null || true)"
-            case "${mode%% *}" in
-                *2|*3|*6|*7) bad+="${mode}"$'\n' ;;
+            octal="${mode%% *}"
+            world_digit="${octal: -1}"
+            group_digit="${octal: -2:1}"
+            case "${world_digit}" in
+                2|3|6|7) bad+="${mode}"$'\n' ; continue ;;
+            esac
+            case "${group_digit}" in
+                2|3|6|7) bad+="${mode}"$'\n' ;;
             esac
         fi
     done
@@ -194,11 +203,7 @@ invoke_altibase_linux_check() {
             ;;
         D-03|D-05|D-09)
             altibase_sql_check "SELECT USER_NAME, PASSWORD_LIFE_TIME, PASSWORD_GRACE_TIME, PASSWORD_REUSE_TIME, PASSWORD_REUSE_MAX, FAILED_LOGIN_ATTEMPTS FROM system_.sys_users_;" "password and login policy" || return 0
-            if printf '%s' "${ALTIBASE_SQL_OUTPUT}" | grep -Eiq 'UNLIMITED|NULL|(^|[[:space:]])0([[:space:]]|$)'; then
-                altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase password/login policy evidence contains weak-looking values; confirm institutional policy thresholds." "${ALTIBASE_SQL_OUTPUT}" "SELECT password policy columns FROM system_.sys_users_"
-            else
-                altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "Altibase password/login policy evidence was collected without obvious unlimited values." "${ALTIBASE_SQL_OUTPUT}" "SELECT password policy columns FROM system_.sys_users_"
-            fi
+            altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase password/login policy evidence was collected; confirm the values satisfy institutional policy thresholds (Altibase isql renders unset limits as blank columns, so non-compliant policies cannot be auto-judged GOOD)." "${ALTIBASE_SQL_OUTPUT}" "SELECT password policy columns FROM system_.sys_users_"
             ;;
         D-04)
             altibase_sql_check "SELECT GRANTEE_ID, PRIV_ID FROM system_.sys_grant_system_;" "administrator privilege restriction" || return 0
@@ -227,9 +232,9 @@ invoke_altibase_linux_check() {
             [ -n "${lines}" ] && altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase encryption-related configuration evidence was found; confirm approved transport encryption policy." "${lines}" "grep Altibase encryption settings" || altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase network encryption evidence was not found; confirm transport encryption policy manually." "$(altibase_evidence)" "grep Altibase encryption settings"
             ;;
         D-10)
-            lines="$(altibase_config_grep 'ACCESS_CONTROL|TCP.*PERMIT|TCP.*DENY|IP_ACCESS|IPC_CHANNEL' || true)"
+            lines="$(altibase_config_grep 'ACCESS_CONTROL|TCP.*PERMIT|TCP.*DENY|IP_ACCESS' || true)"
             if [ -n "${lines}" ]; then
-                altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "Altibase access-control configuration evidence was found." "${lines}" "grep ACCESS_CONTROL altibase.properties"
+                altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase access-control configuration evidence was found; confirm it enforces deny-by-default with an explicit permit list for designated source IPs (a commented template or a non-restricting entry must not be treated as compliant)." "${lines}" "grep ACCESS_CONTROL altibase.properties"
             else
                 altibase_sql_check "SELECT NAME, VALUE1 FROM v\$property WHERE NAME LIKE 'ACCESS_CONTROL_%';" "access control by source IP" || return 0
                 if [ -n "${ALTIBASE_SQL_OUTPUT}" ]; then
@@ -247,8 +252,7 @@ invoke_altibase_linux_check() {
             altibase_set_result "N/A" "N/A" "Oracle listener password control is not directly applicable to Altibase." "Altibase listener access is handled through Altibase properties, IP ACLs, and OS/service controls." "Map DBMS listener-password guideline applicability"
             ;;
         D-13)
-            lines="$(find /etc "${ALTIBASE_HOME_FOUND:-/nonexistent}" -maxdepth 4 \( -iname '*odbc*.ini' -o -iname '*altibase*odbc*' \) 2>/dev/null | head -50 || true)"
-            [ -n "${lines}" ] && altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase ODBC configuration evidence was found; confirm only required DSNs/drivers remain." "${lines}" "find Altibase ODBC config" || altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "No Altibase ODBC configuration evidence was found in inspected paths." "$(altibase_evidence)" "find Altibase ODBC config"
+            altibase_set_result "N/A" "N/A" "Unnecessary ODBC/OLE-DB data source/driver removal is a Windows OS control and is not applicable to Altibase on Linux." "D-13 target is Windows OS; ODBC/OLE-DB data sources are a Windows client artifact with no Altibase_Linux equivalent." "Map DBMS ODBC/OLE-DB guideline applicability"
             ;;
         D-14)
             altibase_acl_check "home/config" "${ALTIBASE_HOME_FOUND}" "${ALTIBASE_CONFIGS[@]}"
@@ -264,11 +268,11 @@ invoke_altibase_linux_check() {
             altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase audit table privilege evidence was collected; confirm only administrators can access audit tables." "${ALTIBASE_SQL_OUTPUT}" "SELECT audit table grants FROM system_.sys_grant_object_"
             ;;
         D-18)
-            altibase_sql_check "SELECT * FROM system_.sys_grant_object_ WHERE GRANTEE_ID IN (SELECT USER_ID FROM system_.sys_users_ WHERE USER_NAME IN ('PUBLIC','GUEST'));" "public role restriction" || return 0
-            if printf '%s' "${ALTIBASE_SQL_OUTPUT}" | grep -Eiq 'PUBLIC|GUEST|[0-9]'; then
-                altibase_set_result "VULNERABLE" "$(altibase_status_for_result VULNERABLE)" "Altibase object permissions granted to PUBLIC/GUEST-like principals may exist." "${ALTIBASE_SQL_OUTPUT}" "SELECT PUBLIC/GUEST grants FROM system_.sys_grant_object_"
+            altibase_sql_check "SELECT 'PUBLIC_GRANT_FOUND' AS FLAG, GRANTOR_ID, OBJ_ID, PRIV_ID FROM system_.sys_grant_object_ WHERE GRANTEE_ID = 0;" "public role restriction" || return 0
+            if printf '%s' "${ALTIBASE_SQL_OUTPUT}" | grep -Eq 'PUBLIC_GRANT_FOUND'; then
+                altibase_set_result "VULNERABLE" "$(altibase_status_for_result VULNERABLE)" "Altibase object permissions granted to PUBLIC (GRANTEE_ID=0) were found; revoke the PUBLIC grant from application/DBA objects." "${ALTIBASE_SQL_OUTPUT}" "SELECT object grants WHERE GRANTEE_ID = 0 FROM system_.sys_grant_object_"
             else
-                altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "No Altibase PUBLIC/GUEST object permission evidence was returned." "${ALTIBASE_SQL_OUTPUT}" "SELECT PUBLIC/GUEST grants FROM system_.sys_grant_object_"
+                altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "No Altibase object permission granted to PUBLIC (GRANTEE_ID=0) was returned." "${ALTIBASE_SQL_OUTPUT}" "SELECT object grants WHERE GRANTEE_ID = 0 FROM system_.sys_grant_object_"
             fi
             ;;
         D-19)
@@ -309,7 +313,7 @@ invoke_altibase_linux_check() {
             if [ -n "${lines}" ]; then
                 altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase audit configuration evidence was found; confirm retention and audited events satisfy policy." "${lines}" "grep audit settings altibase.properties"
             else
-                altibase_set_result "VULNERABLE" "$(altibase_status_for_result VULNERABLE)" "Altibase audit configuration evidence was not found." "$(altibase_evidence)" "grep audit settings altibase.properties"
+                altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase audit policy could not be determined from properties files; Altibase audit is configured via SQL (AUDIT / ALTER SYSTEM START AUDIT) and stored in the DB audit dictionary, so confirm the audit-record policy manually." "$(altibase_evidence)" "grep audit settings altibase.properties; confirm SQL AUDIT policy"
             fi
             ;;
         *)

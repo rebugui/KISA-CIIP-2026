@@ -96,13 +96,23 @@ try {
             $commandExecuted = "Parse DocumentRoot and check known Apache Windows web/manual/sample paths"
         }
         else {
-            $filePatterns = @(
+            # Definite default/backup artifacts: backup/temp/dump extensions that are
+            # not normal application content -> VULNERABLE.
+            $definitePatterns = @(
                 "*.bak", "*.backup", "*.old", "*.orig", "*.save", "*~",
-                "*.swp", "*.tmp", "*.temp", "*.sql", "*.dump", "*.log",
-                "*sample*", "*example*", "*test*", "*install*", "*setup*", "*readme*"
+                "*.swp", "*.tmp", "*.temp", "*.dump"
+            )
+            # Ambiguous substring/extension matches: these also match legitimate
+            # application/library files (e.g. latest.js, readme.html, uninstall.js,
+            # app.log, export.sql), so their origin (install-default vs app asset)
+            # cannot be determined statically -> route to MANUAL, not VULNERABLE.
+            $ambiguousPatterns = @(
+                "*sample*", "*example*", "*test*", "*install*", "*setup*", "*readme*",
+                "*.sql", "*.log"
             )
             $dirNames = @("manual", "manuals", "docs", "doc", "samples", "sample", "examples", "example", "test", "tests")
             $findings = New-Object System.Collections.Generic.List[string]
+            $ambiguousFindings = New-Object System.Collections.Generic.List[string]
 
             foreach ($root in $existingRoots) {
                 $leaf = Split-Path -Leaf $root
@@ -117,7 +127,7 @@ try {
                     }
                 }
 
-                foreach ($pattern in $filePatterns) {
+                foreach ($pattern in $definitePatterns) {
                     $matched = @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue -File -Filter $pattern | Select-Object -First 5)
                     foreach ($item in $matched) {
                         $findings.Add("File: $($item.FullName)")
@@ -126,23 +136,47 @@ try {
                         break
                     }
                 }
-                if ($findings.Count -ge 30) {
+
+                foreach ($pattern in $ambiguousPatterns) {
+                    $matched = @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue -File -Filter $pattern | Select-Object -First 5)
+                    foreach ($item in $matched) {
+                        $ambiguousFindings.Add("File: $($item.FullName)")
+                    }
+                    if ($ambiguousFindings.Count -ge 30) {
+                        break
+                    }
+                }
+
+                if ($findings.Count -ge 30 -and $ambiguousFindings.Count -ge 30) {
                     break
                 }
             }
 
             $findings = @($findings | Select-Object -Unique)
+            $ambiguousFindings = @($ambiguousFindings | Select-Object -Unique)
             $evidence = @(
                 "Checked roots: $($existingRoots -join ', ')",
-                "Unnecessary file/directory evidence count: $($findings.Count)"
+                "Default/backup artifact evidence count: $($findings.Count)",
+                "Ambiguous (manual-review) file evidence count: $($ambiguousFindings.Count)"
             )
 
             if ($findings.Count -gt 0) {
                 $finalResult = "VULNERABLE"
                 $status = "취약"
-                $summary = "Apache web path contains default, sample, manual, test, backup, or temporary files/directories that should be removed."
+                $summary = "Apache web path contains default, sample, manual, or backup/temporary files/directories that should be removed."
                 $evidence += "Matched unnecessary files/directories:"
                 $evidence += $findings
+                if ($ambiguousFindings.Count -gt 0) {
+                    $evidence += "Additional files matching ambiguous patterns (verify origin):"
+                    $evidence += $ambiguousFindings
+                }
+            }
+            elseif ($ambiguousFindings.Count -gt 0) {
+                $finalResult = "MANUAL"
+                $status = "수동진단"
+                $summary = "Files matching sample/example/test/install/setup/readme or .sql/.log patterns were found under Apache web paths, but these also match legitimate application/library content. Verify manually whether they are default-generated install artifacts that must be removed."
+                $evidence += "Files requiring manual origin review:"
+                $evidence += $ambiguousFindings
             }
             else {
                 $finalResult = "GOOD"

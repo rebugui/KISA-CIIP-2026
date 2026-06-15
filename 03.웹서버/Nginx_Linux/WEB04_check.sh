@@ -84,28 +84,74 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
+    # 시드 설정 위치. 확장자 없는 vhost(예: 데비안/우분투의 sites-enabled/default
+    # 심볼릭 링크)도 포함되도록 .conf 글롭과 확장자 없는 디렉터리 글롭을 함께 사용한다.
     local nginx_conf_locations=(
         "/etc/nginx/nginx.conf"
         "/etc/nginx/conf.d/*.conf"
+        "/etc/nginx/conf.d/*"
         "/etc/nginx/sites-enabled/*.conf"
+        "/etc/nginx/sites-enabled/*"
     )
+
+    # 이미 스캔한 파일을 다시 열지 않도록 추적한다.
+    local scanned_files=""
+
+    scan_nginx_conf_file() {
+        local conf_file="$1"
+        if [ ! -f "${conf_file}" ] || [ ! -r "${conf_file}" ]; then
+            return 0
+        fi
+        case "${scanned_files}" in
+            *"|${conf_file}|"*) return 0 ;;
+        esac
+        scanned_files="${scanned_files}|${conf_file}|"
+
+        config_readable=true
+        # 주석을 먼저 제거한 뒤 autoindex 지시자를 단어 경계로 탐지한다.
+        # 데비안 기본 vhost처럼 한 줄에 `location / { autoindex on; }` 형태로
+        # 인라인 작성된 경우도 포함되도록 줄 시작 고정(^\s*) 대신 \bautoindex\b 사용.
+        local found_autoindex
+        found_autoindex=$(sed -E 's/#.*$//' "${conf_file}" 2>/dev/null | grep -E "\bautoindex\b" || true)
+        if [ -n "${found_autoindex}" ]; then
+            autoindex_settings="${autoindex_settings}"$'\n'"${found_autoindex}"
+            # 디렉터리 리스팅이 켜진 경우(autoindex on)만 취약으로 판정한다.
+            if echo "${found_autoindex}" | grep -Eqi "\bautoindex\b[[:space:]]+on\b"; then
+                has_autoindex_on=true
+            fi
+        fi
+
+        # include 지시자를 해석하여 외부/확장자 없는 vhost의 autoindex 설정도 스캔한다.
+        # (Windows 라이브러리 Get-NginxWindowsConfigText와 동일한 의도)
+        local include_targets
+        include_targets=$(grep -E "^\s*include\s+" "${conf_file}" 2>/dev/null | grep -v "^\s*#" \
+            | sed -E 's/^\s*include\s+//; s/;\s*$//' || true)
+        if [ -n "${include_targets}" ]; then
+            local inc
+            while IFS= read -r inc; do
+                [ -n "${inc}" ] || continue
+                # 상대 경로는 nginx 기본 prefix(/etc/nginx) 기준으로 해석한다.
+                case "${inc}" in
+                    /*) : ;;
+                    *) inc="/etc/nginx/${inc}" ;;
+                esac
+                local inc_file
+                for inc_file in $inc; do
+                    if [ -f "${inc_file}" ] && [ -r "${inc_file}" ]; then
+                        scan_nginx_conf_file "${inc_file}"
+                    fi
+                done
+            done <<< "${include_targets}"
+        fi
+    }
 
     for conf_pattern in "${nginx_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
-            if [ -f "${conf_file}" ] && [ -r "${conf_file}" ]; then
-                config_readable=true
-                local found_autoindex=$(grep -E "^\s*autoindex" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
-                if [ -n "${found_autoindex}" ]; then
-                    autoindex_settings="${autoindex_settings}"$'\n'"${found_autoindex}"
-                    if echo "${found_autoindex}" | grep -qi "on"; then
-                        has_autoindex_on=true
-                    fi
-                fi
-            fi
+            scan_nginx_conf_file "${conf_file}"
         done
     done
 
-    command_executed="grep -E '^\\s*autoindex' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null | grep -v '^\\s*#' | head -5"
+    command_executed="grep -E '^\\s*autoindex' /etc/nginx/nginx.conf /etc/nginx/conf.d/* /etc/nginx/sites-enabled/* (include 지시자로 참조되는 vhost 포함) 2>/dev/null | grep -v '^\\s*#' | head -5"
     command_result="${autoindex_settings:-autoindex not set (default: off)}"
 
     if [ "${has_autoindex_on}" = true ]; then

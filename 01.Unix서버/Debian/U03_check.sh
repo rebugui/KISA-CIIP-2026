@@ -98,9 +98,11 @@ diagnose() {
                 deny_val=$(echo "$raw_pam_output" | grep -oE 'deny=[0-9]+' | cut -d= -f2 | head -1 || echo "")
 
                 if [ -n "$deny_val" ]; then
-                    if [ "$deny_val" -le 10 ]; then
+                    if [ "$deny_val" -ge 1 ] && [ "$deny_val" -le 10 ]; then
                         is_secure=true
                         config_details="${pam_module_name} deny=${deny_val}"
+                    elif [ "$deny_val" -eq 0 ]; then
+                        config_details="${pam_module_name} deny=${deny_val} (계정 잠금 비활성화)"
                     else
                         config_details="${pam_module_name} deny=${deny_val} (기준 10회 초과)"
                     fi
@@ -119,9 +121,11 @@ diagnose() {
             conf_output=$(grep -E "^deny" "/etc/security/faillock.conf" 2>/dev/null | grep -v "^#" || echo "")
             local conf_deny=$(echo "$conf_output" | cut -d= -f2 | tr -d ' ')
             if [ -n "$conf_deny" ]; then
-                if [ "$conf_deny" -le 10 ]; then
+                if [ "$conf_deny" -ge 1 ] && [ "$conf_deny" -le 10 ]; then
                     is_secure=true
                     config_details="${config_details:-pam_faillock.so} (conf: deny=${conf_deny})"
+                elif [ "$conf_deny" -eq 0 ]; then
+                    config_details="${config_details:-pam_faillock.so} (conf: deny=${conf_deny} 계정 잠금 비활성화)"
                 else
                     config_details="${config_details:-pam_faillock.so} (conf: deny=${conf_deny} 기준 초과)"
                 fi

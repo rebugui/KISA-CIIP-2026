@@ -106,39 +106,18 @@ diagnose() {
     command_executed="grep -E '^\\s*(fastcgi_pass|scgi_pass|uwsgi_pass|cgi_pass)' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null | grep -v '^\\s*#' | head -10"
     command_result="${cgi_locations:-No CGI configurations found}"
 
-    # If CGI is used, check if it's restricted to specific locations
-    if [ "${cgi_count}" -gt 0 ]; then
-        # Count how many CGI configurations are outside specific dedicated directories
-        local unrestricted_count=0
-        for conf_pattern in "${nginx_conf_locations[@]}"; do
-            for conf_file in $conf_pattern; do
-                if [ -f "${conf_file}" ]; then
-                    # Check if CGI is configured in root location or upload directories
-                    local found_unrestricted=$(grep -B5 -E "^\s*(fastcgi_pass|scgi_pass|uwsgi_pass|cgi_pass)" "${conf_file}" 2>/dev/null | grep -E "location.*(/|/uploads|/upload|/files)" | grep -v "^\s*#" | wc -l)
-                    if [ "${found_unrestricted}" -gt 0 ]; then
-                        ((unrestricted_count++)) || true
-                    fi
-                fi
-            done
-        done
-
-        if [ "${unrestricted_count}" -gt 0 ]; then
-            has_unrestricted_cgi=true
-        fi
-    fi
-
+    # CGI/FastCGI 매핑이 존재하면 (백엔드 주소와 무관하게) 실행 가능 디렉터리 제한 여부를
+    # 정적 설정만으로 확인할 수 없으므로 양호로 단정하지 않고 수동진단으로 분류한다.
+    # (location ~ \.php$ 등 catch-all 매핑은 제한 없는 취약 사례이며, grep 기반
+    # 위치 추론은 include 파일 미추적·블록 경계 모호성으로 신뢰할 수 없음 → Windows 형제 스크립트와 정렬)
     if [ "${cgi_count}" -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="CGI 스크립트가 사용되지 않습니다."
-    elif [ "${has_unrestricted_cgi}" = true ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="CGI가 특정 디렉터리 외에서도 실행 가능합니다. CGI 실행 경로 제한 권장."
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="CGI가 특정 디렉터리로 제한되어 있습니다. (보안 권고사항 준수)"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="CGI/FastCGI 실행이 설정되어 있습니다. 실행이 승인된 디렉터리로 제한되었는지(업로드/게시판 경로가 아닌지) 확인이 필요하며, 정적 설정만으로는 디렉터리 제한 여부를 단정할 수 없습니다."
     fi
 
     # Run-all 모드 확인

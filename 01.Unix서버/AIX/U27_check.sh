@@ -64,6 +64,41 @@ diagnose() {
     local hosts_equiv_exists=0
     local hosts_equiv_details=""
     local details=""
+    local insecure_count=0
+    local insecure_details=""
+    local manual_count=0
+    local manual_details=""
+
+    # 파일 보안 설정 평가: 소유자 root(또는 해당 계정), 권한 600 이하, '+' 미포함 → SECURE
+    u27_eval_file() {
+        local path="$1" acct="${2:-}"
+        local perms owner reasons=""
+        perms=$(perl -e '@s=stat(shift); printf "%04o", $s[2] & 07777' "$path" 2>/dev/null || true)
+        owner=$(perl -e '@s=stat(shift); $u=getpwuid($s[4]); print defined($u) ? $u : $s[4]' "$path" 2>/dev/null || true)
+        if [ "$owner" != "root" ] && { [ -z "$acct" ] || [ "$owner" != "$acct" ]; }; then
+            reasons="${reasons}소유자(${owner:-확인불가}) 부적절; "
+        fi
+        if [[ "$perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms & ~8#600 & 07777 ))" -eq 0 ]; then
+            :
+        else
+            reasons="${reasons}권한(${perms:-확인불가}) 600 초과; "
+        fi
+        if [ -r "$path" ]; then
+            # 주석이 아닌 행에서 '+' 토큰을 위치 무관하게 탐지 (예: 'trustedhost +')
+            if grep -vE '^[[:space:]]*#' "$path" 2>/dev/null | grep -E '(^|[[:space:]])\+([[:space:]]|$)' >/dev/null 2>&1; then
+                reasons="${reasons}'+' 설정 포함; "
+            fi
+        else
+            echo "MANUAL 내용 확인 불가(읽기 권한 없음)"
+            return 0
+        fi
+        if [ -n "$reasons" ]; then
+            echo "INSECURE ${reasons%; }"
+        else
+            echo "SECURE"
+        fi
+        return 0
+    }
 
     # Capture raw find output for .rhosts files
     local rhosts_find=$(find /home -name '.rhosts' 2>/dev/null)
@@ -80,6 +115,19 @@ diagnose() {
         local size=$(ls -ld "/etc/hosts.equiv" 2>/dev/null | awk '{print $5}')
 
         hosts_equiv_details="/etc/hosts.equiv 파일 존재 (권한: ${perms}, 소유자: ${owner}, 크기: ${size}bytes)"
+
+        local he_eval=$(u27_eval_file /etc/hosts.equiv "")
+        case "$he_eval" in
+            SECURE) ;;
+            MANUAL*)
+                ((manual_count++)) || true
+                manual_details="${manual_details}/etc/hosts.equiv: ${he_eval#MANUAL }, "
+                ;;
+            *)
+                ((insecure_count++)) || true
+                insecure_details="${insecure_details}/etc/hosts.equiv: ${he_eval#INSECURE }, "
+                ;;
+        esac
     fi
 
     # 사용자 홈 디렉터리에서 .rhosts 파일 검색
@@ -102,11 +150,27 @@ diagnose() {
                 local size=$(ls -ld "$rhosts_path" 2>/dev/null | awk '{print $5}')
 
                 rhosts_files="${rhosts_files}${rhosts_path} (권한: ${perms}, 소유자: ${owner}, 크기: ${size}bytes), "
+
+                local rh_eval=$(u27_eval_file "$rhosts_path" "$username")
+                case "$rh_eval" in
+                    SECURE) ;;
+                    MANUAL*)
+                        ((manual_count++)) || true
+                        manual_details="${manual_details}${rhosts_path}: ${rh_eval#MANUAL }, "
+                        ;;
+                    *)
+                        ((insecure_count++)) || true
+                        insecure_details="${insecure_details}${rhosts_path}: ${rh_eval#INSECURE }, "
+                        ;;
+                esac
             fi
         fi
     done < /etc/passwd || true
 
     # 결과 판정
+    # - 파일 없음 → 양호
+    # - 존재하나 모두 보안 설정 충족(소유자 root/계정, 권한 600 이하, '+' 없음) → 양호
+    # - 보안 설정 미충족 파일 존재 → 취약, 내용 확인 불가 파일만 존재 → 수동진단
     if [ "$hosts_equiv_exists" -eq 0 ] && [ "$rhosts_count" -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
@@ -115,7 +179,7 @@ diagnose() {
         local ls_equiv=$(ls -l /etc/hosts.equiv 2>/dev/null || echo "No hosts.equiv file")
         command_result="[Command: find /home -name '.rhosts']${newline}${find_rhosts}${newline}${newline}[Command: ls -l /etc/hosts.equiv]${newline}${ls_equiv}"
         command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
-    else
+    elif [ "$insecure_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         details=""
@@ -128,7 +192,26 @@ diagnose() {
             details="${details}.rhosts 파일 ${rhosts_count}개 발견: ${rhosts_files%, }. "
         fi
 
-        inspection_summary="취약: ${details}"
+        inspection_summary="취약: 보안 설정 미충족 파일 ${insecure_count}개 - ${insecure_details%, }. ${details}"
+        local find_rhosts=$(find /home -name '.rhosts' 2>/dev/null | head -15 || echo "No .rhosts files")
+        local ls_equiv=$(ls -l /etc/hosts.equiv 2>/dev/null || echo "No hosts.equiv file")
+        command_result="[Command: find /home -name '.rhosts']${newline}${find_rhosts}${newline}${newline}[Command: ls -l /etc/hosts.equiv]${newline}${ls_equiv}"
+        command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
+    elif [ "$manual_count" -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="r 서비스 설정 파일이 존재하나 내용을 확인할 수 없어 수동 점검 필요: ${manual_details%, }"
+        local find_rhosts=$(find /home -name '.rhosts' 2>/dev/null | head -15 || echo "No .rhosts files")
+        local ls_equiv=$(ls -l /etc/hosts.equiv 2>/dev/null || echo "No hosts.equiv file")
+        command_result="[Command: find /home -name '.rhosts']${newline}${find_rhosts}${newline}${newline}[Command: ls -l /etc/hosts.equiv]${newline}${ls_equiv}"
+        command_executed="find /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        details=""
+        [ "$hosts_equiv_exists" -gt 0 ] && details="${details}${hosts_equiv_details}. "
+        [ "$rhosts_count" -gt 0 ] && details="${details}.rhosts 파일 ${rhosts_count}개: ${rhosts_files%, }. "
+        inspection_summary="r 서비스 설정 파일이 존재하나 모두 보안 설정 충족(소유자 root/해당 계정, 권한 600 이하, '+' 없음): ${details}"
         local find_rhosts=$(find /home -name '.rhosts' 2>/dev/null | head -15 || echo "No .rhosts files")
         local ls_equiv=$(ls -l /etc/hosts.equiv 2>/dev/null || echo "No hosts.equiv file")
         command_result="[Command: find /home -name '.rhosts']${newline}${find_rhosts}${newline}${newline}[Command: ls -l /etc/hosts.equiv]${newline}${ls_equiv}"

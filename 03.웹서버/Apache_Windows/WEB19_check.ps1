@@ -55,7 +55,7 @@ try {
         $activeText = $activeLines -join "`n"
 
         $includeModuleMatches = @([regex]::Matches($activeText, '(?im)^\s*LoadModule\s+include_module\b.*') | ForEach-Object { $_.Value.Trim() })
-        $optionsIncludeMatches = @([regex]::Matches($activeText, '(?im)^\s*Options\b(?=.*\bIncludes(?:NOEXEC)?\b).*$') | ForEach-Object { $_.Value.Trim() })
+        $optionsIncludeMatches = @([regex]::Matches($activeText, '(?im)^\s*Options\b(?=.*(?<![-\w])Includes(?:NOEXEC)?\b).*$') | ForEach-Object { $_.Value.Trim() })
         $addOutputFilterMatches = @([regex]::Matches($activeText, '(?im)^\s*AddOutputFilter\s+INCLUDES\b.*') | ForEach-Object { $_.Value.Trim() })
         $setOutputFilterMatches = @([regex]::Matches($activeText, '(?im)^\s*SetOutputFilter\s+INCLUDES\b.*') | ForEach-Object { $_.Value.Trim() })
         $xBitHackMatches = @([regex]::Matches($activeText, '(?im)^\s*XBitHack\s+(?:on|full)\b.*') | ForEach-Object { $_.Value.Trim() })

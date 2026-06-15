@@ -125,8 +125,9 @@ diagnose() {
            && [[ ! "$dir_other_digit" =~ [2367] ]]; then  # 그룹/기타 쓰기 권한 없음 (700/750 허용)
         # Guideline says 644 for files. For Dir, it implies access control.
 
-           # Check for group/world writable files (664 등 그룹 쓰기 권한도 644 초과로 취약)
-           local insecure_files=$(find "$log_dir" -type f \( -perm -g+w -o -perm -o+w \) 2>/dev/null | head -5)
+           # Check for files exceeding 644 (쓰기뿐 아니라 실행/SUID/SGID/sticky 비트 등 644 초과 전부 취약)
+           # -perm /07133: 0644를 넘어서는 비트(SUID 4000/SGID 2000/sticky 1000/owner-x 0100/group-w 0020/group-x 0010/other-w 0002/other-x 0001) 중 하나라도 설정된 파일
+           local insecure_files=$(find "$log_dir" -type f -perm /07133 2>/dev/null | head -5)
            # Check for files not owned by root (syslog 데몬 소유는 허용)
            local nonroot_files=$(find "$log_dir" -type f ! -user root ! -user syslog 2>/dev/null | head -5)
 
@@ -155,10 +156,11 @@ diagnose() {
                             details="${details}, ${log} owner invalid ($l_owner)"
                         fi
 
-                        # Check if group/others writable (쓰기 비트 포함 자릿수: 2,3,6,7 — 마지막 두 자리만 검사)
-                        if [[ "$l_perm" =~ [2367].$ ]] || [[ "$l_perm" =~ [2367]$ ]]; then
+                        # Check if permission exceeds 644 (쓰기뿐 아니라 실행/SUID/SGID/sticky 등 644 초과 비트 전부 취약)
+                        # 0644를 넘어서는 비트마스크 07133 중 하나라도 켜져 있으면 취약. 권한 형식이 비정상이면 보수적으로 취약 처리.
+                        if [[ ! "$l_perm" =~ ^[0-7]{3,4}$ ]] || (( (8#$l_perm) & 07133 )); then
                              crit_issue=true
-                             details="${details}, ${log} writable by group/others ($l_perm)"
+                             details="${details}, ${log} permission exceeds 644 ($l_perm)"
                         fi
                     fi
                 done || true

@@ -47,11 +47,21 @@ try {
             }
         }
 
-        # IIS 구성에서도 확인
+        # IIS 구성에서도 확인 (applicationHost.config/서버 노드의 상속된 유효 설정 포함)
+        # Get-WebConfiguration 은 상속 병합된 유효값을 반환하므로 enabled 속성을 직접 읽는다.
+        # 기존 .Attributes.value.enabled 경로는 ConfigurationAttributeCollection 을
+        # member-enumerate 하여 항상 $null 이 되는 죽은 코드였다 → 서버 노드에서 디렉터리
+        # 검색을 켠 경우(IIS 관리자 > 디렉터리 검색 > 사용)를 탐지하지 못했다.
         $iisConfig = Get-WebConfiguration -Filter "/system.webServer/directoryBrowse" -Location $siteName
-        if ($iisConfig -and $iisConfig.Attributes.value.enabled -eq "true") {
-            $dirListingEnabled = $true
-            $siteInfo += "Site: $siteName, IIS Config: Enabled"
+        if ($iisConfig) {
+            $iisEnabled = $iisConfig.enabled
+            if ($null -eq $iisEnabled -and $iisConfig.Attributes) {
+                try { $iisEnabled = $iisConfig.Attributes['enabled'].Value } catch { $iisEnabled = $null }
+            }
+            if ("$iisEnabled" -eq "true" -or $iisEnabled -eq $true) {
+                $dirListingEnabled = $true
+                $siteInfo += "Site: $siteName, IIS Config: Enabled"
+            }
         }
     }
 

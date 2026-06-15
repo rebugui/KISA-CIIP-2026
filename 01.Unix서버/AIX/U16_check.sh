@@ -84,7 +84,9 @@ diagnose() {
         local perms_numeric=$(stat -c "%a" "$target_file" 2>/dev/null || perl -e 'printf "%04o", (stat)[2] & 07777' "$target_file" 2>/dev/null || echo "0000")
 
         # 소유자 및 권한 확인 (AIX는 root만 확인)
-        if [ "$file_owner" = "root" ] && [ "$perms_numeric" = "0644" ]; then
+        # 644 초과 비트 없음: 644보다 강한 600/640/440 등은 양호, 추가 비트는 취약
+        # 07777 마스크로 setuid/setgid/sticky 특수 비트(4644, 2644, 1644 등)도 초과 비트로 검출
+        if [ "$file_owner" = "root" ] && [[ "$perms_numeric" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms_numeric & ~8#644 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $perms_numeric, 소유자: $file_owner"
         else

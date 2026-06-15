@@ -83,8 +83,8 @@ diagnose() {
         local perms_octal=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$target_file" 2>/dev/null)
         local file_owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid).":".getgrgid($gid)' "$target_file" 2>/dev/null)
 
-        # 소유자 및 권한 확인
-        if [ "$file_owner" = "root:root" ] && [ "$perms_octal" = "0644" ]; then
+        # 소유자 및 권한 확인 (644 이하, 소유자 root - 그룹은 가이드 기준 아님: HP-UX 기본 root:sys 허용)
+        if [ "${file_owner%%:*}" = "root" ] && [ "$(( 8#$perms_octal & ~8#644 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $perms_octal, 소유자: $file_owner"
         else

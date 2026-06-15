@@ -145,38 +145,21 @@ diagnose() {
         command_result="${empty_check}"
     else
         # 파일이 존재하고 내용이 있는 경우
-        # 주요 시스템 계정이 등록되어 있는지 확인
-        local missing_accounts=()
-        local registered_accounts=""
-
-        for account in "${system_accounts[@]}"; do
-            # /etc/passwd에 계정이 존재하는지 먼저 확인
-            if grep -q "^${account}:" /etc/passwd 2>/dev/null; then
-                # ftpusers 파일에 등록되어 있는지 확인
-                if echo "$file_content" | grep -qx "${account}"; then
-                    registered_accounts="${registered_accounts}${account} "
-                else
-                    missing_accounts+=("$account")
-                fi
-            fi
-        done || true
-
+        # U-57 판정 기준: root 계정의 FTP 접속 차단 여부 (root 등록 여부만 확인)
         local accounts_check=$(cat "${found_file}" 2>/dev/null | grep -v '^#' | grep -v '^$' | head -10 || echo "No registered accounts")
         command_result="File: ${found_file}\n${accounts_check}"
 
-        if [ ${#missing_accounts[@]} -eq 0 ]; then
+        # ftpusers 파일에 root 계정이 등록되어 있는지 확인 (주석 처리된 #root는 차단으로 보지 않음)
+        if echo "$file_content" | grep -qx "root"; then
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="ftpusers 파일에 주요 시스템 계정이 적절하게 등록되어 있습니다(${found_file})."
+            inspection_summary="ftpusers 파일에 root 계정이 등록되어 root FTP 접속이 차단되어 있습니다(${found_file})."
+            command_result="${command_result}${newline}root: [blocked]"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
-            local missing_list=""
-            for acc in "${missing_accounts[@]}"; do
-                missing_list="${missing_list}${acc}, "
-            done || true
-            inspection_summary="ftpusers 파일에 일부 시스템 계정이 미등록되어 있습니다(${found_file}): ${missing_list%, }"
-            command_result="${command_result}${newline}Unregistered accounts: ${missing_list%, }"
+            inspection_summary="ftpusers 파일에 root 계정이 등록되어 있지 않아 root FTP 접속이 허용됩니다(${found_file})."
+            command_result="${command_result}${newline}root: [NOT blocked]"
         fi
     fi
 

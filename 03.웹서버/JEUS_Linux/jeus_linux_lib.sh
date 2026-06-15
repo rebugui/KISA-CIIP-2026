@@ -119,12 +119,54 @@ jeus_config_grep() {
     return "${found}"
 }
 
+# Strip XML comments (including MULTI-LINE <!-- ... --> blocks that span several
+# lines) from each config file, then grep the comment-free text. A per-line sed
+# cannot remove a block comment whose delimiters sit on separate lines, so the awk
+# state machine below carries the in-comment state across newlines. Output lines are
+# prefixed "file:" to keep evidence parity with jeus_config_grep. Returns 0 if the
+# pattern matched any uncommented line.
+jeus_config_grep_stripped() {
+    local pattern="$1"
+    local found=1
+    local file
+    for file in "${JEUS_CONFIGS[@]}"; do
+        [ -f "${file}" ] || continue
+        if awk -v fname="${file}" '
+            {
+                line = $0
+                out = ""
+                while (length(line) > 0) {
+                    if (in_comment) {
+                        idx = index(line, "-->")
+                        if (idx == 0) { line = ""; break }
+                        line = substr(line, idx + 3)
+                        in_comment = 0
+                    } else {
+                        idx = index(line, "<!--")
+                        if (idx == 0) { out = out line; line = ""; break }
+                        out = out substr(line, 1, idx - 1)
+                        line = substr(line, idx + 4)
+                        in_comment = 1
+                    }
+                }
+                if (out != "") print fname ":" out
+            }
+        ' "${file}" 2>/dev/null | grep -Ei "${pattern}"; then
+            found=0
+        fi
+    done
+    return "${found}"
+}
+
 jeus_acl_check() {
     local role="$1"
-    shift
+    local acl_mode="$2"
+    shift 2
+    [ -n "${acl_mode}" ] || acl_mode="lenient"
     local targets=("$@")
     local bad=""
     local checked=""
+    local stat_failed=""
     local mode
     local octal
     local group_digit
@@ -139,25 +181,43 @@ jeus_acl_check() {
             # Normalize to last 3 octal digits (drop setuid/setgid/sticky leading digit).
             # Index 0 = owner, 1 = group, 2 = other.
             octal="${octal: -3}"
+            if ! printf '%s' "${octal}" | grep -Eq '^[0-7]{3}$'; then
+                # stat existed but the permission triplet could not be read/parsed.
+                stat_failed=1
+                continue
+            fi
             group_digit="${octal:1:1}"
             other_digit="${octal:2:1}"
-            # criteria_bad: any general-user access (read/write/exec) on password,
-            # config or log paths. "Other" digit non-zero => world-accessible (read=4,
-            # exec=1, write=2 all flagged). Group-WRITE (2/3/6/7) is also broad access per
-            # guideline remediation (chmod 600 / chmod -R 750 -> group r-x is acceptable,
-            # group write is not). Group read/exec only (4,5) stays clean per 750/640.
-            case "${other_digit}" in
-                1|2|3|4|5|6|7) bad+="${mode}"$'\n' ;;
-            esac
-            if [ -z "${other_digit}" ] || [ "${other_digit}" = "0" ]; then
-                case "${group_digit}" in
-                    2|3|6|7) bad+="${mode}"$'\n' ;;
+            if [ "${acl_mode}" = "strict" ]; then
+                # criteria_bad (e.g. WEB-03 password file, <=600): ANY group OR other
+                # access bit (read/write/exec) is a violation. Mask 0177 (=group rwx +
+                # other rwx + owner-exec) -> non-zero means mode > 600. Group read (640)
+                # and group/other exec are all flagged.
+                if [ "$(( 8#${octal} & 8#177 ))" -ne 0 ]; then
+                    bad+="${mode}"$'\n'
+                fi
+            else
+                # Lenient (config/log hardening): "Other" digit non-zero => world-accessible
+                # (read=4, exec=1, write=2 all flagged). Group-WRITE (2/3/6/7) is also broad
+                # access per guideline remediation (chmod -R 750 -> group r-x acceptable,
+                # group write is not). Group read/exec only (4,5) stays clean per 750/640.
+                case "${other_digit}" in
+                    1|2|3|4|5|6|7) bad+="${mode}"$'\n' ;;
                 esac
+                if [ "${other_digit}" = "0" ]; then
+                    case "${group_digit}" in
+                        2|3|6|7) bad+="${mode}"$'\n' ;;
+                    esac
+                fi
             fi
+        else
+            stat_failed=1
         fi
     done
     if [ -n "${bad}" ]; then
         jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "Broad general-user access (read/write/exec) permission evidence was found on JEUS ${role} paths." "${bad}" "stat JEUS ${role} paths"
+    elif [ "${acl_mode}" = "strict" ] && [ -n "${stat_failed}" ]; then
+        jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS ${role} paths exist but their permissions could not be read; verify the password-file mode (must be 600 or less) manually." "${checked}$(jeus_evidence)" "stat JEUS ${role} paths"
     elif [ -n "${checked}" ]; then
         jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No broad general-user access permission evidence was found on assessed JEUS ${role} paths." "${checked}" "stat JEUS ${role} paths"
     else
@@ -178,10 +238,17 @@ invoke_jeus_linux_check() {
     case "${item_id}" in
         WEB-01)
             lines="$(jeus_config_grep '<user|<account|administrator|Administrators' || true)"
-            if printf '%s' "${lines}" | grep -Eiq 'administrator'; then
+            # criteria_bad is the account NAME equalling the default 'administrator'. The
+            # default 'Administrators' group / 'AdministratorsRole' role is functional and a
+            # compliant (renamed) admin is still a member of it, so matching the bare
+            # 'administrator' substring (which also hits 'Administrators'/'AdministratorsRole')
+            # over-reports. Trigger VULNERABLE only on the username FIELD holding
+            # 'administrator' (<name>administrator</name> or name="administrator"); the
+            # trailing boundary [^[:alnum:]_] / value-close excludes the 'Administrators' group.
+            if printf '%s' "${lines}" | grep -Eiq '<name>[[:space:]]*administrator[[:space:]]*</name>|name[[:space:]]*=[[:space:]]*["'"'"']administrator["'"'"']'; then
                 jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "Default JEUS administrator account name evidence was found." "${lines}" "Inspect JEUS accounts.xml/security domain users"
             elif [ -n "${lines}" ]; then
-                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS account evidence was found; confirm administrator account naming policy." "${lines}" "Inspect JEUS accounts.xml/security domain users"
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS account/group evidence was found (e.g. the default Administrators group/role) but no default 'administrator' account NAME was confirmed; verify the administrator account name is not a default/guessable value." "${lines}" "Inspect JEUS accounts.xml/security domain users"
             else
                 jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS account configuration was not found; confirm administrator account name manually." "$(jeus_evidence)" "Inspect JEUS accounts.xml/security domain users"
             fi
@@ -190,7 +257,18 @@ invoke_jeus_linux_check() {
             jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS administrator password complexity depends on security-domain policy and password store state. Confirm policy and password age manually." "$(jeus_evidence)" "Inspect JEUS password policy/accounts.xml"
             ;;
         WEB-03)
-            jeus_acl_check "security account/policy" "${JEUS_CONFIGS[@]}"
+            # WEB-03 is the STRICT password-file rule (criteria_bad: mode > 600). Only the
+            # credential stores (accounts.xml/policies.xml) are in scope here; general config
+            # files (domain.xml/web.xml/...) are covered by WEB-14 with its 750/640 leniency.
+            # Restrict to the password files and enforce mode <= 600 (any group/other bit = bad).
+            local web03_pwfiles=()
+            local web03_file
+            for web03_file in "${JEUS_CONFIGS[@]}"; do
+                case "${web03_file}" in
+                    */accounts.xml|*/policies.xml) web03_pwfiles+=("${web03_file}") ;;
+                esac
+            done
+            jeus_acl_check "security account/policy" "strict" "${web03_pwfiles[@]:-}"
             ;;
         WEB-04)
             lines="$(jeus_config_grep '<allow-indexing>[[:space:]]*true|<allow-indexing>[[:space:]]*false|listings' || true)"
@@ -221,9 +299,12 @@ invoke_jeus_linux_check() {
             # Strip XML/inline comments so commented-out directives do not count, then
             # require a real positive numeric limit (a size directive followed by a
             # non-zero integer). A lone <multipart-config> tag or <...>0<...> is not a limit.
+            # The gap class [^0-9-]* forbids a leading '-' between the directive and the
+            # digit, so -1 / maxPostSize="-1" (servlet-spec "no limit" = unlimited = bad)
+            # is NOT treated as a valid limit.
             local web08_effective
             web08_effective="$(printf '%s\n' "${lines}" | sed -e 's/<!--.*-->//g' | grep -Ev '<!--|-->' || true)"
-            if printf '%s\n' "${web08_effective}" | grep -Eiq '(max-file-size|max-request-size|maxPostSize)[^0-9]*[1-9][0-9]*'; then
+            if printf '%s\n' "${web08_effective}" | grep -Eiq '(max-file-size|max-request-size|maxPostSize)[^0-9-]*[1-9][0-9]*'; then
                 jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS upload/request size limit evidence (non-zero numeric value) was found." "${web08_effective}" "Inspect web.xml multipart upload limits"
             elif [ -n "${lines}" ]; then
                 jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS multipart/upload configuration was present but had no real non-zero size limit (commented out, empty, or zero value)." "${lines}" "Inspect web.xml multipart upload limits"
@@ -289,7 +370,7 @@ invoke_jeus_linux_check() {
             fi
             ;;
         WEB-14)
-            jeus_acl_check "config/root" "${JEUS_CONFIGS[@]}" "${JEUS_HOME_FOUND}"
+            jeus_acl_check "config/root" "lenient" "${JEUS_CONFIGS[@]}" "${JEUS_HOME_FOUND}"
             ;;
         WEB-15)
             lines="$(jeus_config_grep '<servlet-mapping>|<url-pattern>|cgi|admin|manager|invoker' || true)"
@@ -300,6 +381,11 @@ invoke_jeus_linux_check() {
                 # mapping (e.g. /welcome -> jsp) cannot be decided automatically per the
                 # guideline, so report MANUAL and list the mappings rather than GOOD.
                 jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS servlet mappings were found; necessity cannot be determined automatically. Review the listed mappings and remove unnecessary ones." "${lines}" "Inspect JEUS servlet mappings"
+            elif [ "${#JEUS_CONFIGS[@]}" -eq 0 ]; then
+                # No config files were collected (e.g. JEUS detected by process only,
+                # JEUS_HOME unresolved). "No mapping found" here means "nothing inspected",
+                # not "genuinely no mappings"; do not emit GOOD. (Mirrors the WEB-07 guard.)
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS is installed but no web.xml/config files were available to inspect for servlet mappings; review unnecessary script mappings manually." "$(jeus_evidence)" "Inspect JEUS servlet mappings"
             else
                 jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS servlet mapping evidence was found in inspected configs." "$(jeus_evidence)" "Inspect JEUS servlet mappings"
             fi
@@ -324,11 +410,13 @@ invoke_jeus_linux_check() {
             jeus_set_result "N/A" "N/A" "HTTP-to-HTTPS redirection item is not targeted to JEUS in the guideline metadata." "WEB-21 target excludes JEUS." "Map HTTP redirection guideline applicability"
             ;;
         WEB-22)
-            lines="$(jeus_config_grep '<error-page>|<error-code>|<location>' || true)"
-            # Strip XML comments so commented-out <!-- <error-page> --> blocks do not count,
-            # and require a real <location> with a non-empty value to treat as configured.
+            # Use the comment-stripped grep so that error-page blocks disabled via a
+            # MULTI-LINE <!-- ... --> comment (delimiters on their own lines) are not
+            # counted. jeus_config_grep alone would keep the inner <location> line because
+            # the standalone <!-- / --> lines never enter its match set.
             local web22_effective
-            web22_effective="$(printf '%s\n' "${lines}" | sed -e 's/<!--.*-->//g' | grep -Ev '<!--|-->' || true)"
+            web22_effective="$(jeus_config_grep_stripped '<error-page>|<error-code>|<location>' || true)"
+            # Require a real <location> with a non-empty value to treat as configured.
             if printf '%s\n' "${web22_effective}" | grep -Eiq '<location>[[:space:]]*[^<[:space:]][^<]*</location>'; then
                 jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS custom error-page with a designated location value was found." "${web22_effective}" "Inspect JEUS error-page settings"
             elif printf '%s\n' "${web22_effective}" | grep -Eiq '<error-page>'; then
@@ -356,7 +444,21 @@ invoke_jeus_linux_check() {
             fi
             ;;
         WEB-26)
-            jeus_acl_check "log" "${JEUS_LOG_DIRS[@]}"
+            # criteria_bad covers log DIRECTORIES *and* FILES (remediation: log files 640;
+            # default 644 is world-readable = vulnerable). JEUS_LOG_DIRS holds directories
+            # only, so enumerate the regular files inside each and assess them too.
+            local web26_targets=()
+            local web26_dir
+            local web26_file
+            for web26_dir in "${JEUS_LOG_DIRS[@]:-}"; do
+                [ -n "${web26_dir}" ] || continue
+                web26_targets+=("${web26_dir}")
+                [ -d "${web26_dir}" ] || continue
+                while IFS= read -r web26_file; do
+                    [ -n "${web26_file}" ] && web26_targets+=("${web26_file}")
+                done < <(find "${web26_dir}" -type f 2>/dev/null | head -500)
+            done
+            jeus_acl_check "log" "lenient" "${web26_targets[@]:-}"
             ;;
         *)
             jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "No JEUS Linux diagnostic rule is defined for ${item_id}." "$(jeus_evidence)" "JEUS Linux generic discovery"

@@ -152,7 +152,7 @@ function Get-CubridConfigLines {
 function Test-CubridBroadPrincipal {
     param([System.Security.Principal.IdentityReference]$Identity)
     try { $sid = $Identity.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $sid = [string]$Identity }
-    return @($sid -eq 'S-1-1-0', $sid -eq 'S-1-5-11', $sid -eq 'S-1-5-32-545', $sid -eq 'S-1-5-32-546', $sid -match '-513$', ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users') -contains $true
+    return ($sid -eq 'S-1-1-0') -or ($sid -eq 'S-1-5-11') -or ($sid -eq 'S-1-5-32-545') -or ($sid -eq 'S-1-5-32-546') -or ($sid -match '-513$') -or (([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users')
 }
 
 function Get-CubridBroadAclEvidence {
@@ -170,6 +170,49 @@ function Get-CubridBroadAclEvidence {
     }
 }
 
+function Get-CubridLocalAdminMemberSids {
+    try {
+        $group = [ADSI]"WinNT://./Administrators,group"
+        $members = @($group.Invoke('Members'))
+        $sids = foreach ($m in $members) {
+            try {
+                $bytes = $m.GetType().InvokeMember('objectSid', 'GetProperty', $null, $m, $null)
+                (New-Object System.Security.Principal.SecurityIdentifier($bytes, 0)).Value
+            } catch { }
+        }
+        return @($sids | Where-Object { $_ })
+    } catch { return $null }
+}
+
+function Test-CubridServiceAccountAdmin {
+    param([string]$Account)
+    # Well-known administrator-equivalent service identities (always VULNERABLE).
+    if ($Account -match '^(?i)\s*(\.\\)?(LocalSystem|NT AUTHORITY\\SYSTEM|NT AUTHORITY\\System|System)\s*$') {
+        return [pscustomobject]@{ Account = $Account; Admin = $true; Resolved = $true; Detail = "$Account is the LocalSystem account" }
+    }
+    # Resolve the StartName to a SID. Normalize '.\name' to the local computer principal.
+    $normalized = $Account
+    if ($normalized -match '^\.\\(.+)$') { $normalized = "$env:COMPUTERNAME\$($Matches[1])" }
+    elseif ($normalized -notmatch '\\') { $normalized = "$env:COMPUTERNAME\$normalized" }
+    $sid = $null
+    try { $sid = (New-Object System.Security.Principal.NTAccount($normalized)).Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $sid = $null }
+    if (-not $sid) {
+        return [pscustomobject]@{ Account = $Account; Admin = $false; Resolved = $false; Detail = "$Account could not be resolved to a SID" }
+    }
+    # The built-in Administrator account and the local Administrators group itself are admin-equivalent.
+    if ($sid -eq 'S-1-5-32-544' -or $sid -match '-500$') {
+        return [pscustomobject]@{ Account = $Account; Admin = $true; Resolved = $true; Detail = "$Account ($sid) is a built-in administrator principal" }
+    }
+    $adminSids = Get-CubridLocalAdminMemberSids
+    if ($null -eq $adminSids) {
+        return [pscustomobject]@{ Account = $Account; Admin = $false; Resolved = $false; Detail = "$Account ($sid) resolved, but local Administrators membership could not be enumerated" }
+    }
+    if ($adminSids -contains $sid) {
+        return [pscustomobject]@{ Account = $Account; Admin = $true; Resolved = $true; Detail = "$Account ($sid) is a member of the local Administrators group" }
+    }
+    return [pscustomobject]@{ Account = $Account; Admin = $false; Resolved = $true; Detail = "$Account ($sid) is not a member of the local Administrators group" }
+}
+
 function Invoke-CubridWindowsCheck {
     param([string]$ItemId, [string]$ItemName)
     $state = Get-CubridWindowsState
@@ -180,10 +223,10 @@ function Invoke-CubridWindowsCheck {
         'D-01' { return Invoke-CubridSqlCheck $state "SELECT name, password FROM db_user;" { param($r) if ($r.Output -match '(?im)^dba\s+($|NULL|\s*$)') { New-CubridResult 'VULNERABLE' 'CUBRID DBA/default account appears to have an empty password.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-CubridResult 'MANUAL' 'CUBRID user password evidence was collected; confirm default account password policy.' $r.Output $r.Command } else { New-CubridResult 'MANUAL' 'No CUBRID user rows were returned.' 'No rows returned.' $r.Command } } 'default account password policy' }
         'D-02' { return Invoke-CubridSqlCheck $state "SELECT name FROM db_user WHERE name IN ('public','dba','test','demo') OR name LIKE 'test%';" { param($r) if ($r.Output -match '(?im)^(test|demo)') { New-CubridResult 'VULNERABLE' 'Unnecessary CUBRID sample/test accounts were found.' $r.Output $r.Command } elseif ($r.Output -match '(?m)\S') { New-CubridResult 'MANUAL' 'CUBRID default/public accounts exist; confirm only required accounts remain.' $r.Output $r.Command } else { New-CubridResult 'GOOD' 'No obvious CUBRID sample/test accounts were returned.' 'No rows returned.' $r.Command } } 'unnecessary account removal' }
         'D-03' { return New-CubridResult 'N/A' 'Password lifetime and complexity item is not explicitly targeted to CUBRID in the guideline metadata.' 'D-03 target excludes CUBRID.' 'Map DBMS password-policy guideline applicability' }
-        'D-04' { return Invoke-CubridSqlCheck $state "SELECT g.name FROM db_authorization a, db_user g WHERE a.grantee = g.name;" { param($r) if ($r.Output -match '(?m)\S') { New-CubridResult 'MANUAL' 'CUBRID authorization evidence was collected; confirm only approved administrators have privileged roles.' $r.Output $r.Command } else { New-CubridResult 'GOOD' 'No CUBRID authorization grantee evidence was returned.' 'No rows returned.' $r.Command } } 'administrator privilege restriction' }
+        'D-04' { return Invoke-CubridSqlCheck $state "SELECT a.name FROM db_user a, table(direct_groups) AS t(roles) WHERE roles.name = 'DBA';" { param($r) if ($r.Output -match '(?m)\S') { New-CubridResult 'MANUAL' 'CUBRID DBA-group membership was collected; confirm only required accounts hold DBA privilege.' $r.Output $r.Command } else { New-CubridResult 'MANUAL' 'No CUBRID DBA-group membership rows were returned; manually confirm DBA privilege is restricted to required accounts.' 'No rows returned.' $r.Command } } 'administrator privilege restriction' }
         'D-05' { return New-CubridResult 'N/A' 'Password reuse item is not explicitly targeted to CUBRID in the guideline metadata.' 'D-05 target excludes CUBRID.' 'Map DBMS password-reuse guideline applicability' }
         'D-06' { return New-CubridResult 'N/A' 'Individual DB account assignment item is not explicitly targeted to CUBRID in the guideline metadata.' 'D-06 target excludes CUBRID.' 'Map DBMS account-assignment guideline applicability' }
-        'D-07' { $accounts = @($state.Services | ForEach-Object { $_.StartName } | Where-Object { $_ }); if ($accounts -match '^(?i)(LocalSystem|NT AUTHORITY\\SYSTEM)$|Administrator') { return New-CubridResult 'VULNERABLE' 'CUBRID Windows service appears to run with administrator-equivalent OS privileges.' ($accounts -join ', ') 'Inspect CUBRID Windows service StartName' }; if ($accounts.Count -gt 0) { return New-CubridResult 'GOOD' 'CUBRID Windows service account is not administrator-equivalent.' ($accounts -join ', ') 'Inspect CUBRID Windows service StartName' }; return New-CubridResult 'MANUAL' 'CUBRID service account could not be determined.' $evidence 'Inspect CUBRID Windows service StartName' }
+        'D-07' { $accounts = @($state.Services | ForEach-Object { $_.StartName } | Where-Object { $_ }); if ($accounts.Count -eq 0) { return New-CubridResult 'MANUAL' 'CUBRID service account could not be determined.' $evidence 'Inspect CUBRID Windows service StartName' }; $assessed = @($accounts | ForEach-Object { Test-CubridServiceAccountAdmin -Account $_ }); $detail = ($assessed | ForEach-Object { $_.Detail }) -join '; '; if (@($assessed | Where-Object { $_.Admin }).Count -gt 0) { return New-CubridResult 'VULNERABLE' 'CUBRID Windows service runs as an administrator-equivalent account (LocalSystem or local Administrators member).' $detail 'Resolve CUBRID service StartName SID and expand local Administrators membership' }; if (@($assessed | Where-Object { -not $_.Resolved }).Count -gt 0) { return New-CubridResult 'MANUAL' 'CUBRID Windows service account administrator-equivalence could not be resolved; verify the account is not a local Administrators member.' $detail 'Resolve CUBRID service StartName SID and expand local Administrators membership' }; return New-CubridResult 'GOOD' 'CUBRID Windows service account is not administrator-equivalent.' $detail 'Resolve CUBRID service StartName SID and expand local Administrators membership' }
         'D-08' { return New-CubridResult 'N/A' 'Transport encryption item is not explicitly targeted to CUBRID in the guideline metadata.' 'D-08 target excludes CUBRID.' 'Map DBMS encryption guideline applicability' }
         'D-09' { return New-CubridResult 'N/A' 'Failed-login lockout item is not explicitly targeted to CUBRID in the guideline metadata.' 'D-09 target excludes CUBRID.' 'Map DBMS lockout guideline applicability' }
         'D-10' { return New-CubridResult 'N/A' 'Remote DB access restriction item is not explicitly targeted to CUBRID in the guideline metadata.' 'D-10 target excludes CUBRID.' 'Map DBMS remote-access guideline applicability' }

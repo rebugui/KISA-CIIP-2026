@@ -132,17 +132,28 @@ diagnose() {
     # 디렉토리 자체에 group/other 쓰기 비트가 없으면(700/750/751/755 등) 통과하여 하위 점검 진행.
     # group/other 쓰기 비트 보유(770/775/757 등) → 즉시 취약. others 읽기/실행만 있는 경우는 허용.
     if [ "$owner" = "root" ] && [ "$(( 8#$perms & 022 ))" -eq 0 ]; then
-           # Check for group/world writable files (664 등 그룹 쓰기 권한도 644 초과로 취약)
-           local insecure_files=$(find "$log_dir" -type f \( -perm -g+w -o -perm -o+w \) 2>/dev/null | head -5)
-           # Check for files not owned by root (syslog 데몬 소유는 허용)
-           local nonroot_files=$(find "$log_dir" -type f ! -user root ! -user syslog 2>/dev/null | head -5)
+           # 개별 로그 파일 소유자 및 권한 재귀 점검 (RedHat 형제와 동일한 비트마스크 기준)
+           # 소유자가 root(또는 정당한 로그 데몬 syslog)가 아니거나, 권한이 644 초과(644 외 비트 보유)이면 취약.
+           # 644 초과 여부는 십진 비교가 아닌 비트 마스크(~644 = 7133)로 판정 → 755/744/751 등 비쓰기 초과 모드와
+           # SUID/SGID(4755/2644)도 취약으로 판정 (쓰기 비트만 보는 기존 find 프리필터의 false_good 차단).
+           # HP-UX find 에는 -printf 가 없으므로 파일 목록을 받아 perl stat 으로 권한/소유자를 확인한다.
+           local insecure_files=""
+           local file_list=$(find "$log_dir" -type f 2>/dev/null) || true
+           local f_path="" f_perm="" f_owner=""
+           while IFS= read -r f_path; do
+                [ -n "${f_path:-}" ] || continue
+                f_perm=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$f_path" 2>/dev/null || echo "0000")
+                f_owner=$(perl -e 'print getpwuid((stat(shift))[4])' "$f_path" 2>/dev/null || echo "unknown")
+                if [ "$f_owner" != "root" ] && [ "$f_owner" != "syslog" ]; then
+                     insecure_files="${insecure_files}${f_path}(owner:${f_owner}) "
+                elif [ "$(( (8#$f_perm) & (8#7133) ))" -ne 0 ]; then
+                     insecure_files="${insecure_files}${f_path}(perm:${f_perm}) "
+                fi
+           done <<< "$file_list"
 
            if [ -n "$insecure_files" ]; then
                 is_secure=false
-                details="${details}, Group/World-writable files found: ${insecure_files}..."
-           elif [ -n "$nonroot_files" ]; then
-                is_secure=false
-                details="${details}, Non-root owned files found: ${nonroot_files}..."
+                details="${details}, 취약 파일 발견: ${insecure_files}..."
            else
                 # Check specific critical logs (HP-UX 실제 로그 경로: /var/adm 하위)
                 local critical_logs=("/var/adm/syslog/syslog.log" "/var/adm/syslog/mail.log" "/var/adm/sulog" "/var/adm/wtmp" "/var/adm/btmp")

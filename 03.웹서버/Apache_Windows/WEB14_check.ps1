@@ -41,14 +41,7 @@ function Test-BroadPrincipal {
         $sid = [string]$Identity
     }
 
-    return @(
-        $sid -eq 'S-1-1-0',
-        $sid -eq 'S-1-5-11',
-        $sid -eq 'S-1-5-32-545',
-        $sid -eq 'S-1-5-32-546',
-        $sid -match '-513$',
-        ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users'
-    ) -contains $true
+    return ($sid -eq 'S-1-1-0') -or ($sid -eq 'S-1-5-11') -or ($sid -eq 'S-1-5-32-545') -or ($sid -eq 'S-1-5-32-546') -or ($sid -match '-513$') -or (([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users')
 }
 
 function Test-AnyRight {

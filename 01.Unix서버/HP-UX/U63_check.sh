@@ -85,10 +85,10 @@ diagnose() {
                 local perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$sudoers_file" 2>/dev/null)
                 local owner=$(perl -e '$uid=(stat(shift))[4]; print getpwuid($uid).":"; $gid=(stat(shift))[5]; print getgrgid($gid)' "$sudoers_file" "$sudoers_file" 2>/dev/null)
 
-                # 권한이 440이거나 소유자가 root:root가 아닌 경우
-                if [ "$perms" != "0440" ] && [ "$perms" != "0400" ]; then
+                # 권한이 640 초과인지 확인 (640을 넘는 비트가 있으면 취약)
+                if ! [[ "$perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$perms & ~8#640 & 07777 ))" -ne 0 ] 2>/dev/null; then
                     sudoers_issues=true
-                    issue_details="${issue_details}${sudoers_file} 권한 ${perms} (0440 권장), "
+                    issue_details="${issue_details}${sudoers_file} 권한 ${perms} (640 이하 권장), "
                 fi
 
                 if [ "$owner" != "root:root" ]; then
@@ -123,7 +123,7 @@ diagnose() {
             if [ -n "$sudoers_d_files" ]; then
                 for file in $sudoers_d_files; do
                     local file_perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$file" 2>/dev/null)
-                    if [ "$file_perms" != "0440" ] && [ "$file_perms" != "0400" ]; then
+                    if ! [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$file_perms & ~8#640 & 07777 ))" -ne 0 ] 2>/dev/null; then
                         sudoers_issues=true
                         issue_details="${issue_details}${file} 권한 ${file_perms}, "
                     fi

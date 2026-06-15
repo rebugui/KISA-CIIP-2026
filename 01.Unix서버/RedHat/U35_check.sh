@@ -92,6 +92,10 @@ diagnose() {
             evidence="${evidence}[${vs_conf}]${newline}${vs_anon:-anonymous_enable 설정 없음}${newline}"
             if printf '%s\n' "$vs_anon" | grep -iq '=[[:space:]]*YES'; then
                 vuln_issues="${vuln_issues:+${vuln_issues}; }vsftpd 익명 접근 허용(${vs_conf})"
+            elif [ -z "$vs_anon" ]; then
+                # anonymous_enable 미설정 시 vsftpd 컴파일 기본값(YES)이 적용될 수
+                # 있으므로 양호로 단정하지 않고 수동 진단으로 처리 (false-good 방지)
+                manual_issues="${manual_issues:+${manual_issues}; }vsftpd anonymous_enable 미설정(${vs_conf}) - 빌드 기본값(YES 가능) 적용 여부 수동 확인 필요"
             fi
         fi
     done

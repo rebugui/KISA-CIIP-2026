@@ -175,7 +175,7 @@ function Get-TiberoActiveConfigLines {
 function Test-TiberoBroadPrincipal {
     param([System.Security.Principal.IdentityReference]$Identity)
     try { $sid = $Identity.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $sid = [string]$Identity }
-    return @($sid -eq 'S-1-1-0', $sid -eq 'S-1-5-11', $sid -eq 'S-1-5-32-545', $sid -eq 'S-1-5-32-546', $sid -match '-513$', ([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users') -contains $true
+    return ($sid -eq 'S-1-1-0') -or ($sid -eq 'S-1-5-11') -or ($sid -eq 'S-1-5-32-545') -or ($sid -eq 'S-1-5-32-546') -or ($sid -match '-513$') -or (([string]$Identity) -match '(?i)Everyone|Authenticated Users|BUILTIN\\Users|Guests|Domain Users')
 }
 
 function Get-TiberoBroadAclEvidence {
@@ -225,7 +225,7 @@ function Invoke-TiberoWindowsCheck {
         'D-23' { return New-TiberoResult 'N/A' 'SQL Server xp_cmdshell control is not applicable to Tibero.' 'Tibero has no xp_cmdshell feature.' 'Map DBMS command-shell guideline applicability' }
         'D-24' { return New-TiberoResult 'N/A' 'SQL Server registry extended procedure control is not applicable to Tibero.' 'Tibero does not expose SQL Server registry extended procedures.' 'Map DBMS registry-procedure guideline applicability' }
         'D-25' { return Invoke-TiberoSqlCheck $state "SELECT * FROM v`$version;" { param($r) New-TiberoResult 'MANUAL' 'Tibero was found. Compare detected version and patch level against current TmaxTibero patch guidance.' $r.Output $r.Command } 'vendor patch status' }
-        'D-26' { $lines = @(Get-TiberoConfigLines $state '(?i)AUDIT_TRAIL|AUDIT_SYS_OPERATIONS|AUDIT_FILE_DEST|AUDIT_FILE_SIZE'); if ($lines -match '(?i)AUDIT_TRAIL\s*=\s*(OS|DB|YES)|AUDIT_SYS_OPERATIONS\s*=\s*Y') { return New-TiberoResult 'MANUAL' 'Tibero audit configuration evidence was found; confirm retention and audited events satisfy policy.' ($lines -join "`n") 'Inspect Tibero audit configuration' }; return New-TiberoResult 'VULNERABLE' 'Tibero audit configuration evidence was not found.' (($lines + $evidence) -join "`n") 'Inspect Tibero audit configuration' }
+        'D-26' { $lines = @(Get-TiberoConfigLines $state '(?i)AUDIT_TRAIL|AUDIT_SYS_OPERATIONS|AUDIT_FILE_DEST|AUDIT_FILE_SIZE'); if ($lines -match '(?i)AUDIT_TRAIL\s*=\s*(OS|DB|YES)|AUDIT_SYS_OPERATIONS\s*=\s*Y') { return New-TiberoResult 'MANUAL' 'Tibero audit configuration evidence was found; confirm retention and audited events satisfy policy.' ($lines -join "`n") 'Inspect Tibero audit configuration' }; return New-TiberoResult 'MANUAL' 'No Tibero audit configuration evidence was found in .tip/tbdsn config; Tibero object/system-privilege auditing is established via SQL AUDIT statements stored in the data dictionary, so review dictionary/SQL audit options to confirm the audit-log policy.' (($lines + $evidence) -join "`n") 'Inspect Tibero audit configuration; review dictionary/SQL audit options' }
         default { return New-TiberoResult 'MANUAL' "No Tibero Windows diagnostic rule is defined for $ItemId." $evidence 'Tibero Windows generic discovery' }
     }
 }

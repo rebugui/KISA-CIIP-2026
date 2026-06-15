@@ -199,7 +199,9 @@ invoke_tibero_linux_check() {
             ;;
         D-03)
             tibero_sql_check "SELECT resource_name||'='||limit FROM dba_profiles WHERE profile='DEFAULT' AND resource_name IN ('PASSWORD_LIFE_TIME','PASSWORD_VERIFY_FUNCTION','FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME');" "password lifetime and complexity" || return 0
-            if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'PASSWORD_VERIFY_FUNCTION=NULL|PASSWORD_LIFE_TIME=UNLIMITED|FAILED_LOGIN_ATTEMPTS=UNLIMITED'; then
+            if ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[^[:space:]]'; then
+                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DEFAULT profile returned no password lifetime/complexity/lockout policy rows; the control is not configured." "No rows returned (no DEFAULT profile password policy configured)." "${TIBERO_LAST_COMMAND}"
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'PASSWORD_VERIFY_FUNCTION=NULL|PASSWORD_LIFE_TIME=UNLIMITED|FAILED_LOGIN_ATTEMPTS=UNLIMITED'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DEFAULT profile password lifetime/complexity/lockout controls are weak." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
                 tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero DEFAULT profile password controls appear configured." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
@@ -211,7 +213,9 @@ invoke_tibero_linux_check() {
             ;;
         D-05)
             tibero_sql_check "SELECT resource_name||'='||limit FROM dba_profiles WHERE resource_name IN ('PASSWORD_REUSE_TIME','PASSWORD_REUSE_MAX') ORDER BY profile,resource_name;" "password reuse policy" || return 0
-            if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq '=UNLIMITED|=DEFAULT'; then
+            if ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[^[:space:]]'; then
+                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero returned no PASSWORD_REUSE_TIME/PASSWORD_REUSE_MAX policy rows; the password-reuse control is not configured." "No rows returned (no password-reuse policy configured)." "${TIBERO_LAST_COMMAND}"
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq '=UNLIMITED|=DEFAULT'; then
                 tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero password reuse controls require profile-by-profile review." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
                 tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero password reuse profile limits were collected without obvious unlimited evidence." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
@@ -234,7 +238,9 @@ invoke_tibero_linux_check() {
             ;;
         D-09)
             tibero_sql_check "SELECT resource_name||'='||limit FROM dba_profiles WHERE resource_name IN ('FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME') ORDER BY profile,resource_name;" "failed login lockout policy" || return 0
-            if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'FAILED_LOGIN_ATTEMPTS=UNLIMITED|PASSWORD_LOCK_TIME=UNLIMITED'; then
+            if ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[^[:space:]]'; then
+                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero returned no FAILED_LOGIN_ATTEMPTS/PASSWORD_LOCK_TIME policy rows; the login-failure lockout control is not configured." "No rows returned (no failed-login lockout policy configured)." "${TIBERO_LAST_COMMAND}"
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'FAILED_LOGIN_ATTEMPTS=UNLIMITED|PASSWORD_LOCK_TIME=UNLIMITED'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero failed-login lockout profile controls are weak." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
                 tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero failed-login lockout profile evidence was collected." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
@@ -242,7 +248,9 @@ invoke_tibero_linux_check() {
             ;;
         D-10)
             lines="$(tibero_config_grep '(LSNR_INVITED_IP|LSNR_DENIED_IP)[[:space:]]*=[[:space:]]*[^[:space:]]' || true)"
-            [ -n "${lines}" ] && tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero listener IP restriction evidence (LSNR_INVITED_IP/LSNR_DENIED_IP) was found." "${lines}" "grep Tibero listener IP access controls" || tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "No Tibero listener IP restriction (LSNR_INVITED_IP/LSNR_DENIED_IP) was found; confirm firewall/listener source-IP policy." "$(tibero_evidence)" "grep Tibero listener IP access controls"
+            # Drop commented-out directives (grep -Ein prints file:line:content; skip lines whose content starts with #, ;, or -- ) so an inert commented LSNR_*_IP does not yield GOOD.
+            lines="$(printf '%s\n' "${lines}" | grep -Ev ':[0-9]+:[[:space:]]*(#|;|--)' || true)"
+            [ -n "${lines}" ] && tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero listener IP restriction evidence (active LSNR_INVITED_IP/LSNR_DENIED_IP with a value) was found." "${lines}" "grep Tibero listener IP access controls" || tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "No active Tibero listener IP restriction (LSNR_INVITED_IP/LSNR_DENIED_IP) was found; confirm firewall/listener source-IP policy." "$(tibero_evidence)" "grep Tibero listener IP access controls"
             ;;
         D-11)
             tibero_sql_check "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE owner IN ('SYS','SYSCAT') AND grantee NOT IN ('SYS','SYSCAT','DBA') AND ROWNUM <= 100;" "system table access restriction" || return 0
@@ -256,11 +264,10 @@ invoke_tibero_linux_check() {
             tibero_set_result "N/A" "N/A" "Oracle listener password control is not directly applicable to Tibero." "Tibero listener access is handled through Tibero listener configuration such as LSNR_INVITED_IP/LSNR_DENIED_IP and OS/service controls." "Map DBMS listener-password guideline applicability"
             ;;
         D-13)
-            lines="$(find /etc "${TIBERO_HOME_FOUND:-/nonexistent}" -maxdepth 4 \( -iname '*odbc*.ini' -o -iname '*tibero*odbc*' \) 2>/dev/null | head -50 || true)"
-            [ -n "${lines}" ] && tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero ODBC configuration evidence was found; confirm only required DSNs/drivers remain." "${lines}" "find Tibero ODBC config" || tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "No Tibero ODBC configuration evidence was found in inspected paths." "$(tibero_evidence)" "find Tibero ODBC config"
+            tibero_set_result "N/A" "N/A" "D-13 (unnecessary ODBC/OLE-DB data source/driver removal) targets Windows OS only per the KISA CIIP 2026 guideline metadata; Tibero_Linux is out of scope." "D-13 target: Windows OS. Linux Tibero uses tbdsn.tbr rather than Windows ODBC DSN entries." "Map DBMS ODBC/OLE-DB guideline applicability"
             ;;
         D-14)
-            tibero_acl_check "home/config" "${TIBERO_HOME_FOUND}" "${TIBERO_CONFIGS[@]}"
+            tibero_set_result "N/A" "N/A" "D-14 (main configuration/password file access-permission restriction) does not target Tibero per the KISA CIIP 2026 guideline metadata (target: Oracle DB, PostgreSQL, Cubrid)." "Tibero is out of scope for D-14; no file-ACL judgment is rendered." "Map DBMS file-permission guideline applicability"
             ;;
         D-15)
             lines="$(tibero_config_grep 'AUDIT_FILE_DEST|AUDIT_FILE_SIZE|TRACE|LOG' || true)"
@@ -319,7 +326,7 @@ invoke_tibero_linux_check() {
             if printf '%s' "${lines}" | grep -Eiq 'AUDIT_TRAIL[[:space:]]*=[[:space:]]*(OS|DB|YES)|AUDIT_SYS_OPERATIONS[[:space:]]*=[[:space:]]*Y'; then
                 tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero audit configuration evidence was found; confirm retention and audited events satisfy policy." "${lines}" "grep Tibero audit configuration"
             else
-                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero audit configuration evidence was not found." "$(tibero_evidence)" "grep Tibero audit configuration"
+                tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero audit policy is not derivable from .tip configuration; Tibero audit options reside in the data dictionary. Review DBA_OBJ_AUDIT_OPTS/DBA_PRIV_AUDIT_OPTS/DBA_STMT_AUDIT_OPTS (and AUDIT_SYS_OPERATIONS) to confirm an approved audit logging policy is applied." "$(tibero_evidence)" "grep Tibero audit configuration; review DBA_*_AUDIT_OPTS"
             fi
             ;;
         *)

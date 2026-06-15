@@ -56,9 +56,9 @@ diagnose() {
     local command_executed=""
     local newline=$'\n'
 
-    # DNS 동적 업데이트 설정 제한 확인
+    # DNS 동적 업데이트 설정 제한 확인 (증거 기반: is_secure는 설정 근거가 있을 때만 결정됨)
     local dns_configured=false
-    local is_secure=true
+    local is_secure=""
     local dns_info=""
     local issues=()
 
@@ -84,15 +84,19 @@ diagnose() {
                     is_secure=false
                     issues+=("${conf_file}: allow-update가 'any'로 설정됨 (취약)")
                 elif echo "$au_blocks" | grep -qiw "none"; then
+                    if [ -z "$is_secure" ]; then is_secure=true; fi
                     dns_info="${dns_info}allow-update가 'none'으로 설정됨 (안전)${newline}"
                 elif echo "$au_blocks" | grep -qi "key"; then
+                    if [ -z "$is_secure" ]; then is_secure=true; fi
                     dns_info="${dns_info}allow-update가 키 기반으로 제한됨 (안전)${newline}"
                 else
                     # 특정 IP 제한: 가이드 조치방법(allow-update { <허용 IP>; };)에 부합하는 양호 상태
+                    if [ -z "$is_secure" ]; then is_secure=true; fi
                     dns_info="${dns_info}allow-update가 특정 IP로 제한됨 (가이드 조치방법 부합, 안전)${newline}"
                 fi
             else
                 # 기본값은 none이므로 안전함
+                if [ -z "$is_secure" ]; then is_secure=true; fi
                 dns_info="${dns_info}allow-update 설정 없음 (기본값 none, 안전)${newline}"
             fi
 
@@ -118,6 +122,12 @@ diagnose() {
         inspection_summary="DNS 서비스 미설치됨"
         command_result="[DNS Service Status]${newline}$(systemctl is-active named 2>&1 || echo 'inactive')${newline}$(systemctl is-active bind9 2>&1 || echo 'inactive')"
         command_executed="systemctl is-active named bind9"
+    elif [ "$is_secure" = false ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="DNS 동적 업데이트 제한 미흡: ${issues[*]}"
+        command_result="${dns_info}${newline}[Issues: ${issues[*]}]"
+        command_executed="sed -n '/allow-update/,/;/p' /etc/bind/named.conf /etc/bind/named.conf.local /etc/bind/named.conf.options /etc/bind/named.conf.default-zones; grep -i 'update-policy' /etc/bind/named.conf*"
     elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
@@ -125,11 +135,11 @@ diagnose() {
         command_result="${dns_info}"
         command_executed="sed -n '/allow-update/,/;/p' /etc/bind/named.conf /etc/bind/named.conf.local /etc/bind/named.conf.options /etc/bind/named.conf.default-zones; grep -i 'update-policy' /etc/bind/named.conf*"
     else
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="DNS 동적 업데이트 제한 미흡: ${issues[*]}"
-        command_result="${dns_info}${newline}[Issues: ${issues[*]}]"
-        command_executed="sed -n '/allow-update/,/;/p' /etc/bind/named.conf /etc/bind/named.conf.local /etc/bind/named.conf.options /etc/bind/named.conf.default-zones; grep -i 'update-policy' /etc/bind/named.conf*"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="DNS 서비스 실행 중이나 BIND 설정 파일을 확인하지 못해 동적 업데이트 설정 수동 점검 필요"
+        command_result="${dns_info}${newline}[DNS Service Status]${newline}$(systemctl is-active named 2>&1 || echo 'inactive')${newline}$(systemctl is-active bind9 2>&1 || echo 'inactive')"
+        command_executed="systemctl is-active named bind9; sed -n '/allow-update/,/;/p' /etc/bind/named.conf*"
     fi
 
     # echo ""

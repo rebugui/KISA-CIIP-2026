@@ -154,37 +154,35 @@ diagnose() {
         command_result="File: ${found_file}, Content: [empty] or only comments"
     else
         # 파일이 존재하고 내용이 있는 경우
-        # 주요 시스템 계정이 등록되어 있는지 확인
-        local missing_accounts=()
-        local registered_accounts=""
+        # 가이드라인 기준은 root 계정 접속 차단 여부이므로 root 등록 여부로 판정
+        # (주석/공백 라인을 제외한 활성 라인에 root가 있으면 차단된 것으로 본다)
+        local active_lines=""
+        active_lines=$(echo "$file_content" | grep -v "^[[:space:]]*#" | grep -v "^[[:space:]]*$") || true
 
+        # 참고용: 등록된 주요 시스템 계정 목록 구성(판정에는 영향 없음)
+        local registered_accounts=""
         for account in "${system_accounts[@]}"; do
             # /etc/passwd에 계정이 존재하는지 먼저 확인
             if grep -q "^${account}:" /etc/passwd 2>/dev/null; then
                 # ftpusers 파일에 등록되어 있는지 확인
-                if echo "$file_content" | grep -qx "${account}"; then
+                if echo "$active_lines" | grep -qx "${account}"; then
                     registered_accounts="${registered_accounts}${account} "
-                else
-                    missing_accounts+=("$account")
                 fi
             fi
         done || true
 
         command_result="File: ${found_file}${newline}Registered accounts: ${registered_accounts:-[none]}"
 
-        if [ ${#missing_accounts[@]} -eq 0 ]; then
+        if echo "$active_lines" | grep -qx "root"; then
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="ftpusers 파일에 주요 시스템 계정이 적절하게 등록되어 있습니다(${found_file})."
+            inspection_summary="ftpusers 파일에 root 계정이 등록되어 root FTP 접속이 차단되어 있습니다(${found_file})."
+            command_result="${command_result}${newline}root: [blocked]"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
-            local missing_list=""
-            for acc in "${missing_accounts[@]}"; do
-                missing_list="${missing_list}${acc}, "
-            done || true
-            inspection_summary="ftpusers 파일에 일부 시스템 계정이 미등록되어 있습니다(${found_file}): ${missing_list%, }"
-            command_result="${command_result}${newline}Unregistered accounts: ${missing_list%, }"
+            inspection_summary="ftpusers 파일에 root 계정이 등록되어 있지 않아 root FTP 접속이 허용됩니다(${found_file})."
+            command_result="${command_result}${newline}root: [NOT blocked]"
         fi
     fi
 

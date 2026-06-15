@@ -108,7 +108,32 @@ diagnose() {
         fi
     fi
 
-    # 3) NFS 서버 SMF 서비스 상태 확인 (svcs, U-39와 동일 FMRI)
+    # 3) NFS 설정 파일 접근 권한 확인 (소유자 root + 644 이하)
+    #    dfstab(영속 공유 설정) 및 sharetab(현재 공유 테이블) 점검
+    local cfg
+    for cfg in /etc/dfs/dfstab /etc/dfs/sharetab; do
+        [ -f "$cfg" ] || continue
+        local cfg_owner cfg_perms
+        cfg_owner=$(stat -c '%U' "$cfg" 2>/dev/null || echo "")
+        cfg_perms=$(stat -c '%a' "$cfg" 2>/dev/null || echo "")
+        if [ "$cfg_owner" != "root" ] && [ -n "$cfg_owner" ]; then
+            is_secure=false
+            issues+=("${cfg} 소유자가 root가 아님(${cfg_owner})")
+        fi
+        if [ -n "$cfg_perms" ]; then
+            # 644(rw-r--r--) 초과 비트(그룹/기타 쓰기, 실행, 특수비트) 존재 여부
+            if [ $(( 8#${cfg_perms} & 8#7133 )) -ne 0 ]; then
+                is_secure=false
+                issues+=("${cfg} 접근 권한이 644를 초과함(${cfg_perms})")
+            fi
+        else
+            is_secure=false
+            issues+=("${cfg} 접근 권한 확인 불가")
+        fi
+        exports_info="${exports_info}${cfg} 소유자·권한: ${cfg_owner:-확인불가} ${cfg_perms:-확인불가}\\n"
+    done
+
+    # 4) NFS 서버 SMF 서비스 상태 확인 (svcs, U-39와 동일 FMRI)
     if command -v svcs >/dev/null 2>&1; then
         local svc_state
         svc_state=$(svcs -H -o state svc:/network/nfs/server 2>/dev/null || echo "")
