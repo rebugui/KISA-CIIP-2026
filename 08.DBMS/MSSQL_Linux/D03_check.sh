@@ -93,12 +93,16 @@ diagnose() {
     command_result=$(sqlcmd -S localhost -E -Q "${policy_query}" -h -1 -W 2>/dev/null || echo "")
 
     if [ -n "$command_result" ]; then
-        local no_policy=$(echo "$command_result" | grep -v "Rows affected" | grep -v "^\s*$" | awk -F', ' '{print $1", "$2}' | grep ", 0$" || echo "")
+        # sqlcmd -W -h -1 emits whitespace-separated columns (no -s separator set),
+        # so the two flag columns are the last two fields: $(NF-1)=is_policy_checked,
+        # $NF=is_expiration_checked. Match only rows whose flag field is exactly 0
+        # (digit-only guard avoids matching the trailing "(N rows affected)" line).
+        local no_policy=$(echo "$command_result" | grep -vi "rows affected" | grep -v "^\s*$" | awk 'NF>=3 && $(NF-1) ~ /^[0-9]+$/ && $(NF-1)==0 {print}' || echo "")
         if [ -n "$no_policy" ]; then
             ((vulnerabilities_found++)) || true
             inspection_summary+="취약: 비밀번호 정책 비활성화된 계정 존재; "
         fi
-        local no_expiration=$(echo "$command_result" | grep -v "Rows affected" | grep -v "^\s*$" | awk -F', ' '{print $1", "$3}' | grep ", 0$" || echo "")
+        local no_expiration=$(echo "$command_result" | grep -vi "rows affected" | grep -v "^\s*$" | awk 'NF>=3 && $NF ~ /^[0-9]+$/ && $NF==0 {print}' || echo "")
         if [ -n "$no_expiration" ]; then
             ((vulnerabilities_found++)) || true
             inspection_summary+="취약: 비밀번호 만료 정책 비활성화된 계정 존재; "

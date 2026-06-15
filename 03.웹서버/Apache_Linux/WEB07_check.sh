@@ -172,6 +172,27 @@ diagnose() {
         return 0
     fi
 
+    # Tier A: 웹 설치 시 기본 생성되는 불필요 디렉터리 (manual/docs/samples 등) → 취약
+    # Windows 피어(WEB07_check.ps1 $dirNames)와 동일한 기본 설치 디렉터리 집합을 검사
+    local dir_names=("manual" "manuals" "docs" "doc" "samples" "sample" "examples" "example" "test" "tests")
+    local definite_dirs=""
+    local _wr _dn _leaf _child
+    for _wr in "${web_root_dirs[@]}"; do
+        _leaf="$(basename "${_wr}")"
+        for _dn in "${dir_names[@]}"; do
+            # 웹 루트 자체가 기본 디렉터리명인 경우
+            if [ "${_leaf}" = "${_dn}" ]; then
+                definite_dirs="${definite_dirs}${_wr}"$'\n'
+            fi
+            # 웹 루트 바로 하위에 기본 디렉터리가 존재하는 경우
+            _child="${_wr%/}/${_dn}"
+            if [ -d "${_child}" ]; then
+                definite_dirs="${definite_dirs}${_child}"$'\n'
+            fi
+        done
+    done
+    definite_dirs="$(printf '%s' "${definite_dirs}" | sed '/^$/d' | sort -u)"
+
     # Build find command for a given pattern set
     build_find_cmd() {
         local _cmd="find ${search_paths} -type f"
@@ -194,7 +215,7 @@ diagnose() {
     local ambiguous_cmd
     ambiguous_cmd="$(build_find_cmd "${ambiguous_patterns[@]}")"
 
-    command_executed="[definite] ${definite_cmd}"$'\n'"[ambiguous] ${ambiguous_cmd}"
+    command_executed="[dirs] for d in ${dir_names[*]}; check web roots' leaf/direct-child named \$d"$'\n'"[definite] ${definite_cmd}"$'\n'"[ambiguous] ${ambiguous_cmd}"
 
     # Execute find commands (Tier A: definite backup/temp, Tier B: ambiguous substring)
     local definite_files
@@ -202,14 +223,18 @@ diagnose() {
     local ambiguous_files
     ambiguous_files=$(eval "${ambiguous_cmd}" || true)
 
-    if [ -n "${definite_files}" ]; then
-        # Tier A — 확장자로 명확한 백업/임시 파일 존재 → 취약
-        local file_count
-        file_count=$(echo "${definite_files}" | wc -l)
+    if [ -n "${definite_files}" ] || [ -n "${definite_dirs}" ]; then
+        # Tier A — 확장자로 명확한 백업/임시 파일 또는 기본 설치 디렉터리 존재 → 취약
+        local file_count=0
+        local dir_count=0
+        [ -n "${definite_files}" ] && file_count=$(echo "${definite_files}" | wc -l)
+        [ -n "${definite_dirs}" ] && dir_count=$(echo "${definite_dirs}" | wc -l)
         diagnosis_result="VULNERABLE"
         status="취약"
-        command_result="${definite_files}"
-        inspection_summary="웹 디렉터리에서 ${file_count}개의 불필요한 백업/임시 파일(.bak, .old, .orig, ~ 등)이 발견되었습니다. 해당 파일은 삭제하세요. 보안 위험: 소스 코드 노출, 설정 정보 유출."
+        command_result=""
+        [ -n "${definite_dirs}" ] && command_result="[directories]"$'\n'"${definite_dirs}"$'\n'
+        [ -n "${definite_files}" ] && command_result="${command_result}[files]"$'\n'"${definite_files}"
+        inspection_summary="웹 디렉터리에서 불필요한 기본 설치 디렉터리(manual, docs, samples 등) ${dir_count}개 및 백업/임시 파일(.bak, .old, .orig, ~ 등) ${file_count}개가 발견되었습니다. 해당 디렉터리/파일은 삭제하세요. 보안 위험: 소스 코드 노출, 설정 정보 유출, 웹 서버 정보 노출."
     elif [ -n "${ambiguous_files}" ]; then
         # Tier B — 정상 업무 콘텐츠와 충돌 가능한 모호한 매칭 → 수동진단 (분석가 확인)
         local amb_count

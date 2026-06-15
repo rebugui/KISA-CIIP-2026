@@ -38,6 +38,11 @@ try {
     # 따라서 (a) 속성의 IsInherited 로 명시 설정 여부를 구분하고, (b) 상속 여부를 알 수 없으면 30MB 기본값을
     # "명시적 제한 아님"으로 간주하여 GOOD 로 단정하지 않는다.
     $IIS_DEFAULT_MAX_CONTENT = 30000000
+    # asp/limits 스키마 기본값: Classic ASP 설치 시 Get-WebConfiguration 이 모든 사이트에
+    # 상속 기본값으로 반환(bufferingLimit=4194304(4MB), maxRequestEntityAllowed=200000).
+    # maxAllowedContentLength 와 동일하게, 이 상속 기본값을 명시적 제한으로 오인하면 안 됨.
+    $IIS_DEFAULT_BUFFERING_LIMIT = 4194304
+    $IIS_DEFAULT_MAX_REQ_ENTITY = 200000
 
     $sites = Get-Website
     $details = @()
@@ -86,21 +91,61 @@ try {
         $aspLimits = Get-WebConfiguration -Filter "/system.webServer/asp/limits" -PSPath "IIS:\Sites\$siteName" -ErrorAction SilentlyContinue
         $bufferingLimit = $null
         $maxReqEntity = $null
+        $maxReqEntityExplicit = $false
+        $bufferingLimitExplicit = $false
         if ($aspLimits) {
             $bufferingLimit = $aspLimits.bufferingLimit
             $maxReqEntity = $aspLimits.maxRequestEntityAllowed
         }
 
-        # 명시적으로 설정된 maxAllowedContentLength 가 있으면 제한 있음으로 판단 (상속 기본값은 제외)
-        if ($maxContentExplicit) {
-            $hasLimit = $true
+        # ASP 한계값도 maxAllowedContentLength 와 동일한 상속-기본값 판별 적용:
+        # IsInherited=$false 이면 관리자 명시값. IsInherited 를 확정할 수 없으면 스키마 기본값
+        # (200000 / 4194304)과 다른 값일 때만 명시값으로 간주하고, 기본값과 같으면 명시 설정으로 단정 불가.
+        $maxReqEntityAttr = $null
+        $bufferingLimitAttr = $null
+        try {
+            if ($aspLimits -and $aspLimits.Attributes) {
+                $maxReqEntityAttr = $aspLimits.Attributes['maxRequestEntityAllowed']
+                $bufferingLimitAttr = $aspLimits.Attributes['bufferingLimit']
+            }
+        } catch {
+            $maxReqEntityAttr = $null
+            $bufferingLimitAttr = $null
         }
-        # maxRequestEntityAllowed 가 0 보다 큰 명시값이면 제한 있음 (0 또는 미설정 = 무제한 취약 신호)
+
+        # maxRequestEntityAllowed 명시 설정 여부 판별 (0 또는 미설정 = 무제한 취약 신호)
         if ($null -ne $maxReqEntity -and "$maxReqEntity" -ne "" -and [int64]"$maxReqEntity" -gt 0) {
-            $hasLimit = $true
+            if ($null -ne $maxReqEntityAttr -and ($maxReqEntityAttr.PSObject.Properties.Name -contains 'IsInherited')) {
+                if (-not $maxReqEntityAttr.IsInherited) {
+                    $maxReqEntityExplicit = $true
+                }
+            } elseif ([int64]"$maxReqEntity" -ne $IIS_DEFAULT_MAX_REQ_ENTITY) {
+                # IsInherited 불명 + 스키마 기본값과 다른 값 → 관리자 변경 명시값으로 간주
+                $maxReqEntityExplicit = $true
+            } else {
+                # 스키마 기본값(200000)과 동일 + 상속 여부 불명 → 명시 설정 여부 단정 불가
+                $inheritanceUnknown = $true
+            }
         }
-        # bufferingLimit 가 0 보다 큰 명시값이면 ASP 업로드 버퍼 제한이 있는 것으로 가산 (가이드라인 Step 3)
+
+        # bufferingLimit 명시 설정 여부 판별 (ASP 업로드 버퍼 제한, 가이드라인 Step 3)
         if ($null -ne $bufferingLimit -and "$bufferingLimit" -ne "" -and [int64]"$bufferingLimit" -gt 0) {
+            if ($null -ne $bufferingLimitAttr -and ($bufferingLimitAttr.PSObject.Properties.Name -contains 'IsInherited')) {
+                if (-not $bufferingLimitAttr.IsInherited) {
+                    $bufferingLimitExplicit = $true
+                }
+            } elseif ([int64]"$bufferingLimit" -ne $IIS_DEFAULT_BUFFERING_LIMIT) {
+                # IsInherited 불명 + 스키마 기본값과 다른 값 → 관리자 변경 명시값으로 간주
+                $bufferingLimitExplicit = $true
+            } else {
+                # 스키마 기본값(4194304)과 동일 + 상속 여부 불명 → 명시 설정 여부 단정 불가
+                $inheritanceUnknown = $true
+            }
+        }
+
+        # 명시적으로 설정된 제한(maxAllowedContentLength / ASP 한계값)이 하나라도 있으면 제한 있음으로 판단
+        # (상속 기본값은 제외 — false-good 방지)
+        if ($maxContentExplicit -or $maxReqEntityExplicit -or $bufferingLimitExplicit) {
             $hasLimit = $true
         }
 

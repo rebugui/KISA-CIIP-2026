@@ -123,11 +123,15 @@ diagnose() {
 
             # 허용 목록에 없는 시스템 바이너리인 경우 취약 여부 판단
             if [ "$allowed" = false ]; then
-                if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]] || [ -w "$file" ]; then
+                if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]]; then
                     ((vulnerable_count++)) || true
-                    vulnerable_files="${vulnerable_files}${file} (SUID, 권한: ${perms}, 소유자: ${owner}), "
-                elif [ "${EUID:-$(id -u)}" -ne 0 ]; then
-                    # 비root 실행 시 -w 쓰기 가능 검사를 신뢰할 수 없으므로 수동진단 대상
+                    vulnerable_files="${vulnerable_files}${file} (SUID 스크립트, 권한: ${perms}, 소유자: ${owner}), "
+                elif [ -n "$perms" ] && [ $(( 8#$perms & 8#022 )) -ne 0 ]; then
+                    # 그룹/기타 쓰기 가능한 SUID 파일 (root 실행 시에도 신뢰 가능한 권한 비트 기반 판정)
+                    ((vulnerable_count++)) || true
+                    vulnerable_files="${vulnerable_files}${file} (SUID, 그룹/기타 쓰기 가능, 권한: ${perms}, 소유자: ${owner}), "
+                else
+                    # 허용 목록 외 SUID 파일은 자동 양호 처리하지 않고 수동 점검 대상
                     ((manual_count++)) || true
                     manual_files="${manual_files}${file} (SUID, 권한: ${perms}, 소유자: ${owner}), "
                 fi
@@ -157,11 +161,15 @@ diagnose() {
 
             # 허용 목록에 없는 시스템 바이너리인 경우 취약 여부 판단
             if [ "$allowed" = false ]; then
-                if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]] || [ -w "$file" ]; then
+                if [[ "$file" =~ \.(sh|bash|pl|py|rb)$ ]]; then
                     ((vulnerable_count++)) || true
-                    vulnerable_files="${vulnerable_files}${file} (SGID, 권한: ${perms}, 소유자: ${owner}), "
-                elif [ "${EUID:-$(id -u)}" -ne 0 ]; then
-                    # 비root 실행 시 -w 쓰기 가능 검사를 신뢰할 수 없으므로 수동진단 대상
+                    vulnerable_files="${vulnerable_files}${file} (SGID 스크립트, 권한: ${perms}, 소유자: ${owner}), "
+                elif [ -n "$perms" ] && [ $(( 8#$perms & 8#022 )) -ne 0 ]; then
+                    # 그룹/기타 쓰기 가능한 SGID 파일 (root 실행 시에도 신뢰 가능한 권한 비트 기반 판정)
+                    ((vulnerable_count++)) || true
+                    vulnerable_files="${vulnerable_files}${file} (SGID, 그룹/기타 쓰기 가능, 권한: ${perms}, 소유자: ${owner}), "
+                else
+                    # 허용 목록 외 SGID 파일은 자동 양호 처리하지 않고 수동 점검 대상
                     ((manual_count++)) || true
                     manual_files="${manual_files}${file} (SGID, 권한: ${perms}, 소유자: ${owner}), "
                 fi
@@ -184,7 +192,7 @@ diagnose() {
     elif [ "$manual_count" -gt 0 ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="비root 권한 실행으로 쓰기 가능 여부를 검증할 수 없는 허용 목록 외 SUID/SGID 파일 ${manual_count}개가 발견되었습니다. 수동 점검이 필요합니다."
+        inspection_summary="허용 목록 외 SUID/SGID 파일 ${manual_count}개가 발견되었습니다. 필요성 및 인가 여부에 대한 수동 점검이 필요합니다."
         command_result="[Command: find $find_paths -perm -4000 -type f]${newline}${suid_find_output}${newline}${newline}[Command: find $find_paths -perm -2000 -type f]${newline}${sgid_find_output}${newline}${newline}[수동 점검 대상 (${manual_count}개)]${newline}${manual_files%, }"
         command_executed="find $find_paths -perm -4000 -type f 2>/dev/null; find $find_paths -perm -2000 -type f 2>/dev/null"
     elif [ "$suid_count" -eq 0 ] && [ "$sgid_count" -eq 0 ]; then

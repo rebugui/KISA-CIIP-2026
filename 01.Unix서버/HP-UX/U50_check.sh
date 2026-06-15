@@ -59,6 +59,7 @@ diagnose() {
     # DNS Zone Transfer 설정 확인
     local dns_configured=false
     local is_secure=false
+    local transfer_seen=false
     local dns_info=""
     local issues=()
 
@@ -114,6 +115,7 @@ diagnose() {
             local allow_transfer
             allow_transfer=$(grep -v "^[[:space:]]*//" "$conf_file" 2>/dev/null | grep -v "^[[:space:]]*#" | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || echo "")
             if [ -n "$allow_transfer" ]; then
+                transfer_seen=true
                 dns_info="${dns_info}${allow_transfer}\\n"
 
                 # "any" 또는 "none" 확인 (평탄화된 블록 기준)
@@ -127,9 +129,6 @@ diagnose() {
                     is_secure=true
                     dns_info="${dns_info}allow-transfer가 특정 호스트로 제한됨\\n"
                 fi
-            else
-                # 기본값은 any이므로 명시적 제한이 필요함
-                issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
             fi
 
             # also-notify 확인 (안전한 설정)
@@ -139,6 +138,11 @@ diagnose() {
             fi
         fi
     done || true
+
+    # 모든 설정 파일에 allow-transfer가 전혀 없으면 기본값 any로 취약 (전역 1회 판정)
+    if [ "$dns_configured" = true ] && [ "$transfer_seen" = false ] && [ ${#issues[@]} -eq 0 ]; then
+        issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
+    fi
 
     # DNS 서비스 실행 확인
     if /sbin/init.d/named status 2>/dev/null | grep -q "running" &>/dev/null || /sbin/init.d/bind9 status 2>/dev/null | grep -q "running" &>/dev/null; then

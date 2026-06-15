@@ -49,6 +49,7 @@ diagnose() {
     local command_executed=""
     local max_body_settings=""
     local has_size_limit=false
+    local has_unlimited=false
 
     # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -96,6 +97,10 @@ diagnose() {
                 if [ -n "${found_limit}" ]; then
                     max_body_settings="${max_body_settings}"$'\n'"${conf_file}: ${found_limit}"
                     has_size_limit=true
+                    # client_max_body_size 0; disables the limit (nginx semantics: 0 = unlimited) -> not an effective limit
+                    if printf '%s\n' "${found_limit}" | grep -Eq "^[[:space:]]*client_max_body_size[[:space:]]+0[[:space:]]*;"; then
+                        has_unlimited=true
+                    fi
                 fi
             fi
         done
@@ -104,7 +109,11 @@ diagnose() {
     command_executed="grep -E '^\\s*client_max_body_size' /etc/nginx/nginx.conf /etc/nginx/conf.d/*.conf 2>/dev/null | grep -v '^\\s*#' | head -5"
     command_result="${max_body_settings:-client_max_body_size not set (default: 1m)}"
 
-    if [ "${has_size_limit}" = true ]; then
+    if [ "${has_size_limit}" = true ] && [ "${has_unlimited}" = true ]; then
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="client_max_body_size가 0으로 설정되어 업로드 용량 제한이 비활성화(무제한)되어 있습니다. nginx에서 0은 제한 없음을 의미하므로 허용 가능한 최소 범위의 값으로 제한 설정을 권장합니다."
+    elif [ "${has_size_limit}" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="파일 업로드 크기 제한(client_max_body_size)이 명시적으로 설정되어 있습니다. (보안 권고사항 준수)"

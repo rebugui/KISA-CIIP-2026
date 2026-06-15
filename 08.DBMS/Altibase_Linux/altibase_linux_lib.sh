@@ -283,16 +283,15 @@ invoke_altibase_linux_check() {
             altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Application-owned Altibase objects were found or queried; confirm owners are authorized." "${ALTIBASE_SQL_OUTPUT}" "SELECT USER_ID, TABLE_NAME FROM system_.sys_tables_"
             ;;
         D-21)
-            altibase_sql_check "SELECT * FROM system_.sys_grant_object_ WHERE WITH_GRANT_OPTION = 1;" "GRANT OPTION restriction" || return 0
-            if printf '%s' "${ALTIBASE_SQL_OUTPUT}" | grep -Eiq '1|WITH_GRANT'; then
-                altibase_set_result "VULNERABLE" "$(altibase_status_for_result VULNERABLE)" "Altibase object privileges with grant option were found." "${ALTIBASE_SQL_OUTPUT}" "SELECT WITH_GRANT_OPTION FROM system_.sys_grant_object_"
+            altibase_sql_check "SELECT 'WGO_FOUND' AS FLAG, GRANTOR_ID, GRANTEE_ID, OBJ_ID, PRIV_ID FROM system_.sys_grant_object_ WHERE WITH_GRANT_OPTION = 1 AND GRANTEE_ID NOT IN (SELECT USER_ID FROM system_.sys_users_ WHERE USER_NAME IN ('SYS','SYSTEM_'));" "GRANT OPTION restriction" || return 0
+            if printf '%s' "${ALTIBASE_SQL_OUTPUT}" | grep -Eq 'WGO_FOUND'; then
+                altibase_set_result "VULNERABLE" "$(altibase_status_for_result VULNERABLE)" "Altibase object privileges with grant option granted to non-admin users were found; restrict WITH_GRANT_OPTION via ROLE." "${ALTIBASE_SQL_OUTPUT}" "SELECT WITH_GRANT_OPTION FROM system_.sys_grant_object_"
             else
-                altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "No Altibase object privileges with grant option were returned." "${ALTIBASE_SQL_OUTPUT}" "SELECT WITH_GRANT_OPTION FROM system_.sys_grant_object_"
+                altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "No Altibase object privileges with grant option held by non-admin users were returned." "${ALTIBASE_SQL_OUTPUT}" "SELECT WITH_GRANT_OPTION FROM system_.sys_grant_object_"
             fi
             ;;
         D-22)
-            lines="$(altibase_config_grep 'RESOURCE|MAX_CLIENT|QUERY_TIMEOUT|IDLE_TIMEOUT|SESSION' || true)"
-            [ -n "${lines}" ] && altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase resource/session limit configuration evidence was found; confirm institutional threshold policy." "${lines}" "grep resource/session limits altibase.properties" || altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase resource-limit evidence was not conclusive; confirm DB/session resource policy." "$(altibase_evidence)" "grep resource/session limits altibase.properties"
+            altibase_set_result "N/A" "N/A" "Oracle RESOURCE_LIMIT init.ora parameter control is not applicable to Altibase." "D-22 target is Oracle DB only; Altibase has no RESOURCE_LIMIT equivalent (resource/session limits are governed by distinct Altibase properties)." "Map Oracle RESOURCE_LIMIT guideline applicability"
             ;;
         D-23)
             altibase_set_result "N/A" "N/A" "SQL Server xp_cmdshell control is not applicable to Altibase." "Altibase has no xp_cmdshell feature." "Map DBMS command-shell guideline applicability"

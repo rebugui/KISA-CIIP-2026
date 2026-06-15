@@ -36,31 +36,40 @@ if (-not (Test-RunallMode)) {
 # 1. Check printer driver installation restriction policy
 try {
     $secedit = secedit /export /cfg "$env:TEMP\secedit.tmp" 2>&1
-    $content = Get-Content "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
-    $disableAddPrinter = 0
+    # NOTE: Get-Content returns a string[] array. Using -match on an array FILTERS
+    # the array and does NOT populate $matches. Join to a scalar string first so the
+    # captured value in $matches[1] is valid.
+    $contentText = (Get-Content "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue) -join "`n"
+    $disableAddPrinter = $null
 
-    if ($content -match 'DisableAddPrinter\s*=\s*(\d+)') {
+    if ($contentText -match 'DisableAddPrinter\s*=\s*(\d+)') {
         $disableAddPrinter = [int]$matches[1]
     }
 
     Remove-Item "$env:TEMP\secedit.tmp" -ErrorAction SilentlyContinue
 
-    if ($disableAddPrinter -eq 1) {
+    # DisableAddPrinter: 1 = 사용 (GOOD); 0/기타 = 사용 안 함 (VULNERABLE); 항목 없음 = MANUAL
+    if ($null -eq $disableAddPrinter) {
+        $finalResult = "MANUAL"
+        $summary = "DisableAddPrinter 값을 확인할 수 없음: 수동으로 '사용자가 프린터 드라이버를 설치할 수 없게 함' 정책 확인 필요"
+        $status = "수동진단"
+        $policyStatus = "정책 항목 없음"
+    } elseif ($disableAddPrinter -eq 1) {
         $finalResult = "GOOD"
         $summary = "'사용자가프린터드라이버를설치할수없게함' 정책이 '사용'으로 설정됨"
         $status = "양호"
+        $policyStatus = "사용 (Administrators만 설치 가능)"
     } else {
         $finalResult = "VULNERABLE"
         $summary = "'사용자가프린터드라이버를설치할수없게함' 정책이 '사용안함'으로 설정됨"
         $status = "취약"
+        $policyStatus = switch ($disableAddPrinter) {
+            0 { "사용안함 (모든 사용자 설치 가능)" }
+            default { "알 수 없음 ($disableAddPrinter)" }
+        }
     }
 
     $commandExecuted = "secedit /export 및 DisableAddPrinter 값 확인"
-    $policyStatus = switch ($disableAddPrinter) {
-        1 { "사용 (Administrators만 설치 가능)" }
-        0 { "사용안함 (모든 사용자 설치 가능)" }
-        default { "알 수 없음 ($disableAddPrinter)" }
-    }
     $commandOutput = "DisableAddPrinter=$disableAddPrinter ($policyStatus)"
 
 } catch {

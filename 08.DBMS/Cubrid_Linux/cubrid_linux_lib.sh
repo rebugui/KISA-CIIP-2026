@@ -106,7 +106,18 @@ cubrid_acl_check() {
             local octal="${mode%% *}"
             local group_digit="${octal: -2:1}"
             local other_digit="${octal: -1}"
-            # guideline(docs/09_DBMS.md D-14): cubrid.conf 권한은 600/640 만 양호.
+            # guideline(docs/09_DBMS.md D-14, criteria_good): 디렉터리는 일반 사용자의
+            # '수정(write) 권한 제거'만 양호 기준(예: $ORACLE_HOME/network, /lib 가 755 로 정상).
+            # 디렉터리 대상은 group/other write 비트(2,3,6,7)만 취약 판정(r/x 노출은 허용).
+            if [ -d "${target}" ]; then
+                case "${group_digit}" in
+                    2|3|6|7) bad+="${mode}"$'\n' ; continue ;;
+                esac
+                case "${other_digit}" in
+                    2|3|6|7) bad+="${mode}"$'\n' ;;
+                esac
+                continue
+            fi
             # 자격증명 포함 설정 파일은 일반 사용자(other)의 read 노출도 취약(640 초과).
             # other(마지막 자릿수)가 0 이외(read=4/exec=1/write=2 모두)면 취약.
             # other=0 일 때에만 group write(2,3,6,7) 추가 점검(640 기준 group r 까지 허용).

@@ -38,18 +38,44 @@ try {
     $snmpServices = Get-Service -Name 'SNMP*' -ErrorAction SilentlyContinue
 
     if ($snmpServices) {
-        $runningSnmp = $snmpServices | Where-Object { $_.Status -eq 'Running' }
+        # 가이드라인 양호 기준: SNMP 서비스 미사용 또는 Community String을 설정하여 사용하는 경우.
+        # 취약 기준: '불필요하게' SNMP 서비스를 사용하는 경우(필요성 판단).
+        # 'SNMP*'에는 SNMP 에이전트가 없어도 단독 구동될 수 있는 SNMPTRAP가 포함되므로,
+        # 실제 SNMP 에이전트(서비스명 'SNMP')의 구동 여부만으로 사용 여부를 판단한다.
+        $snmpAgent = $snmpServices | Where-Object { $_.Name -eq 'SNMP' }
+        $runningSnmp = $snmpAgent | Where-Object { $_.Status -eq 'Running' }
 
         $serviceList = ($snmpServices | Format-Table -Property Name, Status, StartType -AutoSize | Out-String).Trim()
         $commandOutput = $serviceList
 
         if ($runningSnmp) {
-            $finalResult = "VULNERABLE"
-            $summary = "SNMP 서비스가 실행 중 (암호화되지 않은 프로토콜로 보안 위험)"
-            $status = "취약"
+            # SNMP 에이전트가 구동 중. 'Community String을 설정하여 사용하는 경우'는 양호이고,
+            # '불필요하게 사용하는 경우'만 취약이다. 서비스의 업무상 필요성은 스크립트로
+            # 정적 판단할 수 없으므로(또한 Community String 설정 시 비취약), 플랫하게 취약 처리하지 않고
+            # ValidCommunities 설정 상태를 증거로 수집하여 수동진단으로 라우팅한다.
+            $regPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\ValidCommunities'
+            $communities = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+            $communityNames = @()
+            if ($communities) {
+                foreach ($prop in $communities.PSObject.Properties) {
+                    if ($prop.Name -notmatch '^PS') {
+                        $communityNames += $prop.Name
+                    }
+                }
+            }
+            $communityLabel = if ($communityNames.Count -gt 0) { ($communityNames -join ', ') } else { '(none)' }
+
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            if ($communityNames.Count -gt 0) {
+                $summary = "SNMP 서비스가 구동 중이며 Community String이 설정됨(Communities: $communityLabel). 업무상 필요(NMS 모니터링 등)에 의한 사용이면 양호, 불필요한 사용이면 취약 - 필요성 수동 확인 필요"
+            } else {
+                $summary = "SNMP 서비스가 구동 중이나 ValidCommunities Community String이 확인되지 않음(GPO/SNMPv3 설정 가능성). 업무상 필요성 및 Community String 설정 여부 수동 확인 필요"
+            }
+            $commandOutput = $serviceList + "`r`nValidCommunities: " + $communityLabel
         } else {
             $finalResult = "GOOD"
-            $summary = "SNMP 서비스가 설치되어 있지만 비활성화됨"
+            $summary = "SNMP 서비스가 설치되어 있지만 구동되지 않음 (서비스 미사용)"
             $status = "양호"
         }
     } else {
@@ -65,7 +91,7 @@ try {
     $commandOutput = $_.Exception.Message
 }
 
-$commandExecuted = "Get-Service -Name 'SNMP*'"
+$commandExecuted = "Get-Service -Name 'SNMP*' (+ SNMP 에이전트 구동 시 Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\SNMP\Parameters\ValidCommunities')"
 
 # 2. lib를 통한 결과 저장
 $purpose = "취약한 SNMP 서비스를 비활성화하여 시스템의 주요 정보 유출 및 불법 수정을 방지하기 위함"

@@ -70,7 +70,8 @@ diagnose() {
         ((total_users++)) || true
 
         # 시스템 계정 제외 (UID >= 1000인 일반 사용자만 확인)
-        if [ "$uid" -lt "$system_gid_threshold" ]; then
+        # 단, root(UID 0)의 홈 디렉토리는 기준 대상이므로 제외하지 않음 (root 홈이 타사용자 쓰기 가능일 때 미탐(false-good) 방지)
+        if [ "$uid" -ne 0 ] && [ "$uid" -lt "$system_gid_threshold" ]; then
             continue
         fi
 

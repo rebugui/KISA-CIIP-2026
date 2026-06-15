@@ -114,11 +114,23 @@ try {
 
         $commandExecuted = "Get-WindowsFeature Web-Server,Web-Ftp-Server,SMTP-Server; Get-WebConfigurationProperty system.webServer/httpProtocol; Get-Service SMTPSVC"
     } else {
-        $finalResult = "GOOD"
-        $status = "양호"
-        $summary = "IIS/FTP/SMTP 서비스가 설치되어 있지 않아 배너 노출 위험 없음"
-        $commandExecuted = "Get-WindowsFeature -Name Web-Server"
-        $commandOutput = "IIS/FTP/SMTP services not installed"
+        # Web-Server(IIS) 역할이 미설치라도 SMTP-Server 기능/SMTPSVC 서비스는 독립적으로 설치·구동될 수 있다.
+        # 이 경우 connectresponse 배너가 노출될 수 있으나 IIS6 메타베이스(adsutil)로만 정적 확인 가능하므로 MANUAL로 라우팅한다.
+        $smtpFeature = Get-WindowsFeature -Name SMTP-Server -ErrorAction SilentlyContinue
+        $smtpService = Get-Service -Name 'SMTPSVC' -ErrorAction SilentlyContinue
+        if (($smtpFeature -and $smtpFeature.InstallState -eq 'Installed') -or $smtpService) {
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Web-Server(IIS) 역할은 미설치이나 SMTP 서비스가 존재하여 SMTP connectresponse 배너 노출 여부를 수동 확인 필요"
+            $commandExecuted = "Get-WindowsFeature -Name Web-Server,SMTP-Server; Get-Service SMTPSVC"
+            $commandOutput = "SMTP service present; SMTP connectresponse banner requires manual verification"
+        } else {
+            $finalResult = "GOOD"
+            $status = "양호"
+            $summary = "IIS/FTP/SMTP 서비스가 설치되어 있지 않아 배너 노출 위험 없음"
+            $commandExecuted = "Get-WindowsFeature -Name Web-Server,SMTP-Server; Get-Service SMTPSVC"
+            $commandOutput = "IIS/FTP/SMTP services not installed"
+        }
     }
 
 } catch {

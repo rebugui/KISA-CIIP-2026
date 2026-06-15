@@ -284,7 +284,10 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'MANUAL' 'No explicit Tomcat directory listing setting was found; verify DefaultServlet listings policy manually.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml listings init-param'
         }
         'WEB-05' {
-            $cgi = @([regex]::Matches($webText, '(?is)<servlet-name>\s*cgi\s*</servlet-name>|org\.apache\.catalina\.servlets\.CGIServlet|cgiPathPrefix|enableCmdLineArguments') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+            # Tomcat 기본 conf/web.xml은 CGIServlet 정의/매핑을 주석(<!-- -->) 처리하여 비활성 상태로 배포하므로
+            # 주석을 제거한 활성 설정만 매칭해야 CGI 미사용(criteria_good) 상태를 취약으로 오탐하지 않음
+            $webTextActive = [regex]::Replace($webText, '(?s)<!--.*?-->', '')
+            $cgi = @([regex]::Matches($webTextActive, '(?is)<servlet-name>\s*cgi\s*</servlet-name>|org\.apache\.catalina\.servlets\.CGIServlet|cgiPathPrefix|enableCmdLineArguments') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
             if ($cgi.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat CGI servlet configuration evidence was found.' ($cgi -join "`n") 'Parse web.xml CGI servlet configuration' }
             return New-TomcatResult 'GOOD' 'No active Tomcat CGI servlet configuration evidence was found.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml CGI servlet configuration'
         }
@@ -330,7 +333,9 @@ function Invoke-TomcatWindowsCheck {
         }
         'WEB-10' {
             $proxy = @([regex]::Matches($serverText, '(?i)(proxyName|proxyPort|AJP/1\.3|protocol\s*=\s*"AJP|secretRequired\s*=\s*"false")') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
-            if ($proxy -match 'secretRequired\s*=\s*"false"|AJP/1\.3|protocol\s*=\s*"AJP') { return New-TomcatResult 'MANUAL' 'Tomcat proxy/AJP configuration evidence was found. Verify it is required, bound to trusted interfaces, and protected by a secret.' ($proxy -join "`n") 'Parse server.xml proxy and AJP connector settings' }
+            # proxyName/proxyPort 등 어떤 Proxy/AJP 설정이라도 존재하면 그 필요성(불필요 여부)은 정적으로 판정할 수 없으므로
+            # GOOD으로 흘려보내지 않고 MANUAL 처리한다(Linux WEB10 점검과 동일하게 proxyName/proxyPort도 포함). 증거가 전혀 없을 때만 GOOD.
+            if ($proxy.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Tomcat proxy/AJP configuration evidence was found. Verify it is required, bound to trusted interfaces, and protected by a secret.' ($proxy -join "`n") 'Parse server.xml proxy and AJP connector settings' }
             return New-TomcatResult 'GOOD' 'No Tomcat proxy/AJP connector evidence was found.' "server.xml files: $($state.ServerXml -join ', ')" 'Parse server.xml proxy and AJP connector settings'
         }
         'WEB-11' {

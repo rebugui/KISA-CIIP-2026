@@ -53,6 +53,19 @@ diagnose() {
         ftp_installed=true
     fi
 
+    # 실행 중인 FTP 데몬 확인 (소스/비-RPM 설치도 탐지)
+    # rpm 기록이 없어도 데몬이 동작 중이면 설치된 것으로 간주하여
+    # 접근 제어 점검(2~5단계)으로 진입시킴
+    if [ "$ftp_installed" = false ]; then
+        if systemctl is-active vsftpd >/dev/null 2>&1 \
+            || systemctl is-active proftpd >/dev/null 2>&1 \
+            || systemctl is-active pure-ftpd >/dev/null 2>&1; then
+            ftp_installed=true
+        elif ps -ef 2>/dev/null | grep -v grep | grep -qE '(vsftpd|proftpd|pure-ftpd|in\.ftpd)'; then
+            ftp_installed=true
+        fi
+    fi
+
     if [ "$ftp_installed" = false ]; then
         status="양호"
         diagnosis_result="GOOD"

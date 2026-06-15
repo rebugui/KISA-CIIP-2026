@@ -137,6 +137,7 @@ diagnose() {
         # 업로드 경로가 웹 루트 하위에 있는지 / 일반 사용자(other) 접근 권한이 있는지 점검
         local inside_root=""
         local world_accessible=""
+        local perm_verified=""
         local p r
         for p in ${upload_paths}; do
             [ -z "${p}" ] && continue
@@ -154,6 +155,7 @@ diagnose() {
                 local perm operm
                 perm=$(stat -c '%a' "${p}" 2>/dev/null || true)
                 if [ -n "${perm}" ]; then
+                    perm_verified="${perm_verified} ${p}"
                     operm="${perm: -1}"
                     if [ "${operm}" -ne 0 ]; then
                         world_accessible="${world_accessible} ${p}(${perm})"
@@ -176,6 +178,11 @@ diagnose() {
             diagnosis_result="MANUAL"
             status="수동진단"
             inspection_summary="업로드 관련 디렉티브가 발견되었으나 실제 업로드 저장 경로를 정적으로 확정할 수 없습니다. 업로드 경로의 웹 루트 분리 여부와 일반 사용자 접근 권한을 수동으로 확인하세요. 발견된 디렉티브:${upload_lines}"
+        elif [ -z "$(echo "${perm_verified}" | tr -d '[:space:]')" ]; then
+            # 업로드 경로는 웹 루트 외부로 확인되었으나, 해당 디렉터리가 점검 호스트에 존재하지 않거나 읽을 수 없어 일반 사용자(other) 접근 권한을 실제로 확인하지 못함 → GOOD로 단정 불가, 수동진단
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="업로드 경로가 웹 루트 외부로 확인되었으나, 해당 디렉터리가 점검 호스트에 존재하지 않거나 접근할 수 없어 일반 사용자(other) 접근 권한을 확인하지 못했습니다. 실제 업로드 디렉터리의 파일시스템 권한(chmod 750 등 일반 사용자 접근 제한 여부)을 수동으로 확인하세요. 업로드 경로:${upload_paths}"
         else
             diagnosis_result="GOOD"
             status="양호"

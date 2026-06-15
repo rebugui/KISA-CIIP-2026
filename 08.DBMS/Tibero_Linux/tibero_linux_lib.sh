@@ -248,8 +248,8 @@ invoke_tibero_linux_check() {
             ;;
         D-10)
             lines="$(tibero_config_grep '(LSNR_INVITED_IP|LSNR_DENIED_IP)[[:space:]]*=[[:space:]]*[^[:space:]]' || true)"
-            # Drop commented-out directives (grep -Ein prints file:line:content; skip lines whose content starts with #, ;, or -- ) so an inert commented LSNR_*_IP does not yield GOOD.
-            lines="$(printf '%s\n' "${lines}" | grep -Ev ':[0-9]+:[[:space:]]*(#|;|--)' || true)"
+            # Drop commented-out directives. tibero_config_grep runs grep -Ein on ONE file at a time, so output is single-file form 'NNN:content' (line number at column 0, no filename and no leading colon); anchor on the leading line number to skip lines whose content starts with #, ;, or -- so an inert commented LSNR_*_IP does not yield GOOD.
+            lines="$(printf '%s\n' "${lines}" | grep -Ev '^[0-9]+:[[:space:]]*(#|;|--)' || true)"
             [ -n "${lines}" ] && tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero listener IP restriction evidence (active LSNR_INVITED_IP/LSNR_DENIED_IP with a value) was found." "${lines}" "grep Tibero listener IP access controls" || tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "No active Tibero listener IP restriction (LSNR_INVITED_IP/LSNR_DENIED_IP) was found; confirm firewall/listener source-IP policy." "$(tibero_evidence)" "grep Tibero listener IP access controls"
             ;;
         D-11)
@@ -308,8 +308,7 @@ invoke_tibero_linux_check() {
             fi
             ;;
         D-22)
-            lines="$(tibero_config_grep 'RESOURCE_LIMIT|RESOURCE_MANAGER|MAX_SESSION|MEMORY_TARGET' || true)"
-            [ -n "${lines}" ] && tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero resource-limit configuration evidence was found; confirm institutional threshold policy." "${lines}" "grep Tibero resource-limit configuration" || tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero resource-limit evidence was not conclusive; confirm DB/profile resource policy." "$(tibero_evidence)" "grep Tibero resource-limit configuration"
+            tibero_set_result "N/A" "$(tibero_status_for_result N/A)" "D-22 (RESOURCE_LIMIT) targets Oracle DB only per KISA CIIP 2026 metadata; Tibero is out of scope." "D-22 target: Oracle DB." "Map DBMS resource-limit guideline applicability"
             ;;
         D-23)
             tibero_set_result "N/A" "N/A" "SQL Server xp_cmdshell control is not applicable to Tibero." "Tibero has no xp_cmdshell feature." "Map DBMS command-shell guideline applicability"

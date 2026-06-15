@@ -161,10 +161,11 @@ diagnose() {
         fi
         inspection_summary="hosts.deny에 기본 차단(ALL: ALL) 정책이 설정되어 있고 hosts.allow는 특정 호스트만 허용합니다. ${details}"
     elif [ "$pf_state" = "online" ] && [ -n "$pf_rules" ]; then
-        # TCP Wrapper 미사용이나 Solaris Packet Filter가 동작 중이고 규칙이 존재 → 양호
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="TCP Wrapper 기본 차단 정책은 없으나 Solaris Packet Filter(svc:/network/firewall)가 동작 중이며 /etc/firewall/pf.conf에 유효 규칙이 존재합니다."
+        # TCP Wrapper 미사용이나 Solaris Packet Filter가 동작 중이고 규칙이 존재
+        # → 규칙의 실제 제한 적절성(예: block in all 기본 차단 여부)은 자동 검증 불가하므로 수동 확인 필요
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="TCP Wrapper 기본 차단 정책은 없으나 Solaris Packet Filter(svc:/network/firewall)가 동작 중이며 /etc/firewall/pf.conf에 유효 규칙이 존재합니다. 다만 규칙이 실제로 접속을 제한하는지(허용 대상의 적절성)는 자동 검증할 수 없어 수동 점검이 필요합니다."
     elif [ "$pf_state" = "online" ] || [ -n "$pf_rules" ]; then
         # PF 서비스 또는 규칙 중 일부만 확인됨 → 실제 차단 정책 적용 여부 수동 확인
         diagnosis_result="MANUAL"

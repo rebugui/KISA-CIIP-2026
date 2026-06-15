@@ -47,7 +47,7 @@ try {
         $cert = @($lines | Where-Object { $_ -match '^(?i)ssl_certificate\s+\S+' })
         $key = @($lines | Where-Object { $_ -match '^(?i)ssl_certificate_key\s+\S+' })
         $protocols = @($lines | Where-Object { $_ -match '^(?i)ssl_protocols\s+' })
-        $weakProtocols = @($protocols | Where-Object { $_ -match '(?i)\bSSLv2\b|\bSSLv3\b|\bTLSv1\b|\bTLSv1\.1\b' })
+        $weakProtocols = @($protocols | Where-Object { $_ -match '(?i)\bSSLv2\b|\bSSLv3\b|\bTLSv1\.0\b|\bTLSv1\.1\b|\bTLSv1\b(?!\.)' })
         $sslEnabled = ($sslListen.Count -gt 0 -and $cert.Count -gt 0 -and $key.Count -gt 0)
         $commandExecuted = "Parse Nginx Windows SSL listen/certificate/protocol directives"
         $commandOutput = (@($sslListen + $cert + $key + $protocols) -join "`n")

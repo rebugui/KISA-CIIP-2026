@@ -143,13 +143,20 @@ diagnose() {
     )
     local apache_scan_paths_display="${apache_scan_paths[*]}"
 
-    # Check for Options Indexes (enabled)
-    indexes_found=$(grep -r "Options.*Indexes" "${apache_scan_paths[@]}" 2>/dev/null | grep -v "^\s*#" | grep -v "Options.*-Indexes" || true)
+    # Check for Options Indexes (enabled). 'Options All' (and 'Options +All') enables all
+    # options except MultiViews, which INCLUDES Indexes and therefore turns on directory
+    # listing, so match the All/+All token as well (mirrors the Windows '^\+?(Indexes|All)$'
+    # token test). The All token is matched only when preceded by whitespace or '+' (so
+    # '+All' counts but the explicit-removal '-All' does not) and followed by whitespace/EOL.
+    indexes_found=$( { \
+        grep -r "Options.*Indexes" "${apache_scan_paths[@]}" 2>/dev/null; \
+        grep -rE "^[[:space:]]*Options([[:space:]]|.*[[:space:]])\+?All([[:space:]]|$)" "${apache_scan_paths[@]}" 2>/dev/null; \
+        } | grep -v "^\s*#" | grep -v "Options.*-Indexes" || true)
 
     # Check for Options -Indexes (explicitly disabled)
     indexes_disabled=$(grep -r "Options.*-Indexes" "${apache_scan_paths[@]}" 2>/dev/null | grep -v "^\s*#" | head -5 || true)
 
-    command_executed="grep -r 'Options.*Indexes' ${apache_scan_paths_display} 2>/dev/null | grep -v '^\\s*#'"
+    command_executed="grep -rE 'Options.*Indexes|Options[[:space:]].*(\\+?All)' ${apache_scan_paths_display} 2>/dev/null | grep -v '^\\s*#' | grep -v 'Options.*-Indexes'"
 
     if [ -n "${indexes_disabled}" ] && [ -z "${indexes_found}" ]; then
         # Indexes explicitly disabled
@@ -167,7 +174,7 @@ diagnose() {
         # Indexes enabled
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="디렉터리 리스팅이 활성화되어 있습니다 (Options Indexes 또는 Options +Indexes). 보안 위험이 있으므로 'Options -Indexes'로 변경하거나 Indexes 옵션을 제거하세요."
+        inspection_summary="디렉터리 리스팅이 활성화되어 있습니다 (Options Indexes, Options +Indexes 또는 Options All/+All). 보안 위험이 있으므로 'Options -Indexes'로 변경하거나 Indexes/All 옵션을 제거하세요."
         command_result="${indexes_found}"
     fi
 

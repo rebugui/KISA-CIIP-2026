@@ -139,11 +139,11 @@ diagnose() {
             nfs_shares=$(grep -vE '^[[:space:]]*(#|$)' /etc/exports 2>/dev/null || true)
             evidence="${evidence}[/etc/exports]${newline}${nfs_shares:-공유 설정 없음}${newline}"
             local nfs_anon=""
-            nfs_anon=$(printf '%s\n' "$nfs_shares" | grep -E 'insecure|anon(uid|gid)?=0([^0-9]|$)' || true)
+            nfs_anon=$(printf '%s\n' "$nfs_shares" | grep -E 'insecure|anon(uid|gid)[[:space:]]*=' || true)
             local nfs_world=""
             nfs_world=$(printf '%s\n' "$nfs_shares" | grep -F '*' | grep -E '[(,[:space:]]rw' || true)
             if [ -n "$nfs_anon" ]; then
-                vuln_issues="${vuln_issues:+${vuln_issues}; }NFS 익명 공유 설정(insecure/anon=0): ${nfs_anon//$'\n'/ | }"
+                vuln_issues="${vuln_issues:+${vuln_issues}; }NFS 익명 공유 설정(insecure/anonuid·anongid 옵션): ${nfs_anon//$'\n'/ | }"
             fi
             if [ -n "$nfs_world" ]; then
                 vuln_issues="${vuln_issues:+${vuln_issues}; }NFS 전체 공개(rw) 공유: ${nfs_world//$'\n'/ | }"

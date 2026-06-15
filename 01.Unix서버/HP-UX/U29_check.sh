@@ -74,8 +74,8 @@ diagnose() {
         local perms=$(perl -e '@stat=stat("/etc/hosts.lpd"); printf "%04o\n", $stat[2] & 07777' 2>/dev/null)
         local owner=$(perl -e '@stat=lstat("/etc/hosts.lpd"); $uid=$stat[4]; $gid=$stat[5]; $user=getpwuid($uid); $group=getgrgid($gid); print "$user:$group"' 2>/dev/null)
 
-        # 보안 설정 확인: root:root 600 또는 400
-        if [ "$owner" = "root:root" ]; then
+        # 보안 설정 확인: 소유자 root (그룹은 가이드 기준 아님: HP-UX 기본 root:sys 허용), 권한 600 또는 400
+        if [ "${owner%%:*}" = "root" ]; then
             if [ "$perms" = "0600" ] || [ "$perms" = "0400" ]; then
                 ((hosts_lpd_secure++)) || true
                 hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (보안 양호)"
@@ -83,7 +83,7 @@ diagnose() {
                 hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (권한 취약 - 600 또는 400 권장)"
             fi
         else
-            hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner} (root:root 아님 - 취약)"
+            hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner} (소유자 root 아님 - 취약)"
         fi
     fi
 

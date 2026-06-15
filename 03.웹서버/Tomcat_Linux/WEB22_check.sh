@@ -107,7 +107,7 @@ diagnose() {
                 # 주석(<!-- ... -->) 블록을 제거하고 유효한 <location>만 계수한다.
                 if [ -r "${xml_file}" ]; then
                     error_page_count=$(tr '\n' ' ' < "${xml_file}" 2>/dev/null \
-                        | sed -E 's/<!--.*?-->/ /g; s/<!--.*$//' \
+                        | sed -E 's/<!--[^-]*(-[^-]+)*-->/ /g' \
                         | grep -oE '<location>[[:space:]]*[^<[:space:]][^<]*</location>' \
                         | grep -c '<location>' || true)
                 fi

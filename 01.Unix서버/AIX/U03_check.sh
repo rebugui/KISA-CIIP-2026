@@ -82,7 +82,20 @@ diagnose() {
         # 기본(default) 설정 확인
         # AIX /etc/security/user 표준 형식은 "loginretries = N" (= 양쪽 공백)이므로
         # '=' 구분자로 값 필드를 추출한다 (awk '{print $2}' 는 '=' 를 반환하는 버그가 있음).
-        local default_loginretries=$(grep -A 10 "^default:" "$user_file" 2>/dev/null | awk -F'=' '/loginretries/{gsub(/[^0-9]/,"",$2);print $2}' | head -1)
+        # default: 스탠자 경계를 벗어나면 추출을 중단하여(U02 u02_get_default_attr 동일 패턴)
+        # 뒤따르는 사용자/시스템 스탠자의 loginretries 값을 default 값으로 오인하지 않도록 한다.
+        # default: 스탠자에 loginretries 가 없으면 빈 값 -> 미설정 -> 취약 판정.
+        local default_loginretries=$(awk '
+            /^\*/ { next }
+            /^default:/ { in_def=1; next }
+            /^[^ \t]/ { in_def=0 }
+            in_def && /loginretries/ {
+                v=$0
+                gsub(/[^0-9]/,"",v)
+                if (v != "") val=v
+            }
+            END { if (val != "") print val }
+        ' "$user_file" 2>/dev/null | head -1)
 
         # 설정이 없는 경우 AIX 기본값은 보통 3 또는 5
         if [ -z "$default_loginretries" ]; then

@@ -96,20 +96,47 @@ diagnose() {
     local servlet_mappings=""
     local unnecessary_detail=""
 
+    # <!-- ... --> 주석 구간(여러 줄/동일 줄)을 제거한 뒤 매칭하기 위한 헬퍼.
+    # 기본 Tomcat conf/web.xml 은 CGI/SSI 서블릿을 여러 줄 <!-- ... --> 블록 안에
+    # 비활성(주석) 상태로 배포한다. 줄 시작(^\s*<!--) 필터만으로는 블록 내부의
+    # <servlet-class>...CGIServlet</servlet-class> 등 줄을 제거하지 못해 비활성
+    # 매핑을 VULNERABLE 로 오판한다. awk 로 주석 구간을 먼저 제거하여 활성(미주석)
+    # 매핑만 탐지한다. 후행 인라인 주석이 붙은 활성 라인은 주석만 제거되고 토큰은 남는다.
+    strip_xml_comments() {
+        awk '
+            {
+                line = $0; out = ""
+                while (length(line) > 0) {
+                    if (incomment) {
+                        p = index(line, "-->")
+                        if (p == 0) { line = ""; break }
+                        line = substr(line, p + 3); incomment = 0
+                    } else {
+                        p = index(line, "<!--")
+                        if (p == 0) { out = out line; line = ""; break }
+                        out = out substr(line, 1, p - 1)
+                        line = substr(line, p + 4); incomment = 1
+                    }
+                }
+                print out
+            }
+        ' "$1" 2>/dev/null
+    }
+
     for xml_pattern in "${web_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
                 config_found=true
-                # 불필요 스크립트 매핑(CGI/SSI/Invoker)만 점검 (주석 제외)
-                local found_unnecessary=$(grep -iE "CGIServlet|SSIServlet|InvokerServlet|<servlet-name>\s*(cgi|ssi|invoker)\s*</servlet-name>" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                # 불필요 스크립트 매핑(CGI/SSI/Invoker)만 점검 (주석 구간 제외)
+                local found_unnecessary=$(strip_xml_comments "${xml_file}" | grep -iE "CGIServlet|SSIServlet|InvokerServlet|<servlet-name>\s*(cgi|ssi|invoker)\s*</servlet-name>" || true)
                 if [ -n "${found_unnecessary}" ]; then
                     unnecessary_detail="${unnecessary_detail}"$'\n'"${found_unnecessary}"
                     local hits=$(echo "${found_unnecessary}" | grep -c . || true)
                     unnecessary_mappings=$((unnecessary_mappings + hits))
                 fi
 
-                # 전체 servlet-mapping 개수(참고용 evidence)
-                local found_mappings=$(grep -E "servlet-mapping" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                # 전체 servlet-mapping 개수(참고용 evidence; 주석 구간 제외)
+                local found_mappings=$(strip_xml_comments "${xml_file}" | grep -E "servlet-mapping" || true)
                 if [ -n "${found_mappings}" ]; then
                     mapping_count=$(echo "${found_mappings}" | grep -c "servlet-mapping" || true)
                 fi

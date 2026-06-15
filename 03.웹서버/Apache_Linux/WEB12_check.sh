@@ -119,10 +119,11 @@ diagnose() {
 
     # FollowSymLinks / Includes 등 위험 옵션이 명시적으로 활성화되어 있는지 확인
     # (마지막 토큰 기준이 아니라 '+Opt' 또는 '-Opt' 부호 없는 활성화를 위험으로 간주)
-    if echo "${options_settings}" | grep -qE "(^|[[:space:]])\+?FollowSymLinks"; then
+    # 'All'(=MultiViews를 제외한 모든 옵션, FollowSymLinks 포함) 별칭도 활성화로 간주
+    if echo "${options_settings}" | grep -qE "(^|[[:space:]])\+?(FollowSymLinks|All)([[:space:]]|\$)"; then
         followsymlinks_found=true
     fi
-    if echo "${options_settings}" | grep -qE "\-FollowSymLinks"; then
+    if echo "${options_settings}" | grep -qE "\-(FollowSymLinks|All)([[:space:]]|\$)"; then
         followsymlinks_disabled=true
     fi
 

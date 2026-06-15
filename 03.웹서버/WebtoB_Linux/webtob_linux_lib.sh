@@ -232,7 +232,16 @@ invoke_webtob_linux_check() {
             ;;
         WEB-12|WEB-17)
             lines="$(webtob_config_grep '^[[:space:]]*\\*ALIAS|RealPath|ALIAS' || true)"
-            [ -n "${lines}" ] && webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB alias/link mapping evidence was found." "${lines}" "grep ALIAS http.m" || webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB alias/link mapping evidence was found." "$(webtob_evidence)" "grep ALIAS http.m"
+            if [ -n "${lines}" ]; then
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB alias/link mapping evidence was found." "${lines}" "grep ALIAS http.m"
+            elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
+                # Installed (per webtob_is_installed) but no http.m config was
+                # actually inspected (home not derivable or config files absent):
+                # GOOD cannot be asserted from zero evidence -> MANUAL.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its configuration (http.m) could not be inspected; manually verify symbolic-link/alias and virtual-directory usage." "$(webtob_evidence)" "grep ALIAS http.m"
+            else
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB alias/link mapping evidence was found." "$(webtob_evidence)" "grep ALIAS http.m"
+            fi
             ;;
         WEB-13|WEB-15)
             webtob_set_result "N/A" "N/A" "This item is not targeted to WebtoB in the guideline metadata." "${item_id} target excludes WebtoB." "Map WebtoB guideline applicability"
@@ -250,11 +259,29 @@ invoke_webtob_linux_check() {
             ;;
         WEB-18)
             lines="$(webtob_config_grep 'Method[[:space:]]*=.*(PROPFIND|PUT|DELETE|MKCOL|COPY|MOVE)|WebDAV|dav' || true)"
-            [ -n "${lines}" ] && webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB WebDAV-like methods/settings evidence was found." "${lines}" "grep WebDAV methods http.m" || webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB WebDAV-like method evidence was found." "$(webtob_evidence)" "grep WebDAV methods http.m"
+            if [ -n "${lines}" ]; then
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB WebDAV-like methods/settings evidence was found." "${lines}" "grep WebDAV methods http.m"
+            elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
+                # Installed (per webtob_is_installed) but no http.m config was
+                # actually inspected (home not derivable or config files absent):
+                # GOOD cannot be asserted from zero evidence -> MANUAL.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its configuration (http.m) could not be inspected; manually verify WebDAV is disabled." "$(webtob_evidence)" "grep WebDAV methods http.m"
+            else
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB WebDAV-like method evidence was found." "$(webtob_evidence)" "grep WebDAV methods http.m"
+            fi
             ;;
         WEB-19)
             lines="$(webtob_config_grep 'SVRTYPE[[:space:]]*=[[:space:]]*SSI|SvrType[[:space:]]*=[[:space:]]*SSI|SSI' || true)"
-            [ -n "${lines}" ] && webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSI server mapping evidence was found." "${lines}" "grep SSI http.m" || webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB SSI mapping evidence was found." "$(webtob_evidence)" "grep SSI http.m"
+            if [ -n "${lines}" ]; then
+                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSI server mapping evidence was found." "${lines}" "grep SSI http.m"
+            elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
+                # Installed (per webtob_is_installed) but no http.m config was
+                # actually inspected (home not derivable or config files absent):
+                # GOOD cannot be asserted from zero evidence -> MANUAL.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its configuration (http.m) could not be inspected; manually verify SSI is disabled." "$(webtob_evidence)" "grep SSI http.m"
+            else
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "No WebtoB SSI mapping evidence was found." "$(webtob_evidence)" "grep SSI http.m"
+            fi
             ;;
         WEB-20)
             # Oracle: GOOD only when SSL/TLS is actually ENABLED (SSLFLAG=Y).
@@ -324,7 +351,22 @@ invoke_webtob_linux_check() {
             fi
             ;;
         WEB-26)
-            webtob_acl_check "log" "${WEBTOB_LOG_DIRS[@]}"
+            # criteria_bad: '로그 디렉터리 및 파일에 일반 사용자의 접근 권한이 있는 경우'
+            # — files are explicitly in scope. The default WebtoB log-file mode is
+            # 644 (world/other-readable), so a 750 log dir containing a 644
+            # access.log is still vulnerable. Enumerate the regular files inside
+            # each log dir (maxdepth 1) and assess them alongside the dirs so a
+            # world-readable log FILE under a tight dir is reported VULNERABLE.
+            local webtob_log_targets=()
+            local log_dir
+            local log_file
+            for log_dir in "${WEBTOB_LOG_DIRS[@]}"; do
+                webtob_log_targets+=("${log_dir}")
+                while IFS= read -r log_file; do
+                    [ -n "${log_file}" ] && webtob_log_targets+=("${log_file}")
+                done < <(find "${log_dir}" -maxdepth 1 -type f 2>/dev/null || true)
+            done
+            webtob_acl_check "log" "${webtob_log_targets[@]}"
             ;;
         *)
             webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "No WebtoB Linux diagnostic rule is defined for ${item_id}." "$(webtob_evidence)" "WebtoB Linux generic discovery"

@@ -100,21 +100,30 @@ diagnose() {
     # ==========================================================================
     # 1. 관리자 권한(SUPER)을 가진 계정 확인
     # ==========================================================================
+    # 연결 가드를 통과한 후이므로, 빈 결과는 "0행"이 아니라 쿼리 오류(권한 부족 등)를 의미할 수 있음.
+    # 정상 0행과 오류/공백을 구분하기 위해 종료 코드를 캡처하고, 헤더는 분석 단계에서 제거함.
+    local query_ok=1
     local admin_query="SELECT user, host FROM mysql.user WHERE Super_priv = 'Y';"
     command_executed="mysql -e \"SELECT user,host FROM mysql.user WHERE Super_priv='Y'; SELECT user,host FROM mysql.user WHERE Grant_priv='Y';\""
-    local admin_users=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${admin_query}" 2>/dev/null | tail -n +2 || echo "")
+    local admin_raw=""
+    admin_raw=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${admin_query}" 2>/dev/null) || query_ok=0
+    local admin_users=$(echo "$admin_raw" | tail -n +2 || echo "")
 
     # ==========================================================================
     # 2. GRANT OPTION 권한을 가진 계정 확인
     # ==========================================================================
     local grant_query="SELECT user, host FROM mysql.user WHERE Grant_priv = 'Y';"
-    local grant_users=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${grant_query}" 2>/dev/null | tail -n +2 || echo "")
+    local grant_raw=""
+    grant_raw=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${grant_query}" 2>/dev/null) || query_ok=0
+    local grant_users=$(echo "$grant_raw" | tail -n +2 || echo "")
 
     # ==========================================================================
     # 3. root 계정 원격 접속 확인 (보조 검사)
     # ==========================================================================
     local root_remote_query="SELECT host FROM mysql.user WHERE user='root' AND host NOT IN ('localhost', '127.0.0.1', '::1');"
-    local root_remote=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${root_remote_query}" 2>/dev/null | tail -n +2 || echo "")
+    local root_remote_raw=""
+    root_remote_raw=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${root_remote_query}" 2>/dev/null) || query_ok=0
+    local root_remote=$(echo "$root_remote_raw" | tail -n +2 || echo "")
 
     local details=""
     local admin_count=0
@@ -151,6 +160,12 @@ diagnose() {
         status="취약"
         inspection_summary="root 계정 원격 접속 허용: ${root_remote}"
         command_result="${details}"
+    elif [ "$query_ok" -eq 0 ]; then
+        # 권한 정보 조회 자체가 실패함(권한 부족 등) → 빈 결과를 양호로 단정할 수 없음. 수동 확인 필요.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="mysql.user 권한 조회 불가 - 권한 부족 가능. SUPER/GRANT 권한 계정 및 root 원격 접속 허용 여부 수동 확인 필요"
+        command_result="${details:-권한 정보 조회 실패}"
     else
         diagnosis_result="GOOD"
         status="양호"

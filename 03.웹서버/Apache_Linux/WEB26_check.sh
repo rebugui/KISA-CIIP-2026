@@ -100,8 +100,9 @@ diagnose() {
             local dir_perm=$(stat -c "%a" "${log_dir}" 2>/dev/null || echo "")
             if [ -n "${dir_perm}" ]; then
                 log_dirs_checked="${log_dirs_checked}"$'\n'"[DIR] ${log_dir}: ${dir_perm}"
-                # Check if directory permission is too permissive (not 700 or 750)
-                if [ "${dir_perm}" != "700" ] && [ "${dir_perm}" != "750" ]; then
+                # 일반 사용자(other) 접근 권한 여부로 판단 (8진수 마지막 자리 != 0 이면 other r/w/x 존재)
+                local dir_others_bit="${dir_perm: -1}"
+                if [ "${dir_others_bit}" != "0" ]; then
                     has_vulnerable_perms=true
                 fi
             fi
@@ -112,8 +113,9 @@ diagnose() {
                     local file_perm=$(stat -c "%a" "${log_file}" 2>/dev/null || echo "")
                     if [ -n "${file_perm}" ]; then
                         log_files_checked="${log_files_checked}"$'\n'"[FILE] ${log_file}: ${file_perm}"
-                        # Check if file permission is too permissive (not 600 or 640)
-                        if [ "${file_perm}" != "600" ] && [ "${file_perm}" != "640" ]; then
+                        # 일반 사용자(other) 접근 권한 여부로 판단 (8진수 마지막 자리 != 0 이면 other r/w/x 존재)
+                        local file_others_bit="${file_perm: -1}"
+                        if [ "${file_others_bit}" != "0" ]; then
                             has_vulnerable_perms=true
                         fi
                     fi

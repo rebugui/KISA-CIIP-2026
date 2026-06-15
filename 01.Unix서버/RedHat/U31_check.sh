@@ -48,7 +48,8 @@ diagnose() {
 
     # set -e에 의해 중단되지 않도록 루프 보호
     while IFS=: read -r user pass uid gid info home shell; do
-        if [ "$uid" -ge 1000 ] && [ -d "$home" ]; then
+        # root(UID 0)의 홈 디렉토리는 기준 대상이므로 제외하지 않음
+        if { [ "$uid" -eq 0 ] || [ "$uid" -ge 1000 ]; } && [ -d "$home" ]; then
             local owner perm
             # 에러 발생 시 죽지 않도록 2>/dev/null 처리
             owner=$(stat -c "%U" "$home" 2>/dev/null) || owner="unknown"

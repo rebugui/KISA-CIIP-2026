@@ -101,23 +101,23 @@ diagnose() {
             fi
         done || true
 
-        # 2-2) 취약한 sudoers 규칙 확인
-        # ALL 권한을 가진 사용자/그룹 확인
-        local all_privilege=$(grep -v "^#" /etc/sudoers 2>/dev/null | grep -v "^$" | grep -E "ALL=\(ALL\) ALL|ALL=\(ALL:ALL\) ALL")
+        # 2-2) sudoers 규칙 확인 (정보성)
+        # 판단 기준은 파일 소유자/권한이므로 규칙 내용은 취약 판정에 반영하지 않음
+        # (%sudo/%admin ALL=(ALL:ALL) ALL 등 표준 기본 규칙으로 과탐 방지)
+        local all_privilege=$(grep -v "^#" /etc/sudoers 2>/dev/null | grep -v "^$" | grep -E "ALL=\(ALL\) ALL|ALL=\(ALL:ALL\) ALL" || true)
         if [ -n "$all_privilege" ]; then
             # root는 제외
-            local non_root_all=$(echo "$all_privilege" | grep -v "root")
+            local non_root_all=$(echo "$all_privilege" | grep -vE "^[[:space:]]*(root|%sudo|%admin)[[:space:]]" || true)
             if [ -n "$non_root_all" ]; then
-                sudoers_issues=true
-                issue_details="${issue_details}모든 권한을 가진 비-root 사용자: ${non_root_all}, "
+                issue_details="${issue_details}[참고] 광범위한 sudo 권한 규칙: ${non_root_all}, "
             fi
         fi
 
-        # 2-3) 암호 없이 sudo 사용 가능한 규칙 확인 (NOPASSWD)
-        local nopasswd_rules=$(grep -v "^#" /etc/sudoers 2>/dev/null | grep -i "NOPASSWD")
+        # 2-3) 암호 없이 sudo 사용 가능한 규칙 확인 (NOPASSWD, 정보성)
+        # U-63 판정 기준은 sudoers 파일 권한/소유자이며 규칙 내용은 취약 트리거가 아님
+        local nopasswd_rules=$(grep -v "^#" /etc/sudoers 2>/dev/null | grep -i "NOPASSWD" || true)
         if [ -n "$nopasswd_rules" ]; then
-            sudoers_issues=true
-            issue_details="${issue_details}암호 없는 sudo 규칙: ${nopasswd_rules}, "
+            issue_details="${issue_details}[참고] 암호 없는 sudo 규칙: ${nopasswd_rules}, "
         fi
 
         # 2-4) sudoers.d 디렉토리 내 파일 확인 (AIX: perl 사용)

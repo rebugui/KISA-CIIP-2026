@@ -114,11 +114,23 @@ diagnose() {
     local secure_accounts=()
     local manual_accounts=()
     local check_results=""
+    # 연결 가드(prompt_mysql_connection)는 `SELECT 1;`만 수행하므로 mysql.user 조회 권한을
+    # 보장하지 않는다. 최소 권한 계정으로 실행 시 mysql.user 쿼리는 ERROR 1142로 실패하고
+    # 빈 문자열을 반환하는데, `[ "" -gt 0 ]`는 거짓이라 GOOD로 흘러 빈 비밀번호 root/익명
+    # 계정을 놓칠 수 있다. 따라서 게이트 쿼리의 종료 코드를 추적해 실패 시 MANUAL로 라우팅한다.
+    local query_failed=0
 
     for account in "${default_accounts[@]}"; do
-        # 계정 존재 여부 확인
-        local account_exists=$(MYSQL_PWD="${DB_ADMIN_PASS}" mysql -u"${DB_ADMIN_USER}" -h"${DB_HOST}" -P"${DB_PORT}" -se \
-            "SELECT COUNT(*) FROM mysql.user WHERE user='${account}';" 2>/dev/null)
+        # 계정 존재 여부 확인 (종료 코드 추적: 빈 결과가 0행인지 쿼리 오류인지 구분)
+        local account_exists
+        account_exists=$(MYSQL_PWD="${DB_ADMIN_PASS}" mysql -u"${DB_ADMIN_USER}" -h"${DB_HOST}" -P"${DB_PORT}" -se \
+            "SELECT COUNT(*) FROM mysql.user WHERE user='${account}';" 2>/dev/null) || { query_failed=1; continue; }
+
+        # 쿼리는 성공했으나 숫자가 아닌(공백 등) 출력이면 신뢰할 수 없으므로 MANUAL 처리
+        if ! [[ "${account_exists}" =~ ^[0-9]+$ ]]; then
+            query_failed=1
+            continue
+        fi
 
         if [ "${account_exists}" -gt 0 ]; then
             echo "[INFO] 계정 발견: ${account}"
@@ -148,13 +160,17 @@ diagnose() {
         fi
     done
 
-    # 익명 사용자 확인
-    local anonymous_users=$(MYSQL_PWD="${DB_ADMIN_PASS}" mysql -u"${DB_ADMIN_USER}" -h"${DB_HOST}" -P"${DB_PORT}" -se \
-        "SELECT COUNT(*) FROM mysql.user WHERE user='';" 2>/dev/null)
-
-    if [ "${anonymous_users}" -gt 0 ]; then
-        vulnerable_accounts+=("익명 사용자 ('' user)")
-        check_results="${check_results}[취약] 익명 사용자: ${anonymous_users}개 발견\\n"
+    # 익명 사용자 확인 (종료 코드 추적: 빈 결과가 0행인지 쿼리 오류인지 구분)
+    local anonymous_users
+    if anonymous_users=$(MYSQL_PWD="${DB_ADMIN_PASS}" mysql -u"${DB_ADMIN_USER}" -h"${DB_HOST}" -P"${DB_PORT}" -se \
+        "SELECT COUNT(*) FROM mysql.user WHERE user='';" 2>/dev/null) && [[ "${anonymous_users}" =~ ^[0-9]+$ ]]; then
+        if [ "${anonymous_users}" -gt 0 ]; then
+            vulnerable_accounts+=("익명 사용자 ('' user)")
+            check_results="${check_results}[취약] 익명 사용자: ${anonymous_users}개 발견\\n"
+        fi
+    else
+        # 쿼리 실패 또는 비숫자 출력 → mysql.user 조회 권한 부족 가능 → MANUAL로 라우팅
+        query_failed=1
     fi
 
     # 최종 판정
@@ -183,6 +199,15 @@ diagnose() {
             command_result="${command_result}- ${account}\\n"
         done
         command_result="${command_result}\\n상세:\\n${check_results}"
+        command_executed="mysql -u${DB_ADMIN_USER} -p*** -h${DB_HOST} -P${DB_PORT} -e \"SELECT user, host, authentication_string FROM mysql.user;\""
+    elif [ ${query_failed} -ne 0 ]; then
+        # mysql.user 조회 쿼리가 실패(권한 부족 등)하여 빈 결과가 반환됨.
+        # 빈 결과를 "계정 없음(양호)"으로 오판하면 빈 비밀번호 root/익명 계정을 놓칠 수 있으므로
+        # 증거 확보 불가로 보고 MANUAL로 라우팅한다.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="mysql.user 조회 권한 부족으로 추정되어 기본/익명 계정 존재 여부를 자동으로 확인할 수 없습니다. mysql.user 조회 권한을 가진 계정으로 기본 계정(root/test) 및 익명 계정의 비밀번호 변경/잠금 여부를 수동으로 확인하세요."
+        command_result="MySQL 버전: ${mysql_version}\\nmysql.user 조회 실패(권한 부족 가능)\\n${check_results}"
         command_executed="mysql -u${DB_ADMIN_USER} -p*** -h${DB_HOST} -P${DB_PORT} -e \"SELECT user, host, authentication_string FROM mysql.user;\""
     else
         diagnosis_result="GOOD"

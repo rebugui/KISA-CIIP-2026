@@ -47,15 +47,17 @@ try {
         $hexString = "0x$($hexValue.ToString('X2')) ($hexValue)"
         $commandOutput = "$regName : $hexString"
 
-        # 0xFF (255) = Disable autorun on all drives
-        # 0xDD (221) = Disable autorun on all drives except CD-ROM
-        if ($hexValue -eq 0xFF -or $hexValue -eq 0xDD) {
+        # NoDriveTypeAutoRun is a bitmask: a SET bit disables autorun for that drive type.
+        # bit 0x04 = DRIVE_REMOVABLE (USB), bit 0x20 = DRIVE_CDROM.
+        # This item targets removable-media autorun, so GOOD = removable bit (0x04) set
+        # (e.g. 0xFF, 0xDD, 0xB5 — all disable removable autorun). Bit 0x04 clear = VULNERABLE.
+        if (($hexValue -band 0x04) -ne 0) {
             $finalResult = "GOOD"
             $summary = "이동식 미디어 자동실행 금지됨 ($hexString)"
             $status = "양호"
         } else {
             $finalResult = "VULNERABLE"
-            $summary = "이동식 미디어 자동실행 허용됨 ($hexString, 권장: 0xFF 또는 0xDD)"
+            $summary = "이동식 미디어 자동실행 허용됨 ($hexString, 권장: 이동식 미디어 비트(0x04) 설정)"
             $status = "취약"
         }
     } else {

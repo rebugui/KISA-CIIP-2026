@@ -74,8 +74,8 @@ diagnose() {
         local perms=$(perl -e 'if (-f $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "/etc/hosts.lpd" 2>/dev/null)
         local owner=$(perl -e 'if (-f $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; $gid = (stat($ARGV[0]))[5]; $user = getpwuid($uid); $group = getgrgid($gid); print "$user:$group\n"; }' "/etc/hosts.lpd" 2>/dev/null)
 
-        # 보안 설정 확인: root:root 600 또는 400
-        if [ "$owner" = "root:root" ]; then
+        # 보안 설정 확인: 소유자 root (그룹은 기준에 없음, Solaris 기본 root:sys도 양호) 및 권한 600 이하
+        if [ "${owner%%:*}" = "root" ]; then
             if [ "$perms" = "0600" ] || [ "$perms" = "0400" ]; then
                 ((hosts_lpd_secure++)) || true
                 hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (보안 양호)"
@@ -83,7 +83,7 @@ diagnose() {
                 hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (권한 취약 - 600 또는 400 권장)"
             fi
         else
-            hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner} (root:root 아님 - 취약)"
+            hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner} (소유자 root 아님 - 취약)"
         fi
     fi
 
@@ -121,7 +121,7 @@ diagnose() {
         else
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="${hosts_lpd_details} (권한 600/400 및 root:root 소유자 필요)"
+            inspection_summary="${hosts_lpd_details} (소유자 root 및 권한 600 이하 필요)"
             command_result="${hosts_lpd_details}"
             command_executed="stat -c '%a:%U:%G' /etc/hosts.lpd 2>/dev/null"
         fi

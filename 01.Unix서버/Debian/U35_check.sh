@@ -149,10 +149,18 @@ diagnose() {
             evidence="${evidence}[/etc/exports]${newline}${nfs_shares:-공유 설정 없음}${newline}"
             local nfs_anon=""
             nfs_anon=$(printf '%s\n' "$nfs_shares" | grep -E 'insecure|anon(uid|gid)?=0([^0-9]|$)' || true)
+            # 가이드라인(LINUX [NFS]): anon 옵션(anonuid/anongid)이 설정된 경우 값과
+            # 무관하게 익명 접근이 활성화된 상태 → 취약. host 제한·비-0 매핑(예: all_squash
+            # 와 anonuid=1500)도 모두 탐지해야 함 (false-good 방지)
+            local nfs_anonmap=""
+            nfs_anonmap=$(printf '%s\n' "$nfs_shares" | grep -E 'anon(uid|gid)[[:space:]]*=' || true)
             local nfs_world=""
             nfs_world=$(printf '%s\n' "$nfs_shares" | grep -F '*' | grep -E '[(,[:space:]]rw' || true)
             if [ -n "$nfs_anon" ]; then
                 vuln_issues="${vuln_issues:+${vuln_issues}; }NFS 익명 공유 설정(insecure/anon=0): ${nfs_anon//$'\n'/ | }"
+            fi
+            if [ -n "$nfs_anonmap" ]; then
+                vuln_issues="${vuln_issues:+${vuln_issues}; }NFS 익명 매핑(anonuid/anongid) 설정: ${nfs_anonmap//$'\n'/ | }"
             fi
             if [ -n "$nfs_world" ]; then
                 vuln_issues="${vuln_issues:+${vuln_issues}; }NFS 전체 공개(rw) 공유: ${nfs_world//$'\n'/ | }"

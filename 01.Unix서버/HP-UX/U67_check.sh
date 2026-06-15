@@ -175,10 +175,11 @@ diagnose() {
                             details="${details}, ${log} owner invalid ($l_owner)"
                         fi
 
-                        # Check if group/others writable (쓰기 비트 포함 자릿수: 2,3,6,7 — 마지막 두 자리만 검사, 4자리 perl 출력 호환)
-                        if [[ "$l_perm" =~ [2367].$ ]] || [[ "$l_perm" =~ [2367]$ ]]; then
+                        # 권한 644 초과 여부(644 외 비트: group/other write, 추가 exec, SUID/SGID)를 비트 마스크(~644 = 7133)로 판정
+                        # (RedHat/Solaris 형제와 동일 기준 — 0755/0744/4755/2644 등 비쓰기 초과 모드도 취약으로 판정)
+                        if [[ "$l_perm" =~ ^[0-7]{3,4}$ ]] && [ $(( (8#${l_perm}) & (8#7133) )) -ne 0 ]; then
                              crit_issue=true
-                             details="${details}, ${log} writable by group/others ($l_perm)"
+                             details="${details}, ${log} 권한 644 초과 ($l_perm)"
                         fi
                     fi
                 done || true

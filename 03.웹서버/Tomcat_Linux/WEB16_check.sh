@@ -88,10 +88,12 @@ diagnose() {
 
     local connector_config=""
     local valve_hidden=false
+    local config_found=false
 
     for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
+                config_found=true
                 # Connector server 속성 확인
                 local server_attr=$(grep -E "Connector.*server=" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 if [ -n "${server_attr}" ]; then
@@ -121,7 +123,11 @@ diagnose() {
     command_executed="grep -iE 'Connector.*server=|ErrorReportValve|showServerInfo' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -4"
     command_result="${connector_config:-No server attribute / ErrorReportValve found (default: Apache-Coyote/1.1)}"
 
-    if [ "${server_hidden}" = true ] || [ "${valve_hidden}" = true ]; then
+    if [ "${config_found}" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="server.xml를 찾을 수 없습니다 - 헤더 노출 설정(Connector server=\"\" / ErrorReportValve showServerInfo=\"false\")을 수동으로 확인하세요."
+    elif [ "${server_hidden}" = true ] || [ "${valve_hidden}" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="Connector server=\"\" 마스킹 또는 ErrorReportValve showServerInfo=\"false\" 설정으로 서버 정보 노출이 제한되어 있습니다. (보안 권고사항 준수)"

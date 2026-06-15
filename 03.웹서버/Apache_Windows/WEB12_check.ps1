@@ -54,8 +54,10 @@ try {
         $activeLines = @($config.Text -split "`r?`n" | Where-Object { $_.Trim() -notmatch '^#' })
         $activeText = $activeLines -join "`n"
 
-        $followEnabled = @([regex]::Matches($activeText, '(?im)^\s*Options\b(?=.*(?:^|\s)\+?FollowSymLinks(?:\s|$)).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
-        $followDisabled = @([regex]::Matches($activeText, '(?im)^\s*Options\b(?=.*(?:^|\s)-FollowSymLinks(?:\s|$)).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+        # Apache 'Options All' / 'Options +All' implicitly enables FollowSymLinks (All = every option except MultiViews),
+        # so a sign-less/+All directive is a link-allowed (vulnerable) state. 'Options -All' disables it.
+        $followEnabled = @([regex]::Matches($activeText, '(?im)^\s*Options\b(?=.*(?:^|\s)(?:\+?FollowSymLinks|\+?All)(?:\s|$)).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+        $followDisabled = @([regex]::Matches($activeText, '(?im)^\s*Options\b(?=.*(?:^|\s)(?:-FollowSymLinks|-All)(?:\s|$)).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
         $ownerMatch = @([regex]::Matches($activeText, '(?im)^\s*Options\b(?=.*(?:^|\s)\+?SymLinksIfOwnerMatch(?:\s|$)).*$') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
         $aliasDirectives = @([regex]::Matches($activeText, '(?im)^\s*(?:Alias|AliasMatch)\b.*') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
 

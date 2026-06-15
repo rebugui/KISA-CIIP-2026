@@ -70,8 +70,13 @@ diagnose() {
     fi
 
     # 2) SNMP 서비스 실행 여부 확인 (Solaris SMF)
+    # Solaris 10+ net-snmp 데몬은 SMA FMRI(svc:/application/management/sma:default)로
+    # 게시되며 'sma' 문자열만 포함하고 'snmp'는 포함하지 않는다. U-58과 동일하게
+    # 'snmp|sma' 모두 매칭하고, SMF에서 못 잡을 경우 프로세스(snmpd/sma) 백업 탐지.
     if [ "$snmpd_installed" = true ]; then
-        if svcs -a | grep -i "snmp" | grep -q "online" 2>/dev/null; then
+        if svcs -a 2>/dev/null | grep -Ei 'snmp|sma' | grep -q "online"; then
+            snmp_running=true
+        elif ps -ef 2>/dev/null | grep -E '[s]nmpd|/sma( |$)' | grep -v grep | grep -q .; then
             snmp_running=true
         fi
     fi

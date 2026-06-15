@@ -35,30 +35,62 @@ if (-not (Test-RunallMode)) {
     Write-Host "카테고리: $CATEGORY"
 }
 
-# 1. Check AllowAnonymousLookup policy
+# 1. Check '익명 SID/이름 변환 허용' policy
+# 해당 정책은 레지스트리에 기록되지 않고 LSA 보안 정책 DB의 [System Access] 토큰
+# LSAAnonymousNameLookup 에만 저장되므로 secedit /export 로 확인한다.
 try {
-    $path = "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa"
-    $value = (Get-ItemProperty -Path $path -ErrorAction SilentlyContinue).AllowAnonymousLookup
+    $tempFile = "$env:TEMP\secedit.tmp"
+    secedit /export /cfg $tempFile 2>&1 | Out-Null
+    $content = Get-Content $tempFile -ErrorAction SilentlyContinue
+    Remove-Item $tempFile -ErrorAction SilentlyContinue
 
-    if ($null -eq $value -or $value -eq 0) {
-        $finalResult = "GOOD"
-        $summary = "'익명 SID/이름 변환 허용' 정책이 '사용 안 함'으로 설정됨"
-        $status = "양호"
-        $commandOutput = "AllowAnonymousLookup = 0 (Disabled)"
+    $value = 0
+    $found = $false
+
+    # secedit 내보내기 결과를 얻지 못한 경우(서비스 미동작/권한 부족 등) 정책 판단 불가 -> 수동진단
+    # null/빈 내용을 GOOD으로 처리하면 정책 미설정을 '사용 안 함'으로 잘못 단정하는 false-good 발생
+    if ($null -eq $content -or @($content).Count -eq 0) {
+        $finalResult = "MANUAL"
+        $summary = "secedit 정책 내보내기 결과를 얻지 못해 'LSAAnonymousNameLookup' 정책을 확인할 수 없음. 로컬 보안 정책에서 '네트워크 액세스: 익명 SID/이름 변환 허용' 설정을 수동으로 확인 필요"
+        $status = "수동진단"
+        $commandOutput = "secedit export returned no content (policy undeterminable)"
+        $commandExecuted = "secedit /export (LSAAnonymousNameLookup 정책 확인)"
     } else {
-        $finalResult = "VULNERABLE"
-        $summary = "'익명 SID/이름 변환 허용' 정책이 '사용'으로 설정됨 (보안 위협)"
-        $status = "취약"
-        $commandOutput = "AllowAnonymousLookup = $value (Enabled)"
-    }
+        # Try to find LSAAnonymousNameLookup setting
+        foreach ($line in $content) {
+            if ($line -match 'LSAAnonymousNameLookup\s*=\s*(\d+)') {
+                $value = [int]$matches[1]
+                $found = $true
+                break
+            }
+        }
 
-    $commandExecuted = "Get-ItemProperty -Path '$path'"
+        if ($found -and $value -eq 0) {
+            $finalResult = "GOOD"
+            $summary = "'익명 SID/이름 변환 허용' 정책이 '사용 안 함'으로 설정됨"
+            $status = "양호"
+            $commandOutput = "LSAAnonymousNameLookup = 0 (Disabled)"
+        } elseif ($found -and $value -eq 1) {
+            $finalResult = "VULNERABLE"
+            $summary = "'익명 SID/이름 변환 허용' 정책이 '사용'으로 설정됨 (보안 위협)"
+            $status = "취약"
+            $commandOutput = "LSAAnonymousNameLookup = 1 (Enabled)"
+        } else {
+            # 정책 항목 자체가 export 결과에 없는 경우: 기본값은 '사용 안 함'이나 자동 단정 불가 -> 수동진단
+            $finalResult = "MANUAL"
+            $summary = "'LSAAnonymousNameLookup' 정책 항목이 secedit 결과에 존재하지 않음. 기본값은 '사용 안 함'이나 정책 적용 여부를 수동으로 확인 필요"
+            $status = "수동진단"
+            $commandOutput = "LSAAnonymousNameLookup not found in secedit export (verify manually)"
+        }
+
+        $commandExecuted = "secedit /export (LSAAnonymousNameLookup 정책 확인)"
+    }
 
 } catch {
     $finalResult = "MANUAL"
     $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
-    $commandExecuted = "Get-ItemProperty -Path '$path'"
+    $commandExecuted = "secedit /export"
     $commandOutput = "진단 실패: $_"
 }
 

@@ -96,11 +96,38 @@ diagnose() {
             if [ -f "${xml_file}" ]; then
                 found_file="${xml_file}"
 
-                # CGI servlet 정의 확인 (주석 제외)
-                local cgi_servlet=$(grep "<servlet-name>cgi</servlet-name>" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                # CGI servlet 정의 확인 (활성 설정만; 주석 제외)
+                # 기본 Tomcat conf/web.xml 은 CGI 서블릿/매핑을 여러 줄 <!-- ... --> 블록 안에
+                # 비활성(주석) 상태로 배포한다. 줄 시작(^\s*<!--) 필터만으로는 블록 내부의
+                # <servlet-name>cgi</servlet-name> / <url-pattern>/cgi-bin/*</url-pattern> 줄을
+                # 제거하지 못해 비활성 CGI 를 VULNERABLE 로 오판한다. 따라서 awk 로
+                # <!-- ... --> 주석 구간(여러 줄/동일 줄)을 먼저 제거한 뒤 매칭하여 활성(미주석)
+                # CGI 만 탐지한다. 후행 인라인 주석이 붙은 활성 라인은 주석 부분만 제거되고
+                # 활성 토큰은 남으므로 계속 탐지된다. 주석 제거 후에도 활성 매핑 블록의
+                # servlet-name/url-pattern 인접성은 유지되므로 grep -A1 파이프라인이 동작한다.
+                local strip_xml_comments='
+                    {
+                        line = $0; out = ""
+                        while (length(line) > 0) {
+                            if (incomment) {
+                                p = index(line, "-->")
+                                if (p == 0) { line = ""; break }
+                                line = substr(line, p + 3); incomment = 0
+                            } else {
+                                p = index(line, "<!--")
+                                if (p == 0) { out = out line; line = ""; break }
+                                out = out substr(line, 1, p - 1)
+                                line = substr(line, p + 4); incomment = 1
+                            }
+                        }
+                        print out
+                    }'
+                local active_xml=$(awk "${strip_xml_comments}" "${xml_file}" 2>/dev/null || true)
 
-                # CGI servlet 매핑 확인 (주석 제외)
-                local cgi_mapping=$(grep -A1 "<servlet-name>cgi</servlet-name>" "${xml_file}" 2>/dev/null | grep "<url-pattern>" | grep -v "^\s*<!--" || true)
+                local cgi_servlet=$(printf '%s\n' "${active_xml}" | grep "<servlet-name>cgi</servlet-name>" || true)
+
+                # CGI servlet 매핑 확인 (활성 설정만; 주석 제거된 스트림 기준)
+                local cgi_mapping=$(printf '%s\n' "${active_xml}" | grep -A1 "<servlet-name>cgi</servlet-name>" | grep "<url-pattern>" || true)
 
                 if [ -n "${cgi_servlet}" ] && [ -n "${cgi_mapping}" ]; then
                     cgi_config="CGI Servlet: ${cgi_servlet}\\nMapping: ${cgi_mapping}"
@@ -112,7 +139,7 @@ diagnose() {
     done
 
     if [ -n "${found_file}" ]; then
-        command_executed="grep -A1 '<servlet-name>cgi</servlet-name>' ${found_file} 2>/dev/null | grep -v '^\\s*<!--' | head -5"
+        command_executed="awk '<!-- ... --> 주석 구간 제거' ${found_file} 2>/dev/null | grep -A1 '<servlet-name>cgi</servlet-name>' | grep '<url-pattern>' | head -5"
         command_result="${cgi_config:-CGI not configured or commented out}"
     else
         command_executed="ls /etc/tomcat*/web.xml /var/lib/tomcat*/conf/web.xml 2>/dev/null"
