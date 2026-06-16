@@ -96,10 +96,15 @@ try {
             $status = "수동진단"
             $summary = "No Nginx upload-specific directive was found. Confirm application upload paths and filesystem ACLs manually."
         }
-        elseif ($insideRoot.Count -gt 0 -or @($broadAcl | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Unknown' }).Count -gt 0) {
+        elseif ($insideRoot.Count -gt 0 -or @($broadAcl | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Read' }).Count -gt 0) {
             $finalResult = "VULNERABLE"
             $status = "취약"
-            $summary = "Upload-related paths appear to be inside a web root or have broad local write/unknown ACL evidence."
+            $summary = "Upload-related paths appear to be inside a web root or grant broad local-user read/write ACL access (general users can access the upload path)."
+        }
+        elseif (@($broadAcl | Where-Object { $_.Access -eq 'Unknown' }).Count -gt 0) {
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Upload-path ACLs could not be read; inspect upload directory permissions manually (general users must not have access)."
         }
         elseif ($uploadPaths.Count -gt 0 -and $verifiedPaths.Count -gt 0) {
             $finalResult = "GOOD"

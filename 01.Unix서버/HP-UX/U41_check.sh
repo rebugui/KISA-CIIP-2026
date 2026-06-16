@@ -96,15 +96,18 @@ diagnose() {
     fi
 
     # 5) autofs 설정 파일 확인 (HP-UX 마스터 맵 /etc/auto_master 포함)
+    #    [증적 전용] /etc/auto.master, /etc/auto_master 등은 HP-UX NFS 번들에서
+    #    기본 제공되는 설정 파일이므로 존재 자체는 활성화 근거가 아님
+    #    (가이드 impact: "/etc/auto.*, /etc/auto_* 파일을 확인하여 필요 여부 확인").
+    #    판정은 ps 프로세스 확인(1)과 AUTOFS 부팅 플래그(3)로만 수행한다.
     if [ -f /etc/auto.master ] || [ -f /etc/auto_master ] || ls /etc/auto.master.d/*.conf >/dev/null 2>&1; then
-        automount_info="${automount_info}autofs 설정 파일 존재\\n"
+        automount_info="${automount_info}autofs 설정 파일 존재 (증적, 존재만으로는 활성화 아님)\\n"
         if [ -f /etc/auto.master ]; then
             automount_info="${automount_info}$(head -5 /etc/auto.master 2>/dev/null)\\n"
         fi
         if [ -f /etc/auto_master ]; then
             automount_info="${automount_info}$(head -5 /etc/auto_master 2>/dev/null)\\n"
         fi
-        automount_running=true
     fi
 
     # 최종 판정

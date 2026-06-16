@@ -224,6 +224,12 @@ invoke_webtob_linux_check() {
             elif [ -n "${lines}" ]; then
                 # Directive present (active) but value not parseable as a number.
                 webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB LimitRequestBody directive was found but its value could not be confirmed as a non-zero limit; verify the configured size." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep LimitRequestBody http.m"
+            elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
+                # Installed (per webtob_is_installed) but no http.m config was
+                # actually inspected (home not derivable or config files absent):
+                # a configured size limit cannot be disproved from zero evidence
+                # -> MANUAL, not a hard VULNERABLE.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its configuration (http.m) could not be inspected; manually verify upload/download size limit." "$(webtob_evidence)" "grep LimitRequestBody http.m"
             else
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB upload/download size limit evidence was not found." "$(webtob_evidence)" "grep LimitRequestBody http.m"
             fi

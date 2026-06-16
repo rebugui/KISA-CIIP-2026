@@ -97,21 +97,28 @@ diagnose() {
         # so the two flag columns are the last two fields: $(NF-1)=is_policy_checked,
         # $NF=is_expiration_checked. Match only rows whose flag field is exactly 0
         # (digit-only guard avoids matching the trailing "(N rows affected)" line).
+        # is_policy_checked/is_expiration_checked=0 alone is NOT statically provable
+        # VULNERABLE: the oracle (criteria_good/criteria_bad) qualifies the verdict by
+        # "기관 정책에 맞게" (institution policy), and SQL Server ships the always-present
+        # built-in sa login as the row "sa 1 0" (CHECK_EXPIRATION OFF by default). Mirror
+        # the Windows helper (mssql_windows_lib.ps1 D-03): route such logins to 수동진단,
+        # never hard-judge VULNERABLE on the policy-dependent expiration-off default.
         local no_policy=$(echo "$command_result" | grep -vi "rows affected" | grep -v "^\s*$" | awk 'NF>=3 && $(NF-1) ~ /^[0-9]+$/ && $(NF-1)==0 {print}' || echo "")
         if [ -n "$no_policy" ]; then
             ((vulnerabilities_found++)) || true
-            inspection_summary+="취약: 비밀번호 정책 비활성화된 계정 존재; "
+            inspection_summary+="비밀번호 정책 비활성화(is_policy_checked=0) 계정 존재; "
         fi
         local no_expiration=$(echo "$command_result" | grep -vi "rows affected" | grep -v "^\s*$" | awk 'NF>=3 && $NF ~ /^[0-9]+$/ && $NF==0 {print}' || echo "")
         if [ -n "$no_expiration" ]; then
             ((vulnerabilities_found++)) || true
-            inspection_summary+="취약: 비밀번호 만료 정책 비활성화된 계정 존재; "
+            inspection_summary+="비밀번호 만료 정책 비활성화(is_expiration_checked=0) 계정 존재(sa는 기본 OFF); "
         fi
     fi
 
     if [ $vulnerabilities_found -gt 0 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="${inspection_summary}비밀번호 정책/만료 설정 적용 여부는 기관 정책에 따라 달라지며(예: sa 계정은 기본적으로 CHECK_EXPIRATION OFF) 정적으로 취약 여부를 단정할 수 없습니다. 나열된 계정이 기관의 비밀번호 사용 기간·복잡도 정책을 충족하는지 수동으로 확인하세요."
     else
         diagnosis_result="GOOD"
         status="양호"

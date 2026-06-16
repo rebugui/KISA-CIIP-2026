@@ -46,9 +46,9 @@ try {
         $status = "양호"
         $commandOutput = "Administrators Group Members ($count): $names"
     } else {
-        $finalResult = "VULNERABLE"
-        $summary = "Administrators 그룹에 $count명의 구성원 존재: $names (불필요한 관리자 권한 제거 필요)"
-        $status = "취약"
+        $finalResult = "MANUAL"
+        $summary = "Administrators 그룹에 $count명의 구성원 존재: $names. 각 구성원이 운영상 반드시 필요한 관리 권한자인지(불필요한 관리자 계정 존재 여부) 수동 확인 필요"
+        $status = "수동진단"
         $commandOutput = "Administrators Group Members ($count): $names"
     }
 

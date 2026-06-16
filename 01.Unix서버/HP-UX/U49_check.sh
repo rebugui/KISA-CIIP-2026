@@ -84,13 +84,17 @@ diagnose() {
         dns_info="${dns_info}DNS 서비스 실행 중\\n"
     fi
 
-    # 4) 포트 확인 (DNS: 53)
-    if command -v ss &>/dev/null; then
-        local dns_port=$(ss -tuln | grep ":53 " || echo "")
-        if [ -n "$dns_port" ]; then
-            dns_installed=true
-            dns_info="${dns_info}DNS 포트 53 활성화\\n"
-        fi
+    # 4) 포트 확인 (DNS: 53) - HP-UX는 BSD netstat 사용 (ss 미존재)
+    local dns_port=$(netstat -an 2>/dev/null | grep '\.53 ' || echo "")
+    if [ -n "$dns_port" ]; then
+        dns_installed=true
+        dns_info="${dns_info}DNS 포트 53 활성화\\n"
+    fi
+
+    # 5) named 프로세스 확인 (비표준 경로/수동 기동 대비 fallback)
+    if ps -ef 2>/dev/null | grep -w named | grep -v grep &>/dev/null; then
+        dns_installed=true
+        dns_info="${dns_info}named 프로세스 실행 중\\n"
     fi
 
     # 최종 판정
@@ -98,9 +102,9 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="DNS 서비스 미설치됨"
-        local dns_check=$(command -v named 2>/dev/null; /sbin/init.d/named status 2>/dev/null | head -2; ss -tuln 2>/dev/null | grep ':53' || echo "DNS service not found")
+        local dns_check=$(command -v named 2>/dev/null; /sbin/init.d/named status 2>/dev/null | head -2; netstat -an 2>/dev/null | grep '\.53 '; ps -ef 2>/dev/null | grep -w named | grep -v grep || echo "DNS service not found")
         command_result="${dns_check}"
-        command_executed="command -v named; /sbin/init.d/named status 2>/dev/null | grep -q "running" bind9; ss -tuln | grep ':53'"
+        command_executed="command -v named; /sbin/init.d/named status; netstat -an | grep '.53 '; ps -ef | grep -w named"
     else
         diagnosis_result="MANUAL"
         status="수동진단"

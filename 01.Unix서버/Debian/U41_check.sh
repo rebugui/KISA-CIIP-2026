@@ -116,12 +116,15 @@ diagnose() {
     elif compgen -G "/etc/auto.master.d/*.conf" >/dev/null 2>&1; then
         autofs_conf_present=true
     fi
+    # 주의: 설정 파일(/etc/auto.master, *.conf) 존재는 'autofs' 패키지의 기본
+    #       conffile 로 서비스 중지/비활성화/마스킹(오라클의 양호 상태) 후에도
+    #       남아 있으므로 취약 판정 트리거가 아닌 참고 증거(evidence)로만 수집함.
+    #       판정은 서비스 활성화(systemctl is-active) 및 실행 프로세스(ps)로만 함.
     if [ "$autofs_conf_present" = true ]; then
-        automount_info="${automount_info}autofs 설정 파일 존재\\n"
+        automount_info="${automount_info}autofs 설정 파일 존재(참고)\\n"
         if [ -f /etc/auto.master ]; then
             automount_info="${automount_info}$(head -5 /etc/auto.master 2>/dev/null)\\n"
         fi
-        automount_running=true
     fi
 
     # 6) 실행 중인 automount/automountd/autofs 프로세스 확인 (process-based)

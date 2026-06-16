@@ -97,7 +97,7 @@ diagnose() {
     local conf_files_read=0
     for conf_pattern in "${apache_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
-            if [ -f "${conf_file}" ]; then
+            if [ -f "${conf_file}" ] && [ -r "${conf_file}" ]; then
                 conf_files_read=$((conf_files_read + 1))
                 # ProxyPass, ProxyPassReverse, ProxyRequests 지시어 확인 (주석 제외)
                 local found_proxy=$(grep -E "^\s*(ProxyPass|ProxyPassReverse|ProxyRequests)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)

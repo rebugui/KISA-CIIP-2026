@@ -45,12 +45,22 @@ GUIDELINE_REMEDIATION="major, minor number를 가지지 않는 device 파일 제
 # 진단 함수
 # ============================================================================
 
-# /dev 1단계 항목 열거 (이식성: HP-UX native find는 -maxdepth 미지원, /dev 자체는 제외)
+# /dev 항목 재귀 열거 (이식성: HP-UX native find는 -maxdepth 미지원, /dev 자체는 제외)
+# 하위 디렉터리(숨김 디렉터리 등)도 점검 대상에 포함 (위장 파일 은닉 방지)
+# 심볼릭 링크 디렉터리는 따라가지 않으며, 깊이 제한으로 폭주 방지
 list_dev_entries() {
+    local dir="${1:-/dev}"
+    local depth="${2:-0}"
     local entry
-    for entry in /dev/* /dev/.[!.]* /dev/..?*; do
+    if [ "$depth" -ge 4 ]; then
+        return 0
+    fi
+    for entry in "$dir"/* "$dir"/.[!.]* "$dir"/..?*; do
         if [ -e "$entry" ] || [ -L "$entry" ]; then
             printf '%s\n' "$entry"
+            if [ -d "$entry" ] && [ ! -L "$entry" ]; then
+                list_dev_entries "$entry" $((depth + 1))
+            fi
         fi
     done
     return 0

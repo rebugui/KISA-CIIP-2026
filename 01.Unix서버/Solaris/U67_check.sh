@@ -138,8 +138,10 @@ diagnose() {
            # 권한이 644를 초과하는 파일(644 외 비트 보유: 추가 exec/SUID/SGID/group·other write 등) 탐지
            # → 쓰기 비트만이 아닌 십진 644 초과를 비트 마스크(~644 = 7133)로 판정 (RedHat/AIX 형제 스크립트와 동일, 예: 755/4755/2644/666 모두 취약)
            local insecure_files=""
+           local evidence_found=false
            while IFS= read -r f_path; do
                [ -n "${f_path:-}" ] || continue
+               evidence_found=true
                local f_perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$f_path" 2>/dev/null || echo "0000")
                if [[ "$f_perms" =~ ^[0-7]{3,4}$ ]] && [ $(( (8#${f_perms}) & (8#7133) )) -ne 0 ]; then
                    insecure_files="${insecure_files}${f_path}(perm:${f_perms}) "
@@ -156,6 +158,7 @@ diagnose() {
 
                 for log in "${critical_logs[@]}"; do
                     if [ -f "$log" ]; then
+                        evidence_found=true
                         local l_perm=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$log" 2>/dev/null || echo "")
                         local l_owner=$(perl -e 'print getpwuid((stat(shift))[4])' "$log" 2>/dev/null || echo "")
 
@@ -185,6 +188,11 @@ diagnose() {
 
                 if [ "$crit_issue" = true ]; then
                     is_secure=false
+                elif [ "$evidence_found" = false ]; then
+                    # 주요 로그 파일/로그 파일이 하나도 존재하지 않음 → 증거 미확보로 GOOD 단정 불가
+                    is_secure=false
+                    diagnosis_result="MANUAL"
+                    details="${details}, 주요 로그 파일을 찾을 수 없어 확인 불가 (수동 점검 필요)"
                 else
                     is_secure=true
                 fi
@@ -201,7 +209,12 @@ diagnose() {
     command_executed="perl -e 'printf \"%04o %s %s\", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' /var/log; find /var/log /var/adm -type f ( -perm -g+w -o -perm -o+w )"
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$diagnosis_result" = "MANUAL" ]; then
+        # 증거 미확보(주요 로그 파일 부재 등) → 수동진단 유지, GOOD 단정 금지
+        status="수동진단"
+        inspection_summary="/var/log 로그 설정을 확정하지 못함 (${details})"
+        command_result="${raw_output}"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="/var/log 디렉터리 및 주요 로그 파일 설정이 양호합니다 (${details})"

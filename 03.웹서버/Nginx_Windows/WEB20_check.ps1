@@ -57,8 +57,10 @@ try {
             $finalResult = "VULNERABLE"; $status = "취약"; $summary = "SSL/TLS configuration is missing or incomplete (listener, certificate, or key directive not found)."
         }
         elseif ($weakProtocols.Count -gt 0) {
-            # ssl_protocols에 약한 프로토콜(SSLv2/SSLv3/TLSv1/TLSv1.1) 포함 → 취약
-            $finalResult = "VULNERABLE"; $status = "취약"; $summary = "SSL/TLS is enabled but ssl_protocols includes weak protocols (SSLv2/SSLv3/TLSv1/TLSv1.1). Restrict to TLSv1.2/TLSv1.3 only."
+            # WEB-20은 SSL/TLS '활성화' 여부만 점검하는 항목(criteria_good: 활성화, criteria_bad: 비활성화)이다.
+            # SSL/TLS가 명확히 활성화된 상태에서 ssl_protocols에 약한 버전이 포함된 경우는 프로토콜 강도(별도 통제)의
+            # 문제이므로, 활성화 통제 기준상으로는 양호로 판정한다. 약한 프로토콜은 참고 정보로만 기록한다.
+            $finalResult = "GOOD"; $status = "양호"; $summary = "SSL/TLS is enabled (listener, certificate, key present). Note: ssl_protocols lists weak protocols (SSLv2/SSLv3/TLSv1/TLSv1.1); restricting to TLSv1.2/TLSv1.3 is recommended but is outside this activation-only control."
         }
         elseif ($protocols.Count -eq 0) {
             # SSL은 활성화되었으나 ssl_protocols 미지정. Nginx 기본값(1.18 이전)은 TLSv1/TLSv1.1을 포함하므로

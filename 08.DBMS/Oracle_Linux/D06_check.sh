@@ -101,16 +101,31 @@ diagnose() {
     fi
 
     # Oracle 연결 정보 초기화 (fallback if library not loaded)
-    ORACLE_USER="${ORACLE_USER:-system}"
-    ORACLE_PASSWORD="${ORACLE_PASSWORD:-manager}"
-    ORACLE_HOST="${ORACLE_HOST:-localhost}"
-    ORACLE_PORT="${ORACLE_PORT:-1521}"
-    ORACLE_SID="${ORACLE_SID:-ORCL}"
-    ORACLE_SYSDBA="${ORACLE_SYSDBA:-sys as sysdba}"
+    DBMS_USER="${DBMS_USER:-${ORACLE_USER:-system}}"
+    DBMS_PASSWORD="${DBMS_PASSWORD:-${ORACLE_PASSWORD:-manager}}"
+    DBMS_HOST="${DBMS_HOST:-${ORACLE_HOST:-localhost}}"
+    DBMS_PORT="${DBMS_PORT:-${ORACLE_PORT:-1521}}"
+    DBMS_SID="${DBMS_SID:-${ORACLE_SID:-ORCL}}"
+
+    # 연결 테스트 (계정 열거 불가 시 MANUAL 으로 라우팅)
+    if ! echo "SELECT 1 FROM DUAL;" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" &>/dev/null; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Oracle 연결에 실패하여 계정을 열거할 수 없습니다. 연결 정보 확인 후 수동 진단이 필요합니다."
+        command_result="Connection failed"
+        command_executed="sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
+        if declare -f save_dual_result >/dev/null 2>&1; then
+            save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        fi
+        if declare -f verify_result_saved >/dev/null 2>&1; then
+            verify_result_saved "${ITEM_ID}"
+        fi
+        return 0
+    fi
 
     # 1. 계정 확인 (dba_users)
     local user_query="SELECT username FROM dba_users ORDER BY username;"
-    command_executed="sqlplus -s ${ORACLE_SYSDBA}/${ORACLE_PASSWORD}@${ORACLE_HOST}:${ORACLE_PORT}/${ORACLE_SID} AS SYSDBA << EOF
+    command_executed="sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID} << EOF
 SET PAGESIZE 0
 SET FEEDBACK OFF
 SET HEADING ON
@@ -118,7 +133,7 @@ ${user_query}
 EXIT;
 EOF"
 
-    command_result=$(sqlplus -s "${ORACLE_SYSDBA}/${ORACLE_PASSWORD}@${ORACLE_HOST}:${ORACLE_PORT}/${ORACLE_SID}" AS SYSDBA << EOF 2>/dev/null
+    command_result=$(sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" << EOF 2>&1
 SET PAGESIZE 0
 SET FEEDBACK OFF
 SET HEADING ON
@@ -126,6 +141,21 @@ ${user_query}
 EXIT;
 EOF
 )
+
+    # 쿼리 출력에 Oracle/SQL*Plus 오류가 있으면 MANUAL 으로 라우팅 (오류 텍스트를 계정으로 오인 방지)
+    if echo "$command_result" | grep -qiE 'ORA-[0-9]+|SP2-[0-9]+|ERROR|TNS-[0-9]+'; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Oracle 계정 조회 중 오류가 발생하여 계정을 열거할 수 없습니다. 수동 진단이 필요합니다."
+        command_executed="sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
+        if declare -f save_dual_result >/dev/null 2>&1; then
+            save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        fi
+        if declare -f verify_result_saved >/dev/null 2>&1; then
+            verify_result_saved "${ITEM_ID}"
+        fi
+        return 0
+    fi
 
     # 일반적인 공용 계정 패턴 (예: test, user, admin, guest 등)
     local common_shared_accounts=("TEST" "USER" "ADMIN" "GUEST" "PUBLIC" "SHARED" "COMMON" "APP" "WEB")

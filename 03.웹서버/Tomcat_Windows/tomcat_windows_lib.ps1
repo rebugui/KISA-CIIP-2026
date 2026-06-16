@@ -486,9 +486,13 @@ function Invoke-TomcatWindowsCheck {
         }
         'WEB-26' {
             $acl = foreach ($path in $state.Logs) { Get-TomcatBroadAclEvidence -Path $path -Role 'LogPath' }
-            $bad = @($acl | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Unknown' })
+            $bad = @($acl | Where-Object { $_.Access -eq 'Write' })
             if ($state.Logs.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Tomcat log paths could not be resolved.' $evidencePrefix 'Inspect Tomcat logs directory ACLs' }
-            if ($bad.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat log paths have broad local write or unknown ACL evidence.' (($bad | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Inspect Tomcat logs directory ACLs' }
+            if ($bad.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat log paths have broad local write ACL evidence.' (($bad | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Inspect Tomcat logs directory ACLs' }
+            # Access='Unknown' means Get-Acl failed: the actual permission state is evidence-unobtainable,
+            # so general-user log access cannot be confirmed present or absent either way -> MANUAL, not VULNERABLE (mirrors WEB-03/WEB-14).
+            $unreadable = @($acl | Where-Object { $_.Access -eq 'Unknown' })
+            if ($unreadable.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Tomcat log path ACL could not be read; permission state is unobtainable. Verify manually that general users have no access to the log directory and files.' (($unreadable | ForEach-Object { "$($_.Path) => $($_.Rights)" }) -join "`n") 'Inspect Tomcat logs directory ACLs' }
             if ($acl) { return New-TomcatResult 'MANUAL' 'Tomcat log paths have broad local read ACL evidence; confirm whether this is required.' (($acl | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Inspect Tomcat logs directory ACLs' }
             return New-TomcatResult 'GOOD' 'No broad local user ACL entries were found on resolved Tomcat log paths.' "Logs: $($state.Logs -join ', ')" 'Inspect Tomcat logs directory ACLs'
         }

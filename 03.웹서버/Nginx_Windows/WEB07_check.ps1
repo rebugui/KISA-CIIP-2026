@@ -61,7 +61,7 @@ try {
                 continue
             }
             foreach ($pattern in $patterns) {
-                foreach ($item in @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue -Include $pattern | Select-Object -First 20)) {
+                foreach ($item in @(Get-ChildItem -Path (Join-Path $root '*') -Recurse -Force -ErrorAction SilentlyContinue -Include $pattern | Select-Object -First 20)) {
                     $findings.Add($item.FullName) | Out-Null
                 }
             }

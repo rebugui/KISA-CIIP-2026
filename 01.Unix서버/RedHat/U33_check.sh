@@ -40,11 +40,11 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="의심스러운 숨겨진 파일이 발견되지 않았습니다."
     local command_result=""
-    local command_executed="find /tmp /var/tmp -name '.*' ( -type f -o -type d ); find <home> -maxdepth 1 -name '.*'"
+    local command_executed="find /tmp /var/tmp /dev/shm -name '.*' ( -type f -o -type d -o -type l ); find <home> -maxdepth 1 -name '.*'"
 
     # 1. 임시 디렉터리 탐색: 숨김 파일 + 숨김 디렉터리 모두 점검
     local hidden_files
-    hidden_files=$(find /tmp /var/tmp -name ".*" \( -type f -o -type d \) 2>/dev/null | grep -vE "\.X11-unix|\.ICE-unix|\.XIM-unix|\.font-unix|\.Test-unix" | head -n 10 || true)
+    hidden_files=$(find /tmp /var/tmp /dev/shm -name ".*" \( -type f -o -type d -o -type l \) 2>/dev/null | grep -vE "\.X11-unix|\.ICE-unix|\.XIM-unix|\.font-unix|\.Test-unix" | head -n 10 || true)
 
     # 2. 사용자 홈 디렉터리 탐색: 통상적인 환경설정 dot 파일을 제외한 숨김 항목
     local home_dirs
@@ -54,7 +54,7 @@ diagnose() {
     for hd in $home_dirs; do
         [ -d "$hd" ] || continue
         local found
-        found=$(find "$hd" -maxdepth 1 -name ".*" \( -type f -o -type d \) 2>/dev/null \
+        found=$(find "$hd" -maxdepth 1 -name ".*" \( -type f -o -type d -o -type l \) 2>/dev/null \
             | grep -vE "/\.(bash_history|bash_logout|bash_profile|bashrc|profile|cshrc|tcshrc|kshrc|login|logout|viminfo|vimrc|emacs|emacs\.d|lesshst|ssh|gnupg|gnupg2|cache|config|local|mozilla|pki|java|ansible|kube|docker|m2|npm|gitconfig|gitignore|wget-hsts|Xauthority|ICEauthority|selected_editor|sudo_as_admin_successful|history|sh_history|mysql_history|psql_history|rnd)$" \
             | head -n 5 || true)
         [ -n "$found" ] && home_hidden="${home_hidden}${found}"$'\n'

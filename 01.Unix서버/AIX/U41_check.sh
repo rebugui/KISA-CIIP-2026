@@ -113,21 +113,19 @@ diagnose() {
         fi
     fi
 
-    # 4) automount 설정 파일 확인 (AIX 기본 경로 /etc/auto_master 포함)
+    # 4) automount 설정 파일 확인 (증적 전용 — 기본 제공/잔존 파일이므로 존재 자체는 활성화 근거가 아님)
     local auto_master_file=""
     for auto_master_file in /etc/auto_master /etc/auto.master; do
         if [ -f "$auto_master_file" ]; then
             automount_info="${automount_info}autofs 설정 파일 존재 (${auto_master_file})\\n"
             automount_info="${automount_info}$(head -5 "$auto_master_file" 2>/dev/null)\\n"
-            automount_running=true
         fi
     done
 
-    # AIX에서 auto.master.d/*.conf glob은 직접 처리
+    # AIX에서 auto.master.d/*.conf glob은 직접 처리 (증적 전용)
     if [ -d /etc/auto.master.d ]; then
         local auto_conf_files=$(ls /etc/auto.master.d/*.conf 2>/dev/null)
         if [ -n "$auto_conf_files" ]; then
-            automount_running=true
             automount_info="${automount_info}autofs 설정 파일 존재\\n"
         fi
     fi

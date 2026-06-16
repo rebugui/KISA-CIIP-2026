@@ -146,9 +146,23 @@ diagnose() {
     # 2. server_principals에서 sysadmin 권한 확인
     local sysadmin_check_query="SELECT name, type_desc FROM sys.server_principals WHERE IS_SRVROLEMEMBER('sysadmin', name) = 1 AND name NOT IN ('sa', '##MS_Agent', '##MS_PolicyEventProcessor', '##MS_PolicySqlExecution', '##MS_PolicyStoredProcUpdates', 'NT AUTHORITY\SYSTEM', 'NT SERVICE\MSSQLSERVER', 'NT SERVICE\SQLSERVERAGENT');"
     command_executed="${sysadmin_check_query}"
-    command_result=$(sqlcmd -S "${DB_HOST},${DB_PORT}" -U "${DB_USER}" -P "${DB_PASSWORD}" -Q "${sysadmin_check_query}" -h -1 -W 2>/dev/null | grep -v "^$" || echo "")
+    # 쿼리 성공 여부를 종료 코드와 오류 텍스트로 판별 (권한 부족/오류 시 빈 결과를 양호로 오판하지 않도록)
+    local sysadmin_check_raw=""
+    local sysadmin_check_rc=0
+    sysadmin_check_raw=$(sqlcmd -S "${DB_HOST},${DB_PORT}" -U "${DB_USER}" -P "${DB_PASSWORD}" -Q "${sysadmin_check_query}" -h -1 -W -b 2>&1) || sysadmin_check_rc=$?
+    command_result=$(echo "$sysadmin_check_raw" | grep -v "^$" || echo "")
 
     echo "[DEBUG] sysadmin check result:\n${command_result}"
+
+    # 쿼리 실패/권한 부족/오류로 증적 수집 불가 시 MANUAL (취약 상태를 양호로 오판 방지)
+    if [ $sysadmin_check_rc -ne 0 ] || echo "$sysadmin_check_raw" | grep -qiE "Msg [0-9]+|permission|denied|error|로그인|권한"; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="sysadmin 권한 계정 열거 쿼리 실행에 실패했거나 권한이 부족하여 증적을 수집할 수 없습니다. 관리자 권한 계정 부여 현황을 수동으로 확인이 필요합니다. - ${command_result}"
+        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
 
     # 3. excessive admin 확인 (sa 이외에 sysadmin 권한을 가진 계정)
     if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "^\s*$"; then

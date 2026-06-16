@@ -119,10 +119,14 @@ diagnose() {
         inspection_summary="빈 비밀번호를 가진 계정 ${user_count}개 발견: $(printf '%s\n' "${empty_pwd_users}" | head -5 | tr '\n' ', ')"
         command_result="${empty_pwd_users}"
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="빈 비밀번호를 가진 계정 없음"
-        command_result="조회 성공: 빈 비밀번호 계정 0건"
+        # 빈 비밀번호 계정은 없으나, 본 항목의 판정 기준(criteria_bad)은 인가되지 않은/퇴직자/
+        # 테스트 등 '불필요한' 계정의 존재 여부이다. 계정의 불필요 여부는 기관의 인가 정책에
+        # 의존하므로 빈 비밀번호 프록시만으로는 자동 GOOD으로 단정할 수 없다. 따라서 이 경로는
+        # MANUAL로 판정하여 불필요 계정 존재 여부를 수동으로 확인하도록 한다.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="빈 비밀번호 계정은 발견되지 않았습니다. 다만 인가되지 않은 계정, 퇴직자 계정, 테스트 계정 등 불필요한 계정의 존재 여부는 기관 인가 정책에 따라 결정되므로 자동 판정할 수 없습니다. SELECT usename FROM pg_catalog.pg_user; 결과를 검토하여 불필요한 계정이 없는지 수동으로 확인하세요."
+        command_result="조회 성공: 빈 비밀번호 계정 0건 (불필요 계정 존재 여부는 수동 확인 필요)"
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
