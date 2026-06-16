@@ -240,10 +240,12 @@ invoke_tibero_linux_check() {
             tibero_sql_check "SELECT resource_name||'='||limit FROM dba_profiles WHERE resource_name IN ('FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME') ORDER BY profile,resource_name;" "failed login lockout policy" || return 0
             if ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[^[:space:]]'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero returned no FAILED_LOGIN_ATTEMPTS/PASSWORD_LOCK_TIME policy rows; the login-failure lockout control is not configured." "No rows returned (no failed-login lockout policy configured)." "${TIBERO_LAST_COMMAND}"
-            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'FAILED_LOGIN_ATTEMPTS=UNLIMITED'; then
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'FAILED_LOGIN_ATTEMPTS[[:space:]]*=[[:space:]]*UNLIMITED'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero failed-login lockout profile controls are weak (FAILED_LOGIN_ATTEMPTS=UNLIMITED; no login-attempt limit). PASSWORD_LOCK_TIME=UNLIMITED alone is an accepted lock policy per KISA D-09 and is not treated as a vulnerability." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'FAILED_LOGIN_ATTEMPTS[[:space:]]*=[[:space:]]*[0-9]+'; then
+                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero failed-login lockout profile evidence shows a concrete numeric FAILED_LOGIN_ATTEMPTS limit." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
-                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero failed-login lockout profile evidence was collected." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+                tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero failed-login lockout evidence does not show a concrete numeric FAILED_LOGIN_ATTEMPTS limit (value is unset, DEFAULT, blank, or only PASSWORD_LOCK_TIME was returned). Resolve the effective per-profile FAILED_LOGIN_ATTEMPTS (expand DEFAULT/blank to the inherited DEFAULT-profile value) and confirm a login-attempt limit is set; treat unset/DEFAULT/UNLIMITED as a finding." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             fi
             ;;
         D-10)
@@ -270,8 +272,7 @@ invoke_tibero_linux_check() {
             tibero_set_result "N/A" "N/A" "D-14 (main configuration/password file access-permission restriction) does not target Tibero per the KISA CIIP 2026 guideline metadata (target: Oracle DB, PostgreSQL, Cubrid)." "Tibero is out of scope for D-14; no file-ACL judgment is rendered." "Map DBMS file-permission guideline applicability"
             ;;
         D-15)
-            lines="$(tibero_config_grep 'AUDIT_FILE_DEST|AUDIT_FILE_SIZE|TRACE|LOG' || true)"
-            [ -n "${lines}" ] && tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero listener/log/trace configuration evidence was found; confirm write access is DBA-only." "${lines}" "grep Tibero log/trace configuration" || tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero log/trace restriction evidence was not conclusive." "$(tibero_evidence)" "grep Tibero log/trace configuration"
+            tibero_set_result "N/A" "N/A" "D-15 (Oracle Listener log/trace change restriction) targets Oracle DB only per the KISA CIIP 2026 guideline metadata; Tibero is out of scope." "D-15 target: Oracle DB; Tibero out of scope." "Map Oracle Listener log/trace guideline applicability"
             ;;
         D-16)
             tibero_set_result "N/A" "N/A" "SQL Server Windows authentication mode control is not applicable to Tibero." "Tibero authentication is controlled by Tibero users, profiles, and DB/OS configuration." "Map DBMS authentication-mode guideline applicability"

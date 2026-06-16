@@ -90,29 +90,31 @@ diagnose() {
         return 0
     fi
 
-    # 빈 비밀번호 계정 확인 (MSSQL 2012+)
-    local empty_password_query="SELECT name FROM sys.sql_logins WHERE is_disabled = 0 AND PWDCOMPARE('', password_hash) = 1;"
-    command_executed="sqlcmd -S localhost -E -Q \"${empty_password_query}\""
-    command_result=$(sqlcmd -S localhost -E -Q "${empty_password_query}" -h -1 -W 2>/dev/null || echo "")
+    # 불필요 계정(비시스템 프린시펄) 열거 - D-02 기준은 불필요한 계정(테스트/퇴직자/데모 등)의 존재 여부이므로
+    # 빈 비밀번호가 아닌 비시스템 프린시펄을 실제로 열거한다 (Windows 헬퍼 D-02 쿼리와 동일 기준).
+    local principal_query="SET NOCOUNT ON; SELECT name FROM sys.server_principals WHERE type IN ('S','U','G') AND name NOT LIKE '##%' AND name NOT LIKE 'NT SERVICE\\%' ESCAPE '\\' AND name NOT LIKE 'NT AUTHORITY\\%' ESCAPE '\\' AND name NOT LIKE 'BUILTIN\\%' ESCAPE '\\' AND name NOT IN ('sa','public');"
+    command_executed="sqlcmd -S localhost -E -Q \"${principal_query}\""
+    command_result=$(sqlcmd -S localhost -E -Q "${principal_query}" -h -1 -W 2>/dev/null || echo "")
 
     # 결과 분석
-    if [ -n "$command_result" ]; then
-        # 공백 라인 및 메시지 필터링
-        local user_count=$(echo "$command_result" | grep -v "Rows affected" | grep -v "^\s*$" | wc -l)
+    local principal_list
+    principal_list=$(echo "$command_result" | grep -v "Rows affected" | grep -v "^[[:space:]]*$")
 
-        if [ "$user_count" -gt 0 ]; then
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="빈 비밀번호를 가진 계정 ${user_count}개 발견: $(echo "$command_result" | grep -v "Rows affected" | grep -v "^\s*$" | head -5 | tr '\n' ', ')"
-        else
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="빈 비밀번호를 가진 계정 없음"
-        fi
+    if echo "$principal_list" | grep -Eiq '^[[:space:]]*(guest|test|demo|scott|adams|clark|sample)'; then
+        # 명백한 불필요/데모/테스트 계정명이 존재하면 취약
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="불필요한 것으로 의심되는 계정(guest/test/demo/scott 등) 발견: $(echo "$principal_list" | head -5 | tr '\n' ', ') - criteria_bad(인가되지 않은/퇴직자/테스트 계정)에 따라 제거 또는 잠금 설정 확인 필요"
+    elif [ -n "$principal_list" ]; then
+        # 비시스템 프린시펄이 존재하나 각 계정의 필요성을 정적으로 증명할 수 없으므로 수동진단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="비시스템 계정이 존재합니다. 각 계정의 용도를 수동으로 확인하여 인가되지 않은/퇴직자/테스트 등 불필요한 계정이 없는지 점검하세요: $(echo "$principal_list" | head -10 | tr '\n' ', ')"
     else
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="모든 계정에 비밀번호 설정됨"
+        # 반환된 비시스템 계정이 없으나 불필요 계정 부재를 정적으로 증명할 수 없으므로 수동진단
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="반환된 비시스템 계정이 없으나 불필요 계정 부재를 자동으로 증명할 수 없습니다. 인가되지 않은/퇴직자/테스트 계정이 남아 있지 않은지 수동으로 확인하세요."
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

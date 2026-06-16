@@ -40,13 +40,32 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="DNS 동적 업데이트 설정이 적절하게 제한되어 있습니다."
     local command_result=""
-    local command_executed="sed -n '/allow-update/,/;/p' /etc/named.conf /etc/named.rfc1912.zones"
+    local command_executed="cat /etc/named.conf /etc/named.rfc1912.zones <include된 zone 파일> | grep -oiE 'allow-update[^{};]*\\{[^}]*'"
 
     local conf_found=false
     local evidence=""
     local conf_file=""
 
-    for conf_file in /etc/named.conf /etc/named.rfc1912.zones; do
+    # 점검 대상 파일: 표준 경로 + named.conf의 include 지시자 1단계 추적
+    # (zone 별 allow-update가 custom include 파일에 있을 수 있음)
+    local scan_files="/etc/named.conf /etc/named.rfc1912.zones"
+    if [ -f /etc/named.conf ]; then
+        local inc
+        for inc in $(grep -v "^[[:space:]]*//" /etc/named.conf 2>/dev/null | grep -v "^[[:space:]]*#" | grep -oE 'include[[:space:]]+"[^"]+"' | sed -E 's/include[[:space:]]+"([^"]+)"/\1/' || true); do
+            case " $scan_files " in
+                *" $inc "*) ;;
+                *)
+                    if [ -f "$inc" ]; then
+                        scan_files="$scan_files $inc"
+                    elif [ -f "/etc/${inc}" ]; then
+                        scan_files="$scan_files /etc/${inc}"
+                    fi
+                    ;;
+            esac
+        done
+    fi
+
+    for conf_file in $scan_files; do
         if [ -f "$conf_file" ]; then
             conf_found=true
             # 주석 제거 후 다중행 allow-update 블록을 한 줄로 평탄화하여 점검

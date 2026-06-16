@@ -74,6 +74,25 @@ diagnose() {
         "/etc/bind/named.conf.options"
     )
 
+    # include 지시자 추적 (1단계): 포함된 설정 파일도 동일 검사 대상에 추가
+    # (include 파일 미확인 상태로 GOOD을 부여하지 않도록 미해결 include는 수동진단 처리)
+    local include_unresolved=false
+    local existing_confs=()
+    for conf_file in "${bind_conf_files[@]}"; do
+        [ -f "$conf_file" ] && existing_confs+=("$conf_file")
+    done
+    if [ ${#existing_confs[@]} -gt 0 ]; then
+        local inc_path
+        while IFS= read -r inc_path; do
+            [ -z "$inc_path" ] && continue
+            if [ -f "$inc_path" ]; then
+                bind_conf_files+=("$inc_path")
+            else
+                include_unresolved=true
+            fi
+        done < <(grep -hE '^[[:space:]]*include[[:space:]]' "${existing_confs[@]}" 2>/dev/null | sed -n 's/.*"\([^"]*\)".*/\1/p' || true)
+    fi
+
     for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
@@ -143,6 +162,12 @@ diagnose() {
         status="취약"
         inspection_summary="DNS 동적 업데이트 제한 미흡: ${issues[*]-}"
         command_result="${dns_info}${newline}[Issues] ${issues[*]-}"
+        command_executed="grep -oiE 'allow-update[^{};]*\{[^}]*' /etc/named.conf /etc/named.boot /var/named/named.conf /etc/bind/named.conf*"
+    elif [ "$is_secure" = "true" ] && [ "$include_unresolved" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="기본 설정의 동적 업데이트 제한은 확인되었으나 include된 설정 파일을 확인할 수 없어 수동 점검 필요"
+        command_result="${dns_info}${newline}[미확인 include 설정 파일 존재]"
         command_executed="grep -oiE 'allow-update[^{};]*\{[^}]*' /etc/named.conf /etc/named.boot /var/named/named.conf /etc/bind/named.conf*"
     elif [ "$is_secure" = "true" ]; then
         diagnosis_result="GOOD"

@@ -61,10 +61,10 @@ diagnose() {
     done
 
     if [ -n "$hidden_files" ]; then
-        # 파일이 발견되면 수동 점검을 위해 '취약' 또는 '검토필요'로 변경
-        status="취약" # KISA 가이드에 따라 일단 '발견' 시 취약으로 분류 후 소명
-        diagnosis_result="VULNERABLE"
-        inspection_summary="임시 디렉터리 내에 숨겨진 파일/디렉터리가 존재합니다. 악성 여부를 수동으로 확인하십시오."
+        # 단순 존재만으로는 '의심스러운' 항목인지 정적으로 판별 불가하므로 수동진단으로 분류 (오라클 criteria_bad: 불필요/의심스러운 항목)
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="임시 디렉터리 내에 숨겨진 파일/디렉터리가 존재합니다. 불필요하거나 의심스러운 항목인지 악성 여부를 수동으로 확인하십시오."
         command_result=$(echo -e "발견된 숨김 항목 리스트(/tmp,/var/tmp):\n${hidden_files}\n${home_hidden}")
     elif [ -n "$home_hidden" ]; then
         status="수동진단"

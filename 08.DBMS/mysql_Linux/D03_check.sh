@@ -97,21 +97,21 @@ diagnose() {
         fi
     fi
 
-    # validate_password 플러그인 확인
-    local plugin_check="SHOW PLUGINS;"
-    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${plugin_check}" 2>/dev/null | grep -i "validate_password" || echo "")
-
-    if [ -z "$command_result" ]; then
-        ((vulnerabilities_found++)) || true
-        inspection_summary+="취약: validate_password 플러그인 미설치; "
-    else
-        inspection_summary+=" validate_password 플러그인 설치됨; "
-    fi
-
-    # 비밀번호 정책 변수 확인
+    # validate_password 설치 확인
+    # MySQL 8.0은 validate_password를 COMPONENT로 설치(INSTALL COMPONENT)하며
+    # 컴포넌트는 SHOW PLUGINS에 나타나지 않고 SHOW VARIABLES로만 노출됨.
+    # 플러그인/컴포넌트 모두를 포괄하기 위해 SHOW VARIABLES 결과로 설치 여부를 판정함.
     local policy_vars="SHOW VARIABLES LIKE 'validate_password%';"
     command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${policy_vars}" 2>/dev/null || echo "")
 
+    if [ -z "$command_result" ]; then
+        ((vulnerabilities_found++)) || true
+        inspection_summary+="취약: validate_password 플러그인/컴포넌트 미설치; "
+    else
+        inspection_summary+=" validate_password 플러그인/컴포넌트 설치됨; "
+    fi
+
+    # 비밀번호 정책 변수 확인
     if [ -n "$command_result" ]; then
         local password_length=$(echo "$command_result" | grep "validate_password.length" | awk '{print $2}')
         local policy_mismatch=$(echo "$command_result" | grep "validate_password.policy" | awk '{print $2}')
@@ -140,7 +140,7 @@ diagnose() {
         inspection_summary+="비밀번호 사용 기간(default_password_lifetime)=${password_lifetime}일; "
     fi
 
-    command_executed="mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p*** -e \"SHOW PLUGINS; SHOW VARIABLES LIKE 'validate_password%'; SHOW VARIABLES LIKE 'default_password_lifetime';\""
+    command_executed="mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p*** -e \"SHOW VARIABLES LIKE 'validate_password%'; SHOW VARIABLES LIKE 'default_password_lifetime';\""
 
     if [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"

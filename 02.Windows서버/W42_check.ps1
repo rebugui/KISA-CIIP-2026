@@ -38,6 +38,7 @@ try {
     $logNames = @('Application', 'System', 'Security')
     $logDetails = @()
     $allConfigured = $true
+    $accessFailed = $false
 
     foreach ($logName in $logNames) {
         $log = Get-WinEvent -ListLog $logName -ErrorAction SilentlyContinue
@@ -55,12 +56,18 @@ try {
                 $allConfigured = $false
             }
         } else {
-            $allConfigured = $false
+            # 설정값이 취약한 것이 아니라 로그를 열거할 수 없음(권한 부족 등).
+            # 양호 여부를 입증할 수 없으므로 취약이 아닌 수동진단으로 분류
+            $accessFailed = $true
             $logDetails += "$logName : 접근 불가"
         }
     }
 
-    if ($allConfigured) {
+    if ($accessFailed) {
+        $finalResult = "MANUAL"
+        $summary = "일부 이벤트 로그를 열거할 수 없어(권한 부족 등) 설정값을 확인할 수 없음. 수동 확인 필요"
+        $status = "수동진단"
+    } elseif ($allConfigured) {
         $finalResult = "GOOD"
         $summary = "최대 로그 크기가 10,240KB 이상으로 설정됨"
         $status = "양호"

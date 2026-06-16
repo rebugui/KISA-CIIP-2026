@@ -188,7 +188,11 @@ invoke_webtob_linux_check() {
             fi
             ;;
         WEB-06)
-            lines="$(webtob_config_grep 'UpperDirRestrict[[:space:]]*=[[:space:]]*[NY]' || true)"
+            # Use the comment-aware grep so a commented-out (deactivated)
+            # `#UpperDirRestrict = N` left after remediation does not trigger
+            # VULNERABLE; the guideline allows removing OR commenting the
+            # directive. Only ACTIVE directives are assessed; absence -> MANUAL.
+            lines="$(webtob_config_grep_active 'UpperDirRestrict[[:space:]]*=[[:space:]]*[NY]' || true)"
             if printf '%s' "${lines}" | grep -Eiq 'UpperDirRestrict[[:space:]]*=[[:space:]]*N'; then
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB upper-directory restriction appears disabled." "${lines}" "grep UpperDirRestrict http.m"
             elif printf '%s' "${lines}" | grep -Eiq 'UpperDirRestrict[[:space:]]*=[[:space:]]*Y'; then
@@ -243,9 +247,17 @@ invoke_webtob_linux_check() {
             [ -n "${lines}" ] && webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB service path evidence was found; confirm DOCROOT is separated from install/system directories." "${lines}" "grep DOCROOT/WEBTOBDIR http.m" || webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB service path evidence was not conclusive." "$(webtob_evidence)" "grep DOCROOT/WEBTOBDIR http.m"
             ;;
         WEB-12|WEB-17)
-            lines="$(webtob_config_grep '^[[:space:]]*\\*ALIAS|RealPath|ALIAS' || true)"
+            # Oracle criteria_bad = an *unnecessary* (불필요한) virtual
+            # directory/alias; necessity is institution-relative and not
+            # statically derivable from http.m, so an ACTIVE alias cannot be
+            # asserted VULNERABLE here -> route to MANUAL (floor), mirroring
+            # WEB-05. Use the comment-aware grep so commented/removed alias
+            # leftovers do not produce false evidence; match only an ACTIVE
+            # alias directive (anchored *ALIAS), not bare RealPath/ALIAS
+            # substrings that also matched comments and unrelated text.
+            lines="$(webtob_config_grep_active '^[[:space:]]*\*ALIAS' || true)"
             if [ -n "${lines}" ]; then
-                webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB alias/link mapping evidence was found." "${lines}" "grep ALIAS http.m"
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB active alias/virtual-directory mapping was found; manually verify the alias is necessary (criteria_bad is an *unnecessary* virtual directory)." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep ALIAS http.m"
             elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
                 # Installed (per webtob_is_installed) but no http.m config was
                 # actually inspected (home not derivable or config files absent):
@@ -262,15 +274,26 @@ invoke_webtob_linux_check() {
             webtob_acl_check "config/root" "${WEBTOB_CONFIGS[@]}" "${WEBTOB_HOME}"
             ;;
         WEB-16)
+            # Oracle criteria_good = the HTTP RESPONSE HEADER does not expose
+            # server info; that header is governed by ServerTokens, NOT by
+            # ServerSignature (which only controls the error-page/dir-listing
+            # footer). GOOD therefore requires an ACTIVE ServerTokens
+            # Prod/ProductOnly; `ServerSignature off` alone does not minimize the
+            # Server: response header and must not yield GOOD -> MANUAL.
             lines="$(webtob_config_grep_active 'ServerTokens|ServerSignature' || true)"
-            if printf '%s' "${lines}" | grep -Eiq 'ServerTokens[[:space:]]+(Prod|ProductOnly)|ServerSignature[[:space:]]+off'; then
-                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB server header minimization evidence was found." "${lines}" "grep ServerTokens/ServerSignature http.m"
+            if printf '%s' "${lines}" | grep -Eiq 'ServerTokens[[:space:]]+(Prod|ProductOnly)'; then
+                webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB response-header minimization evidence was found (ServerTokens Prod/ProductOnly)." "${lines}" "grep ServerTokens/ServerSignature http.m"
             else
-                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB server header minimization evidence was not conclusive." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep ServerTokens/ServerSignature http.m"
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB response-header (ServerTokens) minimization could not be confirmed; ServerSignature alone does not minimize the Server response header. Verify the HTTP response header manually." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep ServerTokens/ServerSignature http.m"
             fi
             ;;
         WEB-18)
-            lines="$(webtob_config_grep 'Method[[:space:]]*=.*(PROPFIND|PUT|DELETE|MKCOL|COPY|MOVE)|WebDAV|dav' || true)"
+            # Use the comment-aware grep so commented-out/removed WebDAV Method
+            # leftovers do not trigger VULNERABLE. Anchor the WebDAV token to an
+            # actual directive (Method line with a WebDAV verb, or a `Dav On`
+            # assignment) instead of a bare 'dav' substring that incidentally
+            # matched paths/identifiers (e.g. /home/david) and comments.
+            lines="$(webtob_config_grep_active 'Method[[:space:]]*=.*(PROPFIND|PUT|DELETE|MKCOL|COPY|MOVE)|WebDAV[[:space:]]*=|Dav[[:space:]]*=?[[:space:]]*On' || true)"
             if [ -n "${lines}" ]; then
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB WebDAV-like methods/settings evidence was found." "${lines}" "grep WebDAV methods http.m"
             elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
@@ -283,7 +306,12 @@ invoke_webtob_linux_check() {
             fi
             ;;
         WEB-19)
-            lines="$(webtob_config_grep 'SVRTYPE[[:space:]]*=[[:space:]]*SSI|SvrType[[:space:]]*=[[:space:]]*SSI|SSI' || true)"
+            # Use the comment-aware grep and require an ACTIVE `SvrType = SSI`
+            # directive. The bare 'SSI' substring alternative was dropped: under
+            # -Ei it matched common active directives (Permi-SSI-on,
+            # Se-SSI-onTimeout) and commented examples, producing a near-universal
+            # false positive even when SSI is disabled.
+            lines="$(webtob_config_grep_active 'SVRTYPE[[:space:]]*=[[:space:]]*SSI' || true)"
             if [ -n "${lines}" ]; then
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSI server mapping evidence was found." "${lines}" "grep SSI http.m"
             elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
@@ -306,6 +334,12 @@ invoke_webtob_linux_check() {
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSL/TLS is disabled (SSLFLAG=N) despite SSL configuration being present." "${lines}" "grep SSL http.m"
             elif [ -n "${lines}" ]; then
                 webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB SSL configuration directives were found but the SSLFLAG activation state could not be determined." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep SSL http.m"
+            elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
+                # Installed (per webtob_is_installed) but no http.m config was
+                # actually inspected (home not derivable or config files absent):
+                # SSL state cannot be observed from zero evidence -> MANUAL,
+                # not a hard VULNERABLE.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its configuration (http.m) could not be inspected; manually verify SSL/TLS is enabled." "$(webtob_evidence)" "grep SSL http.m"
             else
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB SSL/TLS activation evidence was not found." "$(webtob_evidence)" "grep SSL http.m"
             fi
@@ -325,6 +359,12 @@ invoke_webtob_linux_check() {
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB URL rewrite is disabled (URLRewrite=N); HTTPS redirection is not active." "${lines}" "grep rewrite http.m"
             elif printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*Y'; then
                 webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB URLRewrite=Y is set but an explicit HTTPS redirect rule could not be confirmed; verify the rewrite config." "$(webtob_join_lines "${lines}" "$(webtob_evidence)")" "grep rewrite http.m"
+            elif [ -z "${WEBTOB_HOME}" ] || [ "${#WEBTOB_CONFIGS[@]}" -eq 0 ]; then
+                # Installed (per webtob_is_installed) but no http.m config was
+                # actually inspected (home not derivable or config files absent):
+                # redirection state cannot be observed from zero evidence ->
+                # MANUAL, not a hard VULNERABLE.
+                webtob_set_result "MANUAL" "$(webtob_status_for_result MANUAL)" "WebtoB appears installed but its configuration (http.m) could not be inspected; manually verify HTTP-to-HTTPS redirection is enabled." "$(webtob_evidence)" "grep rewrite http.m"
             else
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB HTTP-to-HTTPS redirection activation evidence was not found." "$(webtob_evidence)" "grep rewrite http.m"
             fi

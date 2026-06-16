@@ -63,12 +63,29 @@ diagnose() {
     local issues=()
 
     # BIND 설정 파일 경로 확인 (include 참조 파일 포함)
-    local bind_conf="/etc/bind/named.conf"
-    local bind_conf_local="/etc/bind/named.conf.local"
-    local bind_conf_opts="/etc/bind/named.conf.options"
-    local bind_conf_defzones="/etc/bind/named.conf.default-zones"
+    local bind_conf_files=("/etc/bind/named.conf" "/etc/bind/named.conf.local" "/etc/bind/named.conf.options" "/etc/bind/named.conf.default-zones")
 
-    for conf_file in "$bind_conf" "$bind_conf_local" "$bind_conf_opts" "$bind_conf_defzones"; do
+    # include 지시자 추적 (포함 파일 내 zone 단위 allow-update 'any' 미탐 방지, 2단계)
+    local include_pass included_file existing already
+    for include_pass in 1 2; do
+        local new_includes=()
+        for conf_file in "${bind_conf_files[@]}"; do
+            [ -f "$conf_file" ] || continue
+            while IFS= read -r included_file; do
+                [ -n "$included_file" ] || continue
+                [ -f "$included_file" ] || continue
+                already=false
+                for existing in "${bind_conf_files[@]}" ${new_includes[@]+"${new_includes[@]}"}; do
+                    if [ "$existing" = "$included_file" ]; then already=true; break; fi
+                done
+                if [ "$already" = false ]; then new_includes+=("$included_file"); fi
+            done < <(grep -hoE '^[[:space:]]*include[[:space:]]+"[^"]+"' "$conf_file" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/' || true)
+        done
+        [ ${#new_includes[@]} -eq 0 ] && break
+        bind_conf_files+=("${new_includes[@]}")
+    done
+
+    for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
             dns_info="${dns_info}${conf_file} 확인:${newline}"

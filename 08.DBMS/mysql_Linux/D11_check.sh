@@ -110,12 +110,18 @@ diagnose() {
 
         if [ "$grant_count" -gt 0 ]; then
             local grant_users=$(echo "$command_result" | tail -n +2 | grep -v "^$" || echo "")
-            local non_root_grant=$(echo "$grant_users" | grep -v -E "^root\s" || echo "")
+            # 첫 컬럼(grantee)의 계정명을 정규화하여 root 여부 판별.
+            # - MySQL 5.7/MariaDB(mysql.user): 첫 컬럼이 bare `root`
+            # - MySQL 8.0 폴백(role_table_grants): 첫 컬럼이 따옴표 형식 `'root'@'host'`
+            # 두 형식 모두에서 선행 작은따옴표를 제거하고 @ 이전 사용자명으로 root를 제외함.
+            local non_root_grant=$(echo "$grant_users" | awk '{ acct=$1; gsub(/^'\''/, "", acct); sub(/'\''?@.*$/, "", acct); if (acct != "root") print }' || echo "")
 
             if [ -n "$non_root_grant" ]; then
-                diagnosis_result="VULNERABLE"
-                status="취약"
-                inspection_summary="비-root 계정에 GRANT 권한 부여됨: $(echo "$non_root_grant" | head -5 | tr '\n' ', ')"
+                # 비-root 계정이 GRANT(grantable) 권한을 보유. 해당 계정이 인가된 DBA인지
+                # 정적으로 확인할 수 없으므로 자동 취약 단정 대신 수동진단으로 라우팅.
+                diagnosis_result="MANUAL"
+                status="수동진단"
+                inspection_summary="root 외 계정에 GRANT 권한이 부여되어 있습니다. 해당 계정이 인가된 DBA인지 수동 확인 필요: $(echo "$non_root_grant" | head -5 | tr '\n' ', ')"
             else
                 diagnosis_result="GOOD"
                 status="양호"

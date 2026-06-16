@@ -65,7 +65,7 @@ diagnose() {
 
     # Capture raw ls -l output
     local ls_output=$(ls -l "$target_file" 2>/dev/null)
-    local stat_output=$(perl -e 'printf "%04o %s:%s\n", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' "$target_file" 2>/dev/null)
+    local stat_output=$(perl -e 'printf "%04o %s:%s\n", (stat($ARGV[0]))[2] & 07777, getpwuid((stat($ARGV[0]))[4]), getgrgid((stat($ARGV[0]))[5])' "$target_file" 2>/dev/null)
 
     # 파일 존재 확인
     if [ ! -f "$target_file" ]; then
@@ -81,12 +81,20 @@ diagnose() {
         local file_owner=$(echo "$file_info" | awk '{print $3}')
 
         # 권한을 숫자로 변환
-        local perms_numeric=$(stat -c "%a" "$target_file" 2>/dev/null || perl -e 'printf "%04o", (stat)[2] & 07777' "$target_file" 2>/dev/null || echo "0000")
+        # AIX 네이티브 환경에는 GNU stat(-c)이 없을 수 있으므로 perl 폴백 사용.
+        # perl stat은 반드시 인자($ARGV[0])를 받는 형태여야 함. bare (stat)은 $_(undef)를
+        # 대상으로 하여 0000을 반환하므로(실제 권한 무시) 절대 사용 금지(false_good 유발).
+        local perms_numeric=$(stat -c "%a" "$target_file" 2>/dev/null || perl -e 'printf "%04o", (stat($ARGV[0]))[2] & 07777' "$target_file" 2>/dev/null || echo "")
 
         # 소유자 및 권한 확인 (AIX는 root만 확인)
         # 644 초과 비트 없음: 644보다 강한 600/640/440 등은 양호, 추가 비트는 취약
         # 07777 마스크로 setuid/setgid/sticky 특수 비트(4644, 2644, 1644 등)도 초과 비트로 검출
-        if [ "$file_owner" = "root" ] && [[ "$perms_numeric" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms_numeric & ~8#644 & 07777 ))" -eq 0 ]; then
+        if [[ ! "$perms_numeric" =~ ^[0-7]{3,4}$ ]]; then
+            # 권한 값을 실제로 읽지 못한 경우(폴백 실패): fail-closed -> 수동진단
+            is_secure=false
+            perms_numeric="확인불가"
+            details="권한: $perms_numeric(stat/perl 실패), 소유자: $file_owner"
+        elif [ "$file_owner" = "root" ] && [ "$(( 8#$perms_numeric & ~8#644 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $perms_numeric, 소유자: $file_owner"
         else
@@ -94,7 +102,13 @@ diagnose() {
         fi
 
         # 최종 판정
-        if [ "$is_secure" = true ]; then
+        if [ "$perms_numeric" = "확인불가" ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="/etc/passwd 권한 확인 실패 - 수동 점검 필요 ($details)"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl -e 'printf \"%04o %s:%s\", (stat(\$ARGV[0]))[2] & 07777, getpwuid((stat(\$ARGV[0]))[4]), getgrgid((stat(\$ARGV[0]))[5])' $target_file]${newline}${stat_output}"
+            command_executed="ls -l $target_file"
+        elif [ "$is_secure" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="/etc/passwd 보안 설정 적절 ($details)"

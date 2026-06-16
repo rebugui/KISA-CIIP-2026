@@ -61,6 +61,7 @@ diagnose() {
     local command_result=""
     local command_executed=""
     local vulnerabilities_found=0
+    local manual_review_needed=0
 
     # MSSQL 서비스 확인 (Windows PowerShell 사용)
     if command -v powershell.exe &> /dev/null; then
@@ -112,7 +113,10 @@ diagnose() {
         # sa 계정은 비밀번호가 설정되어 있는지 확인 필요
         local sa_check=$(echo "$command_result" | grep -i "sa" || echo "")
         if [ -n "$sa_check" ]; then
-            inspection_summary+="경고: sa 계정이 활성화됨 (비밀번호 설정 확인 필요); "
+            # 활성화된 sa(기본 계정)의 초기 비밀번호 변경/잠금 여부는 정적으로 증명할 수 없으므로
+            # 양호로 단정하지 않고 수동진단으로 격상한다. (Windows 헬퍼 D-01 동작과 일치)
+            manual_review_needed=1
+            inspection_summary+="수동진단 필요: sa 계정이 활성화됨 - 초기 비밀번호 변경 및 잠금 설정 여부 확인 필요; "
         fi
     fi
 
@@ -132,6 +136,12 @@ diagnose() {
         status="취약"
         if [ -z "$inspection_summary" ]; then
             inspection_summary="DBMS 기본 계정 보안 취약 발견"
+        fi
+    elif [ $manual_review_needed -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        if [ -z "$inspection_summary" ]; then
+            inspection_summary="수동진단 필요: 활성화된 기본 계정의 초기 비밀번호 변경 및 잠금 설정 여부 확인 필요"
         fi
     else
         diagnosis_result="GOOD"

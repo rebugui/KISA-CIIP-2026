@@ -150,6 +150,39 @@ diagnose() {
             fi
         done
 
+        # 시스템/위험 루트 경로 목록 (웹 서비스 영역과 분리되지 않은 시스템 영역 = 취약)
+        # DocumentRoot가 루트('/') 또는 시스템 디렉터리와 정확히 일치하거나 그 하위인 경우,
+        # 웹 침해가 시스템 영역으로 직접 확장될 수 있어 criteria_bad에 해당.
+        local system_roots=(
+            "/"
+            "/etc"
+            "/usr"
+            "/bin"
+            "/sbin"
+            "/lib"
+            "/lib64"
+            "/boot"
+            "/dev"
+            "/proc"
+            "/sys"
+            "/root"
+            "/home"
+            "/var"
+        )
+
+        local under_system_root=false
+        if [ "${norm_root}" = "/" ]; then
+            under_system_root=true
+        else
+            for sysroot in "${system_roots[@]}"; do
+                [ "${sysroot}" = "/" ] && continue
+                if [ "${norm_root}" = "${sysroot}" ] || [[ "${norm_root}" == "${sysroot}/"* ]]; then
+                    under_system_root=true
+                    break
+                fi
+            done
+        fi
+
         if [ "${is_exact_default}" = true ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
@@ -158,6 +191,10 @@ diagnose() {
             diagnosis_result="MANUAL"
             status="수동진단"
             inspection_summary="DocumentRoot(${doc_root})가 기본 웹 트리 하위의 사용자 정의 경로입니다. 업무 영역과의 분리 여부를 자동으로 확정할 수 없어 수동 확인이 필요합니다."
+        elif [ "${under_system_root}" = true ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="DocumentRoot(${doc_root})가 시스템 루트/디렉터리(예: /, /etc, /usr, /home, /root 등)로 설정되어 웹 서비스 영역이 시스템 영역과 분리되어 있지 않습니다. 별도의 분리된 경로로 변경 필요."
         else
             diagnosis_result="GOOD"
             status="양호"

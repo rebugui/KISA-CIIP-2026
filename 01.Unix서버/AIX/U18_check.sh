@@ -65,7 +65,7 @@ diagnose() {
 
     # Capture raw ls -l output
     local ls_output=$(ls -l "$target_file" 2>/dev/null)
-    local stat_output=$(perl -e 'printf "%04o %s:%s\n", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' "$target_file" 2>/dev/null)
+    local stat_output=$(perl -e 'printf "%04o %s:%s\n", (stat($ARGV[0]))[2] & 07777, getpwuid((stat($ARGV[0]))[4]), getgrgid((stat($ARGV[0]))[5])' "$target_file" 2>/dev/null)
 
     # 파일 존재 확인
     if [ ! -f "$target_file" ]; then
@@ -81,29 +81,42 @@ diagnose() {
         local file_owner=$(echo "$file_info" | awk '{print $3}')
         local file_group=$(echo "$file_info" | awk '{print $4}')
 
-        # 권한을 숫자로 변환
-        local file_perms=$(perl -e 'printf "%04o", (stat)[2] & 07777' "$target_file" 2>/dev/null || echo "0000")
+        # 권한을 숫자로 변환 (arg-consuming stat: $ARGV[0] 명시)
+        local file_perms=$(perl -e 'printf "%04o", (stat($ARGV[0]))[2] & 07777' "$target_file" 2>/dev/null)
+
+        # 권한 추출 실패 시(빈 값 또는 4자리 8진수가 아닌 경우) 수동진단으로 라우팅
+        local perms_unresolved=false
+        case "$file_perms" in
+            [0-7][0-7][0-7][0-7]) : ;;
+            *) perms_unresolved=true ;;
+        esac
 
         # 소유자 및 권한 확인 (AIX: root:system, 600 또는 400)
-        if [ "$file_owner" = "root" ] && { [ "$file_perms" = "0600" ] || [ "$file_perms" = "0400" ]; }; then
+        if [ "$perms_unresolved" = false ] && [ "$file_owner" = "root" ] && { [ "$file_perms" = "0600" ] || [ "$file_perms" = "0400" ]; }; then
             is_secure=true
             details="권한: $file_perms, 소유자: ${file_owner}:${file_group}"
         else
-            details="권한: $file_perms, 소유자: ${file_owner}:${file_group}"
+            details="권한: ${file_perms:-확인불가}, 소유자: ${file_owner}:${file_group}"
         fi
 
         # 최종 판정
-        if [ "$is_secure" = true ]; then
+        if [ "$perms_unresolved" = true ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="/etc/security/passwd 권한 값 자동 추출 실패, 수동 확인 필요 ($details)"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl -e 'printf \"%04o %s:%s\", (stat(\$ARGV[0]))[2] & 07777, getpwuid((stat(\$ARGV[0]))[4]), getgrgid((stat(\$ARGV[0]))[5])' $target_file]${newline}${stat_output}"
+            command_executed="ls -l $target_file"
+        elif [ "$is_secure" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="/etc/security/passwd 보안 설정 적절 ($details)"
-            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl -e 'printf \"%04o %s:%s\", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' $target_file]${newline}${stat_output}"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl -e 'printf \"%04o %s:%s\", (stat(\$ARGV[0]))[2] & 07777, getpwuid((stat(\$ARGV[0]))[4]), getgrgid((stat(\$ARGV[0]))[5])' $target_file]${newline}${stat_output}"
             command_executed="ls -l $target_file"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="/etc/security/passwd 보안 설정 부적절 ($details)"
-            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl -e 'printf \"%04o %s:%s\", (stat)[2] & 07777, getpwuid((stat)[4]), getgrgid((stat)[5])' $target_file]${newline}${stat_output}"
+            command_result="[Command: ls -l $target_file]${newline}${ls_output}${newline}${newline}[Command: perl -e 'printf \"%04o %s:%s\", (stat(\$ARGV[0]))[2] & 07777, getpwuid((stat(\$ARGV[0]))[4]), getgrgid((stat(\$ARGV[0]))[5])' $target_file]${newline}${stat_output}"
             command_executed="ls -l $target_file"
         fi
     fi

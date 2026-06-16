@@ -50,6 +50,7 @@ diagnose() {
     local cgi_locations=""
     local cgi_count=0
     local has_unrestricted_cgi=false
+    local config_readable=false
 
     # Process check (Updated for Docker)
     if command -v pgrep >/dev/null; then
@@ -107,6 +108,7 @@ diagnose() {
         esac
         scanned_files="${scanned_files}|${conf_file}|"
 
+        config_readable=true
         # Check for FastCGI/SCGI/UWSGI/CGI configurations
         local found_cgi
         found_cgi=$(grep -E "^\s*(fastcgi_pass|scgi_pass|uwsgi_pass|cgi_pass)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
@@ -152,7 +154,15 @@ diagnose() {
     # 정적 설정만으로 확인할 수 없으므로 양호로 단정하지 않고 수동진단으로 분류한다.
     # (location ~ \.php$ 등 catch-all 매핑은 제한 없는 취약 사례이며, grep 기반
     # 위치 추론은 include 파일 미추적·블록 경계 모호성으로 신뢰할 수 없음 → Windows 형제 스크립트와 정렬)
-    if [ "${cgi_count}" -eq 0 ]; then
+    if [ "${cgi_count}" -eq 0 ] && [ "${config_readable}" = false ]; then
+        # nginx 프로세스는 실행 중이나 설정 파일을 읽을 수 없거나 존재하지 않음.
+        # 읽지 못한 설정에 제한 없는 fastcgi/scgi/uwsgi/cgi_pass가 포함될 수 있으므로
+        # GOOD로 단정할 수 없어 수동진단으로 분류. (WEB-04 Linux / WEB-05 Windows 형제와 정렬)
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Nginx가 실행 중이나 점검 가능한 설정 파일(/etc/nginx/nginx.conf, conf.d, sites-enabled)을 찾거나 읽을 수 없습니다. fastcgi/scgi/uwsgi/cgi_pass 실행이 승인된 디렉터리로 제한되었는지 수동으로 확인하세요."
+        command_result="No readable nginx configuration file found while nginx is running"
+    elif [ "${cgi_count}" -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="CGI 스크립트가 사용되지 않습니다."

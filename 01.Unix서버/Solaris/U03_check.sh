@@ -96,19 +96,34 @@ diagnose() {
 
     # 최종 판정
     # - 점검 파일을 읽을 수 없으면 수동진단
-    # - RETRIES 1~10 AND LOCK_AFTER_RETRIES=YES → 양호, 그 외 취약 (0/미설정은 잠금 미적용)
+    # - 잠금 활성화(LOCK_AFTER_RETRIES=YES)가 전제. 그 위에서 임계값 평가:
+    #   * RETRIES 명시(1~10) → 양호 / RETRIES 명시(>10 또는 0) → 취약
+    #   * RETRIES 미설정 → Solaris 기본값(5, ≤10) 적용 → 양호 (5.9+ 가이드 권고 구성)
+    # - LOCK_AFTER_RETRIES!=YES → 잠금 미적용 → 취약
+    local solaris_default_retries=5
     if [ -n "$files_unreadable" ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
         inspection_summary="점검 대상 파일(${files_unreadable})을 읽을 수 없어 계정 잠금 임계값을 확인하지 못함. 수동 점검 필요"
-    elif [ -n "$retries_val" ] && [ "$retries_val" -ge 1 ] && [ "$retries_val" -le 10 ] && [ "$lock_after" = "YES" ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="계정 잠금 임계값 적절히 설정됨 (RETRIES=${retries_val}, LOCK_AFTER_RETRIES=YES)"
-    else
+    elif [ "$lock_after" != "YES" ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="계정 잠금 임계값 미설정 또는 부적절 (RETRIES=${retries_val:-미설정}, LOCK_AFTER_RETRIES=${lock_after:-미설정}; RETRIES 1~10 및 LOCK_AFTER_RETRIES=YES 필요)"
+        inspection_summary="계정 잠금 미적용 (LOCK_AFTER_RETRIES=${lock_after:-미설정}; LOCK_AFTER_RETRIES=YES 필요)"
+    elif [ -n "$retries_val" ]; then
+        if [ "$retries_val" -ge 1 ] && [ "$retries_val" -le 10 ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="계정 잠금 임계값 적절히 설정됨 (RETRIES=${retries_val}, LOCK_AFTER_RETRIES=YES)"
+        else
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            inspection_summary="계정 잠금 임계값 부적절 (RETRIES=${retries_val}, LOCK_AFTER_RETRIES=YES; RETRIES 1~10 필요)"
+        fi
+    else
+        # RETRIES 미설정: Solaris 기본 임계값(5회, ≤10) 적용 → 양호
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="계정 잠금 활성화됨 (LOCK_AFTER_RETRIES=YES); RETRIES 미설정으로 Solaris 기본 임계값(${solaris_default_retries}회, 10회 이하) 적용됨"
     fi
 
     echo "" >&2

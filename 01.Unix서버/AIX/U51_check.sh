@@ -74,6 +74,27 @@ diagnose() {
         "/etc/bind/named.conf.options"
     )
 
+    # include 구문으로 참조되는 설정 파일도 점검 대상에 추가 (zone별 allow-update 누락 방지)
+    # U50과 동일하게 include된 zone 파일까지 스캔하여 included 파일 내 allow-update {any;} 누락을 방지함
+    local include_files=()
+    local inc_path=""
+    local include_unresolved=false
+    for conf_file in "${bind_conf_files[@]}"; do
+        [ -f "$conf_file" ] || continue
+        while IFS= read -r inc_path; do
+            [ -n "$inc_path" ] || continue
+            if [ -f "$inc_path" ]; then
+                include_files+=("$inc_path")
+            else
+                # include 경로를 확인할 수 없음: 자동 판정 불가 (수동 점검 대상)
+                include_unresolved=true
+            fi
+        done < <(sed -e 's://.*$::' -e 's:#.*$::' "$conf_file" 2>/dev/null | grep -oE 'include[[:space:]]+"[^"]+"' | sed 's/include[[:space:]]*"//; s/"$//' | head -20 || true)
+    done
+    if [ ${#include_files[@]} -gt 0 ]; then
+        bind_conf_files+=("${include_files[@]}")
+    fi
+
     for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
@@ -144,6 +165,14 @@ diagnose() {
         inspection_summary="DNS 동적 업데이트 제한 미흡: ${issues[*]}"
         command_result="${dns_info}${newline}[Issues] ${issues[*]}"
         command_executed="sed -n '/allow-update/,/;/p' /etc/named.conf /etc/named.boot /var/named/named.conf /etc/bind/named.conf*"
+    elif [ "$is_secure" = "true" ] && [ "$include_unresolved" = true ]; then
+        # 읽을 수 있는 설정 파일은 양호하나 include 경로를 확인하지 못함:
+        # included zone 파일에 allow-update {any;}가 있을 수 있어 자동 판정 불가 (수동 점검)
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="DNS 동적 업데이트 설정은 확인된 설정 파일 기준 양호하나, include 참조 경로를 확인하지 못해 included zone 파일의 allow-update 설정 수동 점검 필요"
+        command_result="${dns_info}${newline}[Unresolved include] 참조된 설정 파일을 확인하지 못함"
+        command_executed="sed -n '/allow-update/,/;/p' /etc/named.conf /etc/named.boot /var/named/named.conf /etc/bind/named.conf* <included zone files>"
     elif [ "$is_secure" = "true" ]; then
         diagnosis_result="GOOD"
         status="양호"

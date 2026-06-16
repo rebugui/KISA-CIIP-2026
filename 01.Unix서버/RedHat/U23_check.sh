@@ -52,7 +52,13 @@ diagnose() {
     local suid_sgids=""
     local found_count=0
     local vulnerable_count=0
+    local manual_count=0
     local details=""
+
+    # 표준 시스템 SUID/SGID 바이너리 허용 목록 (basename 완전 일치 비교)
+    # 형제 플랫폼(Debian 등)과 정렬: RHEL 기본 설치 시 항상 존재하는 정당한
+    # SUID/SGID 바이너리를 취약으로 오판하지 않도록 충분히 포함함
+    local suid_allowlist=" ping ping6 traceroute traceroute6 tracepath mount umount fusermount fusermount3 su sudo passwd gpasswd chsh chfn chage expiry newgrp chown chmod uptime crontab at sperl rsh rcp rlogin rshd telnet ftp ftpd nc tcpdump pkexec ssh-keysign ssh-agent unix_chkpwd pam_timestamp_check mount.nfs mount.nfs4 umount.nfs umount.nfs4 write wall bsd-write Xorg utempter netreport locate mlocate dbus-daemon-launch-helper polkit-agent-helper-1 "
 
     # 주요 실행 디렉토리 탐색
     # 표준 시스템 경로뿐 아니라 SUID/SGID 바이너리가 위치할 수 있는 비표준 경로
@@ -84,15 +90,38 @@ diagnose() {
             suid_sgids="${suid_sgids}${file} (권한: ${perms}, 소유자: ${owner})${newline}"
 
             # 일반적인 SUID/SGID 파일 중 취약한 것 확인
-            # 대부분의 시스템 실행 파일은 SUID/SGID가 필요하지만,
-            # 사용자가 직접 생성한 파일이나 의심스러운 파일은 취약
-            case "$(basename "$file")" in
-                ping|mount|umount|su|passwd|chsh|newgrp|chown|chmod|uptime|crontab|at|sperl|rsh|rcp|rlogin|rshd|telnet|ftp|ftpd|nc|tcpdump|ping6|tracepath)
-                    # 이 파일들은 필수적이므로 취약으로 간주하지 않음
+            # 대부분의 시스템 실행 파일은 SUID/SGID가 필요하므로,
+            # 허용 목록에 있으면 정상으로 간주함.
+            # 허용 목록에 없는 파일은 필요성을 정적으로 단정할 수 없으므로
+            # 명백히 의심스러운 경우(스크립트 확장자 또는 그룹/기타 쓰기 가능)만
+            # 취약으로 판정하고, 그 외에는 수동 점검(MANUAL)으로 라우팅함
+            local fname=$(basename "$file")
+            case " ${suid_allowlist} " in
+                *" ${fname} "*)
+                    # 허용 목록에 포함된 필수 바이너리 - 취약 아님
                     ;;
                 *)
-                    ((vulnerable_count++)) || true
-                    details="${details}${file} (불필요한 SUID/SGID 설정 의심), "
+                    # 허용 목록 외 파일: 명백한 위험 신호만 취약으로 판정
+                    local is_suspicious=0
+                    case "$fname" in
+                        *.sh|*.pl|*.py|*.rb)
+                            is_suspicious=1 ;;
+                    esac
+                    # 그룹/기타 쓰기 가능 여부 확인 (8진수 권한 하위 2자리)
+                    if [ "$is_suspicious" -eq 0 ] && [ -n "$perms" ]; then
+                        local last2="${perms: -2}"
+                        local gperm="${last2:0:1}"
+                        local operm="${last2:1:1}"
+                        case "$gperm" in 2|3|6|7) is_suspicious=1 ;; esac
+                        case "$operm" in 2|3|6|7) is_suspicious=1 ;; esac
+                    fi
+                    if [ "$is_suspicious" -eq 1 ]; then
+                        ((vulnerable_count++)) || true
+                        details="${details}${file} (불필요/의심스러운 SUID/SGID 설정), "
+                    else
+                        ((manual_count++)) || true
+                        details="${details}${file} (허용 목록 외 SUID/SGID - 필요성 수동 점검 필요), "
+                    fi
                     ;;
             esac
         fi
@@ -107,10 +136,11 @@ diagnose() {
         command_executed="find /usr/bin /usr/sbin /sbin /bin -user root -type f \( -perm -04000 -o -perm -02000 \) -xdev"
     else
         if [ "$vulnerable_count" -eq 0 ]; then
-            # 모든 SUID/SGID가 필수적 파일인 경우 - MANUAL
+            # 명백히 취약한 파일은 없으나, 허용 목록 외 파일의 필요성은
+            # 정적으로 단정할 수 없으므로(또는 모두 필수 파일이므로) - MANUAL
             diagnosis_result="MANUAL"
             status="수동진단"
-            inspection_summary="SUID/SGID 설정 파일이 발견되었습니다. (총 ${found_count}개) 불필요한 파일인지 수동으로 확인 필요."
+            inspection_summary="SUID/SGID 설정 파일이 발견되었습니다. (총 ${found_count}개, 허용 목록 외 ${manual_count}개) 불필요한 파일인지 수동으로 확인 필요.${details:+${newline}${details}}"
             command_result="[Command: find SUID/SGID files]${newline}${raw_find_output}${newline}${newline}[발견된 파일 분석]${newline}${suid_sgids}"
             command_executed="find /usr/bin /usr/sbin /sbin /bin /usr/local/bin /usr/local/sbin /usr/libexec /usr/lib /opt /home /root /tmp /var/tmp -user root -type f \( -perm -04000 -o -perm -02000 \) -xdev"
         else
