@@ -67,7 +67,7 @@ try {
         $finalResult = "MANUAL"
         $summary = "SMB 세션 중단 관련 레지스트리 값(EnableForcedLogOff/AutoDisconnect)을 확인할 수 없어 수동 진단 필요"
         $status = "수동진단"
-    } elseif ($enableForcedLogoff -eq 1 -and $autoDisconnect -le 15) {
+    } elseif ($enableForcedLogoff -eq 1 -and $autoDisconnect -ge 0 -and $autoDisconnect -le 15) {
         $finalResult = "GOOD"
         $summary = "SMB 세션 타임아웃이 적절하게 설정됨 (15분 이하)"
         $status = "양호"

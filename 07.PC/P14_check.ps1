@@ -54,11 +54,13 @@ try {
         foreach ($av in $thirdParty) {
             $avName = $av.displayName
             # productState 비트 플래그 확인
-            # SecurityCenter2 productState에서 실시간 보호(ON) 상태는 비트 12-15 (마스크 0x1000)로 표현됨
-            # (0x10은 잘못된 마스크였음 — 실제 실시간 보호 활성화 nibble과 무관)
+            # SecurityCenter2 productState는 0xPPRRSS로 인코딩되며 RR(비트 8-15)이 실시간 보호 상태를 나타냄
+            # RR == 0x10 이면 실시간 감시 ON, RR == 0x11 이면 실시간 감시 OFF/스누즈(비활성화)
+            # 0x10과 0x11 모두 비트 12(0x1000)가 설정되므로 0x1000 단일 마스크로는 ON/OFF를 구분할 수 없음
+            # 따라서 RR nibble 전체를 격리하여 정확히 0x10일 때만 ON으로 판정
             $stateVal = $av.productState
             if ($null -ne $stateVal) {
-                $realTimeBit = ($stateVal -band 0x1000) -ne 0
+                $realTimeBit = ((($stateVal -band 0xF000) -eq 0x1000) -and (($stateVal -band 0x0F00) -eq 0))
                 if ($realTimeBit) {
                     $thirdPartyRealTime = $true
                     $thirdPartyDetails = "$avName 실시간 감시 활성화 (productState=0x{0:X})" -f [int]$stateVal

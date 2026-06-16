@@ -78,10 +78,14 @@ diagnose() {
     else
         # 2) sudoers 파일 확인
         local sudoers_files=("/etc/sudoers" "/etc/sudoers.d/*" "/etc/sudoers.tmp")
+        local main_sudoers_present=false
 
         # 2-1) sudoers 파일 권한 확인 (440 또는 더 엄격해야 함)
         for sudoers_file in /etc/sudoers /etc/sudoers.d/*; do
             if [ -f "$sudoers_file" ]; then
+                if [ "$sudoers_file" = "/etc/sudoers" ]; then
+                    main_sudoers_present=true
+                fi
                 local perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$sudoers_file" 2>/dev/null)
                 local owner=$(perl -e 'print +(getpwuid((stat shift)[4]))[0]' "$sudoers_file" 2>/dev/null || echo "unknown")
                 local group=$(perl -e 'print +(getgrgid((stat shift)[5]))[0]' "$sudoers_file" 2>/dev/null || echo "unknown")
@@ -145,6 +149,13 @@ diagnose() {
             inspection_summary="sudoers 설정에 보안 문제 존재: ${issue_details%, }"
             command_result="${issue_details%, }"
             command_executed="ls -la /etc/sudoers /etc/sudoers.d/ 2>/dev/null; grep -E 'ALL.*ALL|NOPASSWD' /etc/sudoers 2>/dev/null"
+        elif [ "$main_sudoers_present" = false ]; then
+            # sudo가 설치되어 있으나 /etc/sudoers 파일이 없는 비정상 구성 → 수동 확인 필요
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="sudo가 설치되어 있으나 /etc/sudoers 파일이 존재하지 않습니다. sudo 권한 구성을 수동으로 확인하십시오."
+            command_result="/etc/sudoers: 파일 없음"
+            command_executed="ls -la /etc/sudoers 2>/dev/null; command -v sudo"
         else
             diagnosis_result="GOOD"
             status="양호"

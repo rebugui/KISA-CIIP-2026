@@ -98,15 +98,15 @@ try {
             $status = "수동진단"
             $summary = "Nginx log paths could not be resolved; inspect active access_log and error_log paths manually."
         }
-        elseif (@($aclEvidence | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Unknown' }).Count -gt 0) {
+        elseif (@($aclEvidence | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Read' }).Count -gt 0) {
             $finalResult = "VULNERABLE"
             $status = "취약"
-            $summary = "Nginx log paths have broad local write or unreadable ACL evidence."
+            $summary = "Nginx log paths grant broad local-user read or write access (general-user access to logs)."
         }
-        elseif ($aclEvidence) {
+        elseif (@($aclEvidence | Where-Object { $_.Access -eq 'Unknown' }).Count -gt 0) {
             $finalResult = "MANUAL"
             $status = "수동진단"
-            $summary = "Nginx log paths have broad local read ACL evidence; confirm whether this is required."
+            $summary = "Nginx log path ACLs could not be read; inspect log directory/file permissions manually."
         }
         else {
             $finalResult = "GOOD"

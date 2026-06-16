@@ -220,11 +220,21 @@ invoke_cubrid_linux_check() {
             cubrid_acl_check "home/config" "${CUBRID_HOME_FOUND}" "${CUBRID_CONFIGS[@]}"
             ;;
         D-18)
-            cubrid_sql_check "SELECT name FROM db_user WHERE name='PUBLIC';" "public role restriction" || return 0
-            if printf '%s' "${CUBRID_SQL_OUTPUT}" | grep -Eiq '^PUBLIC'; then
-                cubrid_set_result "MANUAL" "$(cubrid_status_for_result MANUAL)" "CUBRID PUBLIC role/user evidence exists; confirm application/DBA roles are not assigned broadly." "${CUBRID_SQL_OUTPUT}" "${CUBRID_LAST_COMMAND}"
+            # docs/09_DBMS.md D-18: application/DBA Role must NOT be granted to PUBLIC.
+            # Inspect actual grants to PUBLIC (CUBRID surfaces a PUBLIC grant as grantee
+            # name 'PUBLIC' / GRANTEE_ID 0 in the system catalog), not the mere existence
+            # of the built-in PUBLIC user (which always exists and proves nothing).
+            cubrid_sql_check "SELECT grantor_name, grantee_name, object_name FROM db_auth WHERE grantee_name='PUBLIC';" "public role restriction" || return 0
+            if printf '%s' "${CUBRID_SQL_OUTPUT}" | grep -Eiq 'PUBLIC'; then
+                # A grant to PUBLIC was returned. Whether the granted object/privilege is a
+                # DBA/application Role (vulnerable) vs a benign built-in grant requires manual
+                # judgement against the institution's account scheme; never auto-GOOD.
+                cubrid_set_result "MANUAL" "$(cubrid_status_for_result MANUAL)" "CUBRID grants to PUBLIC were found; confirm no application/DBA Role is assigned to PUBLIC." "${CUBRID_SQL_OUTPUT}" "${CUBRID_LAST_COMMAND}"
             else
-                cubrid_set_result "GOOD" "$(cubrid_status_for_result GOOD)" "No CUBRID PUBLIC role/user evidence was returned." "${CUBRID_SQL_OUTPUT}" "${CUBRID_LAST_COMMAND}"
+                # No grant-to-PUBLIC evidence could be confirmed. Compliance cannot be proven
+                # statically (query support varies across CUBRID versions), so route to MANUAL
+                # rather than GOOD to avoid a false-good on this severity-상 item.
+                cubrid_set_result "MANUAL" "$(cubrid_status_for_result MANUAL)" "CUBRID grant-to-PUBLIC evidence could not be confirmed automatically; manually verify no application/DBA Role is assigned to PUBLIC." "${CUBRID_SQL_OUTPUT}" "${CUBRID_LAST_COMMAND}"
             fi
             ;;
         D-25)

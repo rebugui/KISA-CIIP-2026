@@ -111,7 +111,7 @@ diagnose() {
             fi
             # 마지막 3자리(소유자/그룹/기타)만 평가 (setuid 등 4자리 권한 대응)
             local perm3="${octal: -3}"
-            local g_perm="${perm3:0:1}"
+            local g_perm="${perm3:1:1}"
             local o_perm="${perm3:2:1}"
             local insecure_reason=""
             # other에 어떤 권한이라도 있으면 취약 (trailing octal != 0)

@@ -80,9 +80,9 @@ diagnose() {
             diagnosis_result="MANUAL"
             inspection_summary="named 프로세스는 실행 중이나 표준 경로에서 설정 파일을 찾을 수 없습니다. 비표준/chroot 경로의 allow-transfer 설정을 수동으로 확인하십시오."
         else
-            status="N/A"
-            diagnosis_result="N/A"
-            inspection_summary="DNS(BIND) 서비스 및 설정 파일이 존재하지 않아 점검 대상이 아닙니다."
+            status="양호"
+            diagnosis_result="GOOD"
+            inspection_summary="DNS(BIND) 서비스 미사용 (설정 파일 없음 및 named 미실행)"
         fi
         command_result="DNS 설정 파일(/etc/named.conf, /var/named/chroot/etc/named.conf)이 존재하지 않습니다."
     fi

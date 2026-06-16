@@ -383,8 +383,12 @@ function Invoke-TomcatWindowsCheck {
         'WEB-14' {
             $targets = @($state.ServerXml + $state.TomcatUsersXml + $state.WebXml + $state.ContextXml + $state.Webapps | Select-Object -Unique)
             $acl = foreach ($path in $targets) { if (Test-Path -LiteralPath $path) { Get-TomcatBroadAclEvidence -Path $path -Role 'TomcatPath' } }
-            $bad = @($acl | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Unknown' })
-            if ($bad.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Broad local write or unknown ACL evidence was found on Tomcat paths.' (($bad | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Get-Acl Tomcat config and web paths' }
+            $bad = @($acl | Where-Object { $_.Access -eq 'Write' })
+            if ($bad.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Broad local write ACL evidence was found on Tomcat paths.' (($bad | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Get-Acl Tomcat config and web paths' }
+            # Access='Unknown' means Get-Acl failed: the actual permission state is evidence-unobtainable,
+            # so the path permission cannot be confirmed compliant or non-compliant either way -> MANUAL, not VULNERABLE (mirrors WEB-03).
+            $unreadable = @($acl | Where-Object { $_.Access -eq 'Unknown' })
+            if ($unreadable.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Tomcat path ACL could not be read; permission state is unobtainable. Verify manually that no unnecessary access permission is granted.' (($unreadable | ForEach-Object { "$($_.Path) => $($_.Rights)" }) -join "`n") 'Get-Acl Tomcat config and web paths' }
             if ($acl) { return New-TomcatResult 'MANUAL' 'Broad local read ACL evidence was found on Tomcat paths; confirm sensitive files are excluded.' (($acl | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Get-Acl Tomcat config and web paths' }
             return New-TomcatResult 'GOOD' 'No broad local user ACL entries were found on assessed Tomcat paths.' "Assessed paths: $($targets -join ', ')" 'Get-Acl Tomcat config and web paths'
         }

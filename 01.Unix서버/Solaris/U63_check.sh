@@ -61,6 +61,7 @@ diagnose() {
 
     local sudo_installed=false
     local sudoers_issues=false
+    local sudoers_measured=false
     local issue_details=""
 
     # 1) sudo 설치 여부 확인
@@ -81,6 +82,7 @@ diagnose() {
         # 2-1) sudoers 파일 권한 확인 (440 또는 더 엄격해야 함)
         for sudoers_file in /etc/sudoers /etc/sudoers.d/*; do
             if [ -f "$sudoers_file" ]; then
+                sudoers_measured=true
                 local perms=$(perl -e 'printf "%04o\n", (stat($ARGV[0]))[2] & 07777' "$sudoers_file" 2>/dev/null)
                 local owner=$(perl -e '@s=stat($ARGV[0]); print scalar(getpwuid($s[4])) . ":" . scalar(getgrgid($s[5]))' "$sudoers_file" 2>/dev/null)
 
@@ -143,10 +145,18 @@ diagnose() {
             inspection_summary="sudoers 설정에 보안 문제 존재: ${issue_details%, }"
             command_result="${issue_details%, }"
             command_executed="ls -la /etc/sudoers /etc/sudoers.d/ 2>/dev/null; grep -E 'ALL.*ALL|NOPASSWD' /etc/sudoers 2>/dev/null"
+        elif [ "$sudoers_measured" = false ]; then
+            # sudo가 설치되어 있으나 측정 가능한 sudoers 파일(/etc/sudoers 또는 /etc/sudoers.d/*)이 없음
+            # → 권한/소유자를 실제로 확인할 수 없으므로 수동 진단 필요
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="sudo가 설치되어 있으나 /etc/sudoers 파일이 존재하지 않습니다. sudoers 권한/소유자 구성을 수동으로 확인하십시오.${issue_details:+ 참고: ${issue_details%, }}"
+            command_result="sudoers: 측정 가능한 파일 없음"
+            command_executed="ls -la /etc/sudoers /etc/sudoers.d/ 2>/dev/null"
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="sudoers 설정이 안전하게 구성됨 (권한 440, root:root)"
+            inspection_summary="sudoers 설정이 안전하게 구성됨 (소유자 root, 권한 640 이하)"
             command_result="sudoers: secure configuration"
             command_executed="perl -e 'printf \"%04o\n\", (stat)[2] & 07777' /etc/sudoers 2>/dev/null; ls -la /etc/sudoers"
         fi

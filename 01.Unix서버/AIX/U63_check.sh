@@ -146,6 +146,14 @@ diagnose() {
             inspection_summary="sudoers 설정에 보안 문제 존재: ${issue_details%, }"
             command_result="${issue_details%, }"
             command_executed="ls -la /etc/sudoers /etc/sudoers.d/ 2>/dev/null; grep -E 'ALL.*ALL|NOPASSWD' /etc/sudoers 2>/dev/null"
+        elif [ ! -f /etc/sudoers ]; then
+            # sudo가 설치되어 있으나 /etc/sudoers 파일이 존재하지 않는 비정상 구성
+            # → 소유자 root, 권한 640 충족 여부를 증명할 수 없으므로 수동 확인 필요
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="sudo가 설치되어 있으나 /etc/sudoers 파일이 존재하지 않습니다. sudo 권한 구성을 수동으로 확인하십시오."
+            command_result="/etc/sudoers: 파일 없음"
+            command_executed="command -v sudo; ls -la /etc/sudoers 2>/dev/null"
         else
             diagnosis_result="GOOD"
             status="양호"

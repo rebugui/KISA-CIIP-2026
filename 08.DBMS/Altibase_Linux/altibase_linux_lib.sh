@@ -268,11 +268,11 @@ invoke_altibase_linux_check() {
             altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase audit table privilege evidence was collected; confirm only administrators can access audit tables." "${ALTIBASE_SQL_OUTPUT}" "SELECT audit table grants FROM system_.sys_grant_object_"
             ;;
         D-18)
-            altibase_sql_check "SELECT 'PUBLIC_GRANT_FOUND' AS FLAG, GRANTOR_ID, OBJ_ID, PRIV_ID FROM system_.sys_grant_object_ WHERE GRANTEE_ID = 0;" "public role restriction" || return 0
+            altibase_sql_check "SELECT 'PUBLIC_GRANT_FOUND' AS FLAG, GRANTOR_ID, OBJ_ID, PRIV_ID FROM system_.sys_grant_object_ WHERE GRANTEE_ID = 0 UNION ALL SELECT 'PUBLIC_GRANT_FOUND' AS FLAG, GRANTOR_ID, NULL, PRIV_ID FROM system_.sys_grant_system_ WHERE GRANTEE_ID = 0;" "public role restriction" || return 0
             if printf '%s' "${ALTIBASE_SQL_OUTPUT}" | grep -Eq 'PUBLIC_GRANT_FOUND'; then
-                altibase_set_result "VULNERABLE" "$(altibase_status_for_result VULNERABLE)" "Altibase object permissions granted to PUBLIC (GRANTEE_ID=0) were found; revoke the PUBLIC grant from application/DBA objects." "${ALTIBASE_SQL_OUTPUT}" "SELECT object grants WHERE GRANTEE_ID = 0 FROM system_.sys_grant_object_"
+                altibase_set_result "VULNERABLE" "$(altibase_status_for_result VULNERABLE)" "Altibase object or system permissions granted to PUBLIC (GRANTEE_ID=0) were found; revoke the PUBLIC grant from application/DBA objects and DBA-equivalent system privileges." "${ALTIBASE_SQL_OUTPUT}" "SELECT object/system grants WHERE GRANTEE_ID = 0 FROM system_.sys_grant_object_/sys_grant_system_"
             else
-                altibase_set_result "GOOD" "$(altibase_status_for_result GOOD)" "No Altibase object permission granted to PUBLIC (GRANTEE_ID=0) was returned." "${ALTIBASE_SQL_OUTPUT}" "SELECT object grants WHERE GRANTEE_ID = 0 FROM system_.sys_grant_object_"
+                altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "No Altibase object or system permission granted to PUBLIC (GRANTEE_ID=0) was returned; confirm no application/DBA Role is set to Public or Guest (Guest-principal grants are not auto-detectable, so verify manually)." "${ALTIBASE_SQL_OUTPUT}" "SELECT object/system grants WHERE GRANTEE_ID = 0 FROM system_.sys_grant_object_/sys_grant_system_"
             fi
             ;;
         D-19)

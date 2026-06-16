@@ -53,6 +53,9 @@ try {
             # 양호 기준은 동적 업데이트 '없음(0)'인 경우에만 성립한다.
             # 주의: ($x -eq $true)는 $true를 1로 강제 변환하므로 2(보안 동적)를 false로 오판한다.
             # 따라서 정수 비교로 0 이외의 모든 값(1, 2)을 동적 업데이트 설정으로 간주한다.
+            # 가이드라인은 '각 조회 영역 > 해당 영역 > 속성 > 동적 업데이트'로 영역(zone)별 점검을 요구한다.
+            # MicrosoftDNS_Server.AllowUpdate는 서버 기본값일 뿐, 영역별 설정은 독립적이므로
+            # 반드시 MicrosoftDNS_Zone을 별도로 열거하여 영역별 AllowUpdate를 확인해야 한다.
             $updateEnabled = $false
             $updateDetails = @()
             foreach ($srv in $dnsServer) {
@@ -63,21 +66,53 @@ try {
                     2 { "Secure only" }
                     default { "Unknown ($au)" }
                 }
-                $updateDetails += "AllowUpdate=$au ($label)"
+                $updateDetails += "Server default AllowUpdate=$au ($label)"
                 if ($au -ne 0) {
                     $updateEnabled = $true
+                }
+            }
+
+            # 영역(zone)별 동적 업데이트 설정 점검 (서버 기본값과 독립적인 속성)
+            $zoneQueryFailed = $false
+            $zones = Get-WmiObject -Class MicrosoftDNS_Zone -Namespace 'Root\MicrosoftDNS' -ErrorAction SilentlyContinue
+            if ($zones) {
+                foreach ($zone in $zones) {
+                    # 자동 생성된 시스템 영역(예: 0.in-addr.arpa, TrustAnchors 등)은 점검 대상에서 제외
+                    if ($zone.AutoCreated -eq $true) { continue }
+                    $zau = [int]$zone.AllowUpdate
+                    $zlabel = switch ($zau) {
+                        0 { "None" }
+                        1 { "Unsecure (nonsecure and secure)" }
+                        2 { "Secure only" }
+                        default { "Unknown ($zau)" }
+                    }
+                    $zname = $zone.Name
+                    $updateDetails += "Zone '$zname' AllowUpdate=$zau ($zlabel)"
+                    if ($zau -ne 0) {
+                        $updateEnabled = $true
+                    }
+                }
+            } else {
+                # DNS 서비스가 구동 중인데 영역을 열거하지 못한 경우 GOOD으로 단정할 수 없음
+                if ($service.Status -eq 'Running') {
+                    $zoneQueryFailed = $true
                 }
             }
 
             if ($updateEnabled) {
                 $finalResult = "VULNERABLE"
                 $status = "취약"
-                $summary = "DNS 서비스가 활성화되어 있고 동적 업데이트가 설정됨 (보안 동적 업데이트 포함)"
+                $summary = "DNS 서비스가 활성화되어 있고 동적 업데이트가 설정됨 (서버 또는 영역 수준, 보안 동적 업데이트 포함)"
                 $commandOutput = "DNS service running with dynamic updates enabled: " + ($updateDetails -join '; ')
+            } elseif ($zoneQueryFailed) {
+                $finalResult = "MANUAL"
+                $status = "수동진단"
+                $summary = "DNS 서비스가 구동 중이나 영역(zone)별 동적 업데이트 설정을 확인하지 못함: 각 조회 영역의 속성에서 동적 업데이트 설정을 수동 확인 필요"
+                $commandOutput = "DNS service running but MicrosoftDNS_Zone enumeration failed; manual per-zone verification required. " + ($updateDetails -join '; ')
             } else {
                 $finalResult = "GOOD"
                 $status = "양호"
-                $summary = "DNS 서비스가 비활성화되거나 동적 업데이트가 '없음'으로 설정됨"
+                $summary = "DNS 서비스가 비활성화되거나 동적 업데이트가 '없음'으로 설정됨 (서버 및 영역 수준)"
                 $commandOutput = "DNS service running with dynamic updates disabled: " + ($updateDetails -join '; ')
             }
         } else {
@@ -87,7 +122,7 @@ try {
             $commandOutput = "Failed to query DNS server configuration"
         }
 
-        $commandExecuted = "Get-Service -Name 'DNS'; Get-WmiObject -Class MicrosoftDNS_Server"
+        $commandExecuted = "Get-Service -Name 'DNS'; Get-WmiObject -Class MicrosoftDNS_Server; Get-WmiObject -Class MicrosoftDNS_Zone"
     }
 
 } catch {

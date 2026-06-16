@@ -77,10 +77,17 @@ try {
             )
 
             foreach ($pattern in $definitePatterns) {
-                $files = Get-ChildItem -Path $path -Filter $pattern -Recurse -ErrorAction SilentlyContinue
+                $recurseErrors = $null
+                $files = Get-ChildItem -Path $path -Filter $pattern -Recurse -ErrorAction SilentlyContinue -ErrorVariable recurseErrors
                 foreach ($file in $files) {
                     if ($file.Name -ne "web.config") {
                         $definiteFiles += "$($file.Name) in $path"
+                    }
+                }
+                # 재귀 중 접근 거부된 하위 디렉터리 -> 조용히 누락하면 양호 오판 가능 -> 수동진단 대상
+                foreach ($re in $recurseErrors) {
+                    if ($re.CategoryInfo.Category -eq 'PermissionDenied' -or $re.Exception -is [System.UnauthorizedAccessException]) {
+                        $unreadablePaths += "$($site.Name): $($re.TargetObject) (접근 불가)"
                     }
                 }
             }
@@ -100,7 +107,22 @@ try {
         }
     }
 
-    $commandExecuted = "Get-ChildItem -Path {webroot} -Filter {[definite] *.bak,*.backup,*.old,*.orig,*.tmp; [ambiguous] *.txt,test.*,sample.*} -Recurse"
+    # IIS 기본 설치 시 생성되는 불필요한 샘플/매뉴얼 디렉터리 (웹 루트 외부에 존재) -> 존재 시 취약
+    # 가이드라인 명시 경로: iissamples, iishelp, msadc\sample, IISADMPWD
+    $sampleDirs = @(
+        (Join-Path $env:SystemDrive "inetpub\iissamples"),
+        (Join-Path $env:SystemRoot "help\iishelp"),
+        (Join-Path ${env:CommonProgramFiles} "system\msadc\sample"),
+        (Join-Path $env:SystemRoot "System32\Inetsrv\IISADMPWD")
+    )
+    foreach ($sampleDir in $sampleDirs) {
+        if (-not $sampleDir) { continue }
+        if (Test-Path $sampleDir) {
+            $definiteFiles += "기본 샘플 디렉터리: $sampleDir"
+        }
+    }
+
+    $commandExecuted = "Get-ChildItem -Path {webroot} -Filter {[definite] *.bak,*.backup,*.old,*.orig,*.tmp; [ambiguous] *.txt,test.*,sample.*} -Recurse; Test-Path {iissamples,iishelp,msadc\sample,IISADMPWD}"
 
     if ($definiteFiles.Count -gt 0) {
         # Tier A — 확장자로 명확한 백업/임시 파일 존재 -> 취약

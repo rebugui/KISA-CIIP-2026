@@ -63,7 +63,7 @@ diagnose() {
     local system_accounts=("root" "bin" "daemon" "adm" "lp" "sync" "shutdown" "halt" "mail" "news" "uucp" "operator" "games" "gopher" "ftp" "nobody" "sys")
 
     # ftpusers 파일 위치 확인 (다양한 경로 지원)
-    local ftpusers_files=("/etc/ftpusers" "/etc/vsftpd/ftpusers" "/etc/pure-ftpd/ftpusers" "/etc/proftpd/ftpusers")
+    local ftpusers_files=("/etc/ftpd/ftpusers" "/etc/ftpusers" "/etc/vsftpd/ftpusers" "/etc/pure-ftpd/ftpusers" "/etc/proftpd/ftpusers")
     local found_file=""
     local file_content=""
 
