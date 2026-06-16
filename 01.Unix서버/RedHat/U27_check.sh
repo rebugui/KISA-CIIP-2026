@@ -84,7 +84,7 @@ diagnose() {
     while IFS=: read -r username _ uid _ _ homedir shell; do
         # 시스템 노이즈 계정 (UID < 100, root 제외)만 건너뜀 (서비스 계정 uid>=100 포함, HP-UX/Solaris와 동일 기준)
         [ "$uid" -ne 0 ] 2>/dev/null && [ "$uid" -lt 100 ] 2>/dev/null && continue
-        [ -z "$homedir" ] || [ "$homedir" = "/" ] && continue
+        [ -z "$homedir" ] && continue
 
         local rhosts_file="${homedir}/.rhosts"
         if [ -f "$rhosts_file" ]; then

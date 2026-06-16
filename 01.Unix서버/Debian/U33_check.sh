@@ -238,22 +238,21 @@ diagnose() {
     [ -n "$unreadable_areas" ] && scope_note="${scope_note}${newline}[읽기 불가로 미점검] ${unreadable_areas% }"
 
     # 최종 판정
-    # - /tmp,/var/tmp,/dev/shm 의 비표준 숨김 항목은 백도어 은닉 상습 경로이므로 취약(VULNERABLE).
+    # - /tmp,/var/tmp,/dev/shm 의 비표준 숨김 항목은 백도어 은닉 상습 경로이나, 정상 산출물
+    #   (JVM hsperfdata .java_pidNNNN, 브라우저 임시파일 등)과 악성 파일을 정적으로 단정할 수
+    #   없으므로 자동 '취약' 단정 대신 수동진단(MANUAL)으로 라우팅하여 오탐을 방지하되, 발견된
+    #   항목 목록을 근거로 제시해 백도어 미탐(false-good)도 방지(오라클·AIX U33과 정렬).
     # - 홈 디렉터리의 통상적이지 않은 dot 항목은 정상/악성을 정적으로 단정할 수 없어 수동진단(MANUAL).
     # - 읽기 불가 영역이 있어도 수동진단(MANUAL).
-    if [ "$suspicious_count" -gt 0 ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="임시/공유 디렉터리(/tmp, /var/tmp, /dev/shm)에서 의심스러운 숨겨진 파일 ${suspicious_count}개가 발견되었습니다: ${suspicious_files%, }. 해당 파일들을 검토한 후 불필요하거나 악성적인 경우 제거하세요: rm -rf <file>"
-        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Suspicious files found]${newline}${suspicious_files%, }${newline}${scope_note}"
-    elif [ "$home_unrecognized_count" -gt 0 ] || [ -n "$unreadable_areas" ]; then
+    if [ "$suspicious_count" -gt 0 ] || [ "$home_unrecognized_count" -gt 0 ] || [ -n "$unreadable_areas" ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
         local manual_detail=""
-        [ "$home_unrecognized_count" -gt 0 ] && manual_detail="홈 디렉터리 내 통상적이지 않은 숨김 항목 ${home_unrecognized_count}개: ${home_unrecognized%, }. 불필요하거나 의심스러운 항목인지 수동으로 확인하세요."
+        [ "$suspicious_count" -gt 0 ] && manual_detail="임시/공유 디렉터리(/tmp, /var/tmp, /dev/shm)의 비표준 숨김 항목 ${suspicious_count}개: ${suspicious_files%, }. 정상 산출물(JVM hsperfdata 등)이 아닌 불필요하거나 의심스러운 파일인지 ls -al 명령어로 수동 확인 후, 악성적인 경우 제거하세요: rm -rf <file>"
+        [ "$home_unrecognized_count" -gt 0 ] && manual_detail="${manual_detail}${manual_detail:+ }홈 디렉터리 내 통상적이지 않은 숨김 항목 ${home_unrecognized_count}개: ${home_unrecognized%, }. 불필요하거나 의심스러운 항목인지 수동으로 확인하세요."
         [ -n "$unreadable_areas" ] && manual_detail="${manual_detail}${manual_detail:+ }일부 영역을 읽을 수 없어 수동 점검 필요 (읽기 불가: ${unreadable_areas% })."
         inspection_summary="${manual_detail} 확인된 홈 디렉토리: ${checked_homedirs}개, 전체 숨겨진 파일: ${total_hidden}개"
-        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Home hidden items requiring manual review]${newline}${home_unrecognized%, }${newline}${scope_note}"
+        command_result="[Hidden files search results]${newline}${raw_find_output}${newline}[Hidden items requiring manual review]${newline}${suspicious_files%, }${newline}${home_unrecognized%, }${newline}${scope_note}"
     else
         diagnosis_result="GOOD"
         status="양호"

@@ -277,8 +277,12 @@ function Invoke-TomcatWindowsCheck {
         'WEB-03' {
             if ($state.TomcatUsersXml.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Tomcat was found, but tomcat-users.xml was not located.' $evidencePrefix 'Inspect tomcat-users.xml ACLs' }
             $acl = foreach ($file in $state.TomcatUsersXml) { Get-TomcatBroadAclEvidence -Path $file -Role 'PasswordFile' }
-            $bad = @($acl | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Read' -or $_.Access -eq 'Unknown' })
+            $bad = @($acl | Where-Object { $_.Access -eq 'Write' -or $_.Access -eq 'Read' })
             if ($bad.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'tomcat-users.xml has broad local user ACL evidence.' (($bad | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Get-Acl tomcat-users.xml' }
+            # Access='Unknown' means Get-Acl failed: the actual permission state is evidence-unobtainable,
+            # so the password-file permission cannot be confirmed <=600 either way -> MANUAL, not VULNERABLE.
+            $unreadable = @($acl | Where-Object { $_.Access -eq 'Unknown' })
+            if ($unreadable.Count -gt 0) { return New-TomcatResult 'MANUAL' 'tomcat-users.xml ACL could not be read; permission state is unobtainable. Verify the file permission is 600 or stricter manually.' (($unreadable | ForEach-Object { "$($_.Path) => $($_.Rights)" }) -join "`n") 'Get-Acl tomcat-users.xml' }
             return New-TomcatResult 'GOOD' 'No broad local user ACL entries were found on tomcat-users.xml.' "Files: $($state.TomcatUsersXml -join ', ')" 'Get-Acl tomcat-users.xml'
         }
         'WEB-04' {
@@ -298,9 +302,13 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'GOOD' 'No active Tomcat CGI servlet configuration evidence was found.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml CGI servlet configuration'
         }
         'WEB-06' {
-            $allowLinking = @([regex]::Matches($contextText, '(?i)allowLinking\s*=\s*"true"') | ForEach-Object { $_.Value })
+            # allowLinking="true" is a <Context> attribute the guideline documents in BOTH
+            # conf/server.xml and conf/context.xml; scan the combined text (mirrors Linux WEB06),
+            # and accept single- or double-quoted true.
+            $linkText = ($serverText + "`n" + $contextText)
+            $allowLinking = @([regex]::Matches($linkText, '(?i)allowLinking\s*=\s*["'']true["'']') | ForEach-Object { $_.Value })
             if ($allowLinking.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat allowLinking is enabled and may allow traversal through linked paths.' ($allowLinking -join "`n") 'Parse context.xml allowLinking' }
-            return New-TomcatResult 'GOOD' 'No Tomcat allowLinking=true evidence was found in context configuration.' "context.xml files: $($state.ContextXml -join ', ')" 'Parse context.xml allowLinking'
+            return New-TomcatResult 'GOOD' 'No Tomcat allowLinking=true evidence was found in server/context configuration.' "server.xml files: $($state.ServerXml -join ', '); context.xml files: $($state.ContextXml -join ', ')" 'Parse server.xml/context.xml allowLinking'
         }
         'WEB-07' {
             $findings = [System.Collections.Generic.List[string]]::new()

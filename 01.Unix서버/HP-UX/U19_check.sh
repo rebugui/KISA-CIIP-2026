@@ -81,7 +81,7 @@ diagnose() {
         local file_owner=$(perl -e '($dev,$ino,$mode,$nlink,$uid,$gid)=stat(shift); print getpwuid($uid).":".getgrgid($gid)' "$target_file" 2>/dev/null)
 
         # 소유자 및 권한 확인 (644 이하: 644 마스크 외 비트가 없으면 양호)
-        if [ "$file_owner" = "root:root" ] && [[ "$perms_octal" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms_octal & ~8#644 & 07777 ))" -eq 0 ]; then
+        if [ "${file_owner%%:*}" = "root" ] && [[ "$perms_octal" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms_octal & ~8#644 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $perms_octal, 소유자: $file_owner"
         else

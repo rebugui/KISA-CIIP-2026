@@ -67,10 +67,10 @@ try {
                 $status = "취약"
             }
         } else {
-            $finalResult = "VULNERABLE"
-            $summary = "RDP 사용 중이나 암호화 수준 설정을 찾을 수 없음"
-            $status = "취약"
-            $commandOutput = "레지스트리 값 없음 (MinEncryptionLevel) - RDP 활성화 상태"
+            $finalResult = "MANUAL"
+            $summary = "암호화 수준 레지스트리 값 부재 - 유효 정책 수동 확인 필요 (Windows 기본값은 '클라이언트와 호환 가능(중간)'일 수 있음)"
+            $status = "수동진단"
+            $commandOutput = "레지스트리 값 없음 (MinEncryptionLevel) - RDP 활성화 상태, 유효 암호화 정책 수동 확인 필요"
         }
     }
 } catch {

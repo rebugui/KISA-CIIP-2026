@@ -240,8 +240,8 @@ invoke_tibero_linux_check() {
             tibero_sql_check "SELECT resource_name||'='||limit FROM dba_profiles WHERE resource_name IN ('FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME') ORDER BY profile,resource_name;" "failed login lockout policy" || return 0
             if ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[^[:space:]]'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero returned no FAILED_LOGIN_ATTEMPTS/PASSWORD_LOCK_TIME policy rows; the login-failure lockout control is not configured." "No rows returned (no failed-login lockout policy configured)." "${TIBERO_LAST_COMMAND}"
-            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'FAILED_LOGIN_ATTEMPTS=UNLIMITED|PASSWORD_LOCK_TIME=UNLIMITED'; then
-                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero failed-login lockout profile controls are weak." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'FAILED_LOGIN_ATTEMPTS=UNLIMITED'; then
+                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero failed-login lockout profile controls are weak (FAILED_LOGIN_ATTEMPTS=UNLIMITED; no login-attempt limit). PASSWORD_LOCK_TIME=UNLIMITED alone is an accepted lock policy per KISA D-09 and is not treated as a vulnerability." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
                 tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero failed-login lockout profile evidence was collected." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             fi

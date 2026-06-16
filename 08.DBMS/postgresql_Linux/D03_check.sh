@@ -57,6 +57,7 @@ diagnose() {
     local command_executed=""
     local vulnerabilities_found=0
     local expiry_indeterminate=0
+    local complexity_indeterminate=0
 
     # Initialize PostgreSQL connection variables
     init_postgresql_vars
@@ -112,31 +113,41 @@ diagnose() {
         inspection_summary+="수동확인 필요: 비밀번호 만료 정책 조회 불가(결과 불명확); "
     fi
 
-    # 비밀번호 복잡도 확인 (passwordcheck 확장 모듈)
-    local passwordcheck_query="SELECT * FROM pg_available_extensions WHERE name='passwordcheck';"
-    local passwordcheck_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -t -c "${passwordcheck_query}" 2>/dev/null | xargs || echo "")
+    # 비밀번호 복잡도 확인 (passwordcheck)
+    # passwordcheck 는 shared_preload_libraries 에 미리 로드(preload)된 경우에만
+    # 실제로 복잡도를 강제한다. pg_available_extensions 는 contrib 패키지가 설치되어
+    # 디스크에 control 파일이 존재하는지(=가용 여부)만 나타내므로, 가용/설치만으로
+    # 복잡도가 강제된다고 단정하면 거짓 양호가 발생한다.
+    # 따라서 shared_preload_libraries 에 'passwordcheck' 가 실제로 로드되어 있는지로
+    # 강제 여부를 판단한다.
+    local preload_query="SHOW shared_preload_libraries;"
+    local preload_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -t -A -c "${preload_query}" 2>/dev/null | xargs || echo "__QUERY_FAILED__")
 
-    if [ -z "$passwordcheck_result" ]; then
-        ((vulnerabilities_found++)) || true
-        inspection_summary+="취약: passwordcheck 확장 모듈 미설치; "
+    if [ "$preload_result" = "__QUERY_FAILED__" ]; then
+        # 로드 라이브러리 조회 실패: 강제 여부 검증 불가 -> 자동 양호 단정 불가
+        complexity_indeterminate=1
+        inspection_summary+="수동확인 필요: shared_preload_libraries 조회 불가(복잡도 강제 여부 불명확); "
+    elif printf '%s' "$preload_result" | grep -qw "passwordcheck"; then
+        inspection_summary+="양호: passwordcheck 가 shared_preload_libraries 에 로드되어 복잡도 강제됨; "
     else
-        inspection_summary+="양호: passwordcheck 확장 모듈 설치됨; "
+        ((vulnerabilities_found++)) || true
+        inspection_summary+="취약: passwordcheck 가 shared_preload_libraries 에 로드되지 않아 복잡도 미강제; "
     fi
 
     if [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-    elif [ $expiry_indeterminate -gt 0 ]; then
-        # 만료 정책을 검증할 수 없으면 양호로 단정 불가 -> 수동진단 (거짓 양호 방지)
+    elif [ $expiry_indeterminate -gt 0 ] || [ $complexity_indeterminate -gt 0 ]; then
+        # 만료 정책 또는 복잡도 강제 여부를 검증할 수 없으면 양호로 단정 불가 -> 수동진단 (거짓 양호 방지)
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary+="비밀번호 만료 정책 검증 불가로 자동 양호 판단 불가 (수동진단 필요); "
+        inspection_summary+="비밀번호 만료 정책 또는 복잡도 강제 여부 검증 불가로 자동 양호 판단 불가 (수동진단 필요); "
     else
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="비밀번호 정책이 적절히 설정됨"
     fi
-    command_executed="psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_ADMIN_USER} -d postgres -c \"SHOW password_encryption; SELECT * FROM pg_available_extensions WHERE name='passwordcheck';\""
+    command_executed="psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_ADMIN_USER} -d postgres -c \"SHOW password_encryption; SHOW shared_preload_libraries;\""
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
     verify_result_saved "${ITEM_ID}"

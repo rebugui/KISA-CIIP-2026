@@ -84,22 +84,64 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
+    # 시드 설정 위치. 확장자 없는 vhost(예: 데비안/우분투의 sites-enabled/default
+    # 심볼릭 링크)도 포함되도록 .conf 글롭과 확장자 없는 디렉터리 글롭을 함께 사용한다.
     local nginx_conf_locations=(
         "/etc/nginx/nginx.conf"
         "/etc/nginx/conf.d/*.conf"
+        "/etc/nginx/conf.d/*"
         "/etc/nginx/sites-enabled/*.conf"
+        "/etc/nginx/sites-enabled/*"
     )
+
+    # 이미 스캔한 파일을 다시 열지 않도록 추적한다.
+    local scanned_files=""
+
+    scan_nginx_conf_file() {
+        local conf_file="$1"
+        if [ ! -f "${conf_file}" ] || [ ! -r "${conf_file}" ]; then
+            return 0
+        fi
+        case "${scanned_files}" in
+            *"|${conf_file}|"*) return 0 ;;
+        esac
+        scanned_files="${scanned_files}|${conf_file}|"
+
+        # Check for FastCGI/SCGI/UWSGI/CGI configurations
+        local found_cgi
+        found_cgi=$(grep -E "^\s*(fastcgi_pass|scgi_pass|uwsgi_pass|cgi_pass)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
+        if [ -n "${found_cgi}" ]; then
+            cgi_locations="${cgi_locations}"$'\n'"${conf_file}: ${found_cgi}"
+            ((cgi_count++)) || true
+        fi
+
+        # include 지시자를 해석하여 외부/확장자 없는 vhost의 *_pass 설정도 스캔한다.
+        # (Windows 형제 스크립트의 include-following ActiveLines와 동일한 의도)
+        local include_targets
+        include_targets=$(grep -E "^\s*include\s+" "${conf_file}" 2>/dev/null | grep -v "^\s*#" \
+            | sed -E 's/^\s*include\s+//; s/;\s*$//' || true)
+        if [ -n "${include_targets}" ]; then
+            local inc
+            while IFS= read -r inc; do
+                [ -n "${inc}" ] || continue
+                # 상대 경로는 nginx 기본 prefix(/etc/nginx) 기준으로 해석한다.
+                case "${inc}" in
+                    /*) : ;;
+                    *) inc="/etc/nginx/${inc}" ;;
+                esac
+                local inc_file
+                for inc_file in $inc; do
+                    if [ -f "${inc_file}" ] && [ -r "${inc_file}" ]; then
+                        scan_nginx_conf_file "${inc_file}"
+                    fi
+                done
+            done <<< "${include_targets}"
+        fi
+    }
 
     for conf_pattern in "${nginx_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
-            if [ -f "${conf_file}" ]; then
-                # Check for FastCGI/SCGI/UWSGI/CGI configurations
-                local found_cgi=$(grep -E "^\s*(fastcgi_pass|scgi_pass|uwsgi_pass|cgi_pass)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
-                if [ -n "${found_cgi}" ]; then
-                    cgi_locations="${cgi_locations}"$'\n'"${conf_file}: ${found_cgi}"
-                    ((cgi_count++)) || true
-                fi
-            fi
+            scan_nginx_conf_file "${conf_file}"
         done
     done
 

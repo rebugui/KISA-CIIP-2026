@@ -190,16 +190,18 @@ diagnose() {
                     filetype="symlink"
                 fi
 
-                # 실행 가능한 숨김 파일은 명백한 이상 징후이므로 취약으로 판정하고,
-                # 그 외(비실행 파일/디렉토리/심볼릭링크)는 정적으로 악성 여부를
-                # 단정할 수 없으므로 수동 점검(MANUAL) 대상으로 분류함
+                # 화이트리스트에 없는 숨김 파일/디렉토리는 정적으로 악성 여부를
+                # 단정할 수 없으므로(실행 비트만으로는 불필요/악성을 증명하지 못함)
+                # 모두 수동 점검(MANUAL) 대상으로 분류함. AIX U-33과 동일하게
+                # ls -al 수동 확인을 강제하여 오탐(정상 관리자 실행 dotfile)을 방지함.
+                # 실행 가능 파일은 우선 검토 지표로 권한 정보를 함께 기록함.
                 local perms=""
                 if [ -f "$hidden_file" ]; then
                     perms=$(perl -e '@stat=stat("'$hidden_file'"); printf "%04o\n", $stat[2] & 07777' 2>/dev/null || echo "0000")
                     if [[ "$perms" =~ ^[0-9]*[1357][0-9]*$ ]]; then
-                        # 실행 가능한 파일 (명백한 이상 징후 → 취약)
-                        suspicious_files="${suspicious_files}${home}/${filename}(${filetype}, executable: ${perms}), "
-                        ((suspicious_count++)) || true
+                        # 실행 가능한 파일 → 우선 수동 점검 대상(권한 기록)
+                        review_files="${review_files}${home}/${filename}(${filetype}, executable: ${perms}), "
+                        ((review_count++)) || true
                     else
                         # 비실행 일반 파일 → 수동 점검 대상
                         review_files="${review_files}${home}/${filename}(${filetype}), "

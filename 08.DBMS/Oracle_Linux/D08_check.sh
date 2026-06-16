@@ -162,7 +162,7 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="Oracle ${full_version}은 취약한 암호화 알고리즘(${encryption_algorithm})을 사용합니다. Oracle 12.2+로 업그레이드하여 SHA-512/AES 암호화를 적용하세요."
-    elif [[ "${full_version}" == "12.2"* ]] || [[ "${oracle_version}" -ge 12 ]] && [[ "${oracle_version}" -ne 12 ]]; then
+    elif [[ "${full_version}" == "12.2"* ]] || { [[ "${oracle_version}" -ge 12 ]] && [[ "${oracle_version}" -ne 12 ]]; }; then
         encryption_algorithm="SHA-512/AES"
         diagnosis_result="GOOD"
         status="양호"

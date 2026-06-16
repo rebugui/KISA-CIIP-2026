@@ -117,7 +117,15 @@ diagnose() {
                 ((vulnerabilities_found++)) || true
                 inspection_summary="취약: 모든 원격 호스트 접속 허용됨"
             else
-                inspection_summary=" 원격 접속 제한됨"
+                # 로컬 외 원격 host 규칙 존재 여부 확인 (host 계열 연결 유형 포함)
+                local remote_host_access=$(grep -E "^\s*host(ssl|nossl|gssenc|nogssenc)?\s+" "$pg_hba_path" | grep -v "127\.0\.0\.1" | grep -v "::1" | grep -v "localhost" || echo "")
+                if [ -n "$remote_host_access" ]; then
+                    # 지정 IP 제한 여부는 기관 허용 IP 정책 대비 판단이 필요하므로 수동진단으로 분류
+                    needs_manual=1
+                    inspection_summary="수동진단: 원격 host 규칙 존재 - 지정된 IP로 제한되었는지 수동 확인 필요"
+                else
+                    inspection_summary="양호: 원격 접속 제한됨 (로컬만 허용)"
+                fi
             fi
         else
             needs_manual=1

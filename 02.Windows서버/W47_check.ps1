@@ -36,7 +36,7 @@ if (-not (Test-RunallMode)) {
 # 1. Check screen saver settings
 try {
     $screenSaver = Get-ItemProperty -Path 'HKCU:\Control Panel\Desktop' -ErrorAction SilentlyContinue
-    $scrnsaveexe = if ($screenSaver) { $screenSaver.SCRNSAVE.EXE } else { '' }
+    $scrnsaveexe = if ($screenSaver) { $screenSaver.'SCRNSAVE.EXE' } else { '' }
     $screenSaveTimeOut = if ($screenSaver) { $screenSaver.ScreenSaveTimeOut } else { 0 }
     $screenSaveIsSecure = if ($screenSaver) { $screenSaver.ScreenSaverIsSecure } else { 0 }
 

@@ -82,18 +82,17 @@ diagnose() {
         local file_perms=$(stat -c "%a" "$target_file" 2>/dev/null)
         local file_owner=$(stat -c "%U:%G" "$target_file" 2>/dev/null)
 
-        # 소유자 및 권한 확인 (보수적 검사: 가이드라인 기준 엄격 적용)
-        # 허용 소유자: root:root, root:bin, root:sys
+        # 소유자 및 권한 확인 (가이드라인 기준: 소유자(USER)가 root/bin/sys)
+        # 허용 소유자(USER): root, bin, sys (그룹은 기준에 없음)
         # 허용 권한: 640 이하
         local is_valid_owner=false
-        local valid_owners=("root:root" "root:bin" "root:sys")
+        local file_owner_user="${file_owner%%:*}"
 
-        for valid_owner in "${valid_owners[@]}"; do
-            if [ "$file_owner" = "$valid_owner" ]; then
+        case "$file_owner_user" in
+            root|bin|sys)
                 is_valid_owner=true
-                break
-            fi
-        done
+                ;;
+        esac
 
         # 권한 확인 (640 이하인 경우 양호)
         local perms_num=$(echo "$file_perms" | sed 's/^0*//')

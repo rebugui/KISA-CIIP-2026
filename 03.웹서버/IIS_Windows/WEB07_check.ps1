@@ -35,10 +35,22 @@ try {
     #         (예: robots.txt, license.txt, test.aspx, example.js) -> 수동진단
     #         기본 설치 산출물(샘플/매뉴얼/테스트)인지 분석가 확인 필요
     $ambiguousFiles = @()
+    # 환경변수 미확장/접근 불가로 점검하지 못한 웹 루트 (양호 오판 방지 -> 수동진단)
+    $unreadablePaths = @()
     $sites = Get-Website
 
     foreach ($site in $sites) {
         $path = $site.PhysicalPath
+
+        # 환경변수 확장 (%SystemDrive% 등) - 미확장 시 Test-Path가 실패하여 사이트가 조용히 누락됨
+        if ($path) {
+            $path = [System.Environment]::ExpandEnvironmentVariables($path)
+        }
+
+        if (-not $path) {
+            continue
+        }
+
         if (Test-Path $path) {
             # Tier A 패턴: 확장자로 명확한 백업/임시 파일
             $definitePatterns = @(
@@ -82,6 +94,9 @@ try {
                     }
                 }
             }
+        } else {
+            # 확장 후에도 경로 접근 불가(UNC/원격/권한 등) -> 조용히 누락하면 양호 오판 가능 -> 수동진단 대상
+            $unreadablePaths += "$($site.Name): $path"
         }
     }
 
@@ -102,6 +117,12 @@ try {
         $summary = "이름/확장자가 sample/example/test/readme 또는 .txt 인 파일이 $($ambiguousFiles.Count)개 발견되었습니다(예: robots.txt). 정상 애플리케이션 파일과 겹칠 수 있으므로, 해당 파일이 웹 서버 기본 설치 시 생성된 불필요한 샘플/매뉴얼/테스트 파일인지 직접 확인하여 양호/취약을 판정하세요."
         $status = "수동진단"
         $commandOutput = $ambiguousFiles -join "`n"
+    } elseif ($unreadablePaths.Count -gt 0) {
+        # 일부 웹 루트를 점검하지 못함(경로 접근 불가) -> 양호 단정 불가 -> 수동진단
+        $finalResult = "MANUAL"
+        $summary = "일부 웹 서비스 경로에 접근할 수 없어 불필요한 파일 존재 여부를 점검하지 못했습니다. 해당 경로를 직접 확인하여 양호/취약을 판정하세요."
+        $status = "수동진단"
+        $commandOutput = "[점검 불가 경로]`n" + ($unreadablePaths -join "`n")
     } else {
         $finalResult = "GOOD"
         $summary = "웹 디렉터리에서 불필요한 파일(백업, 샘플, 테스트 파일 등)이 발견되지 않았습니다. (보안 권고사항 준수)"

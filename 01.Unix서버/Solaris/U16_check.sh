@@ -90,7 +90,8 @@ diagnose() {
             if [ $(( 8#$file_perms & ~8#644 & 8#7777 )) -eq 0 ]; then
                 perm_ok=true
             fi
-            if { [ "$file_owner" = "root:root" ] || [ "$file_owner" = "root:sys" ]; } && [ "$perm_ok" = true ]; then
+            # 가이드 기준: 소유자=root AND 권한<=644 (그룹은 가이드 기준 아님)
+            if [ "${file_owner%%:*}" = "root" ] && [ "$perm_ok" = true ]; then
                 is_secure=true
             fi
             details="권한: $file_perms, 소유자: $file_owner"

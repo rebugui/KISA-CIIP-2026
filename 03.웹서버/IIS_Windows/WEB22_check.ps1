@@ -87,7 +87,12 @@ try {
     $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/httpErrors'"
     $commandOutput = $details -join "`n"
 
-    if ($vulnSites.Count -gt 0) {
+    if (($null -eq $sites) -or ($sites.Count -eq 0)) {
+        $finalResult = "MANUAL"
+        $summary = "점검 대상 웹사이트 없음. 수동 확인이 필요합니다."
+        $status = "수동진단"
+        if ([string]::IsNullOrEmpty($commandOutput)) { $commandOutput = "Get-Website 결과 구성된 웹사이트가 없습니다." }
+    } elseif ($vulnSites.Count -gt 0) {
         $finalResult = "VULNERABLE"
         $summary = "사용자 지정 에러 페이지가 지정되지 않았거나 상세 오류가 노출되는 사이트가 있습니다: " + ($vulnSites -join " / ")
         $status = "취약"

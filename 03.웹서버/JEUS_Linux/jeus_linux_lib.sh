@@ -329,7 +329,16 @@ invoke_jeus_linux_check() {
             ;;
         WEB-10)
             lines="$(jeus_config_grep 'ReverseProxy|proxy|PathPrefix|ServerAddress' || true)"
-            [ -n "${lines}" ] && jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS proxy/reverse-proxy evidence was found; confirm only required proxy mappings remain." "${lines}" "Inspect JEUS proxy mappings" || jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS proxy/reverse-proxy evidence was found in inspected configs." "$(jeus_evidence)" "Inspect JEUS proxy mappings"
+            if [ -n "${lines}" ]; then
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS proxy/reverse-proxy evidence was found; confirm only required proxy mappings remain." "${lines}" "Inspect JEUS proxy mappings"
+            elif [ "${#JEUS_CONFIGS[@]}" -eq 0 ]; then
+                # No config files were collected (e.g. JEUS detected by process only,
+                # JEUS_HOME unresolved). "No proxy found" here means "nothing inspected",
+                # not "genuinely no proxy"; do not emit GOOD. (Mirrors the WEB-15 guard.)
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS is installed but no config files were available to inspect for proxy settings; review proxy/reverse-proxy mappings manually." "$(jeus_evidence)" "Inspect JEUS proxy mappings"
+            else
+                jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS proxy/reverse-proxy evidence was found in inspected configs." "$(jeus_evidence)" "Inspect JEUS proxy mappings"
+            fi
             ;;
         WEB-11)
             lines="$(jeus_config_grep 'docBase|appBase|webhome|context-root' || true)"
@@ -342,7 +351,16 @@ invoke_jeus_linux_check() {
             # block means aliasing is NOT in effect and must NOT drive VULNERABLE. Only an
             # active aliasing element should flag (same multi-line fix used for WEB-22).
             lines="$(jeus_config_grep_stripped '<aliasing>|<alias>|<alias-name>|<real-path>' || true)"
-            [ -n "${lines}" ] && jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS alias/link mapping evidence was found." "${lines}" "Inspect JEUS aliasing settings" || jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS alias/link mapping evidence was found in inspected configs." "$(jeus_evidence)" "Inspect JEUS aliasing settings"
+            if [ -n "${lines}" ]; then
+                jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS alias/link mapping evidence was found." "${lines}" "Inspect JEUS aliasing settings"
+            elif [ "${#JEUS_CONFIGS[@]}" -eq 0 ]; then
+                # No config files were collected (e.g. JEUS detected by process only,
+                # JEUS_HOME unresolved). "No aliasing found" here means "nothing inspected",
+                # not "genuinely no aliasing"; do not emit GOOD. (Mirrors the WEB-15 guard.)
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS is installed but no config files were available to inspect for alias/link mappings; review symbolic link/aliasing settings manually." "$(jeus_evidence)" "Inspect JEUS aliasing settings"
+            else
+                jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "No JEUS alias/link mapping evidence was found in inspected configs." "$(jeus_evidence)" "Inspect JEUS aliasing settings"
+            fi
             ;;
         WEB-13)
             lines="$(jeus_config_grep 'DataSource|db|jdbc|password' || true)"

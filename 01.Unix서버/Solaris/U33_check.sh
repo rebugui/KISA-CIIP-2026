@@ -174,17 +174,18 @@ diagnose() {
                     filetype="symlink"
                 fi
 
-                # 실행 가능한 파일인 경우 더 의심스러움 (Solaris: perl stat 사용)
-                # 실행 가능한 숨김 파일만 '취약'(VULNERABLE)으로 판정하고,
-                # 그 외 미인식 숨김 항목(세션 이력/X 권한 등 통상적 부산물 포함)은
-                # 정적 판정이 불가하므로 '수동진단'(MANUAL) 대상으로 분류한다.
+                # 미인식 숨김 항목은 악성 여부를 정적으로 판정할 수 없으므로
+                # (실행 권한 유무와 무관하게) 모두 '수동진단'(MANUAL) 대상으로 분류한다.
+                # 실행 권한이 있는 정상 부산물(.xinitrc/.xprofile 0755, 관리자 헬퍼 0700/0750 등)을
+                # 자동 '취약'으로 오판(false-positive)하지 않도록 가이드라인(ls -al 수동 확인) 및
+                # 동일 항목 AIX U-33과 동일하게 수동 검토로 라우팅한다.
                 local perms=""
                 if [ -f "$hidden_file" ]; then
                     perms=$(perl -e 'if (-f $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$hidden_file" 2>/dev/null || echo "000")
                     if [[ "$perms" =~ ^[0-9]*[1357][0-9]*$ ]]; then
-                        # 실행 가능한 파일 (이상 징후 → 취약)
-                        suspicious_files="${suspicious_files}${home}/${filename}(${filetype}, executable: ${perms}), "
-                        ((suspicious_count++)) || true
+                        # 실행 권한이 있는 미인식 파일 → 정적 판정 불가, 수동 검토
+                        review_files="${review_files}${home}/${filename}(${filetype}, perms: ${perms}), "
+                        ((review_count++)) || true
                     else
                         # 비실행 미인식 파일 → 수동 검토
                         review_files="${review_files}${home}/${filename}(${filetype}), "
