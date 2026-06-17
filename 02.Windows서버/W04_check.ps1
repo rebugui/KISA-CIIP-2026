@@ -47,7 +47,7 @@ try {
         $found = $true
     }
     # Try English pattern
-    elseif ($output -match 'LockoutThreshold\s*:\s*(\d+)') {
+    elseif ($output -match 'Lockout threshold\s*:\s*(\d+)') {
         $threshold = [int]$matches[1]
         $found = $true
     }
@@ -64,9 +64,9 @@ try {
         }
         $commandOutput = "Lockout Threshold: $threshold"
     } else {
-        $finalResult = "VULNERABLE"
-        $summary = "계정 잠금 임계값을 확인할 수 없음 (기본값 0으로 간주)"
-        $status = "취약"
+        $finalResult = "MANUAL"
+        $summary = "계정 잠금 임계값을 확인할 수 없음 (net accounts 출력에서 Lockout threshold 필드를 파싱하지 못함). 수동 검토 필요."
+        $status = "수동진단"
         $commandOutput = "Lockout threshold not found in output"
     }
 
