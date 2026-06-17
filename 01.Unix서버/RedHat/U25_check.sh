@@ -33,7 +33,7 @@ diagnose() {
     while IFS= read -r mnt; do
         if [ -n "$mnt" ] && [ -d "$mnt" ]; then
             local found=""
-            found=$(find "$mnt" -xdev -type f -perm -2 2>/dev/null) || true
+            found=$(find "$mnt" -xdev -type f -perm -2 2>/dev/null | grep -Ev '^(/tmp|/var/tmp|/var/mail|/dev/shm|/mnt|/media)(/|$)' || true)
             if [ -n "$found" ]; then
                 ww_all="${ww_all}${found}${newline}"
             fi

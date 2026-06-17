@@ -97,8 +97,28 @@ diagnose() {
     for xml_pattern in "${xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
-                # Context 요소의 allowLinking 속성 확인 (주석 제외)
-                local allow_linking=$(grep -i 'allowLinking' "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                # XML 주석(<!-- ... -->) 영역을 다중 행 포함 제거하여 활성(주석 외) 설정만 추출한다.
+                # 라인 선두 <!-- 만 거르는 방식은 다중 행 주석의 내부 라인을 통과시켜
+                # 비활성 allowLinking 을 오탐함.
+                local strip_xml_comments='
+                    {
+                        line = $0; out = ""
+                        while (length(line) > 0) {
+                            if (incomment) {
+                                p = index(line, "-->")
+                                if (p == 0) { line = ""; break }
+                                line = substr(line, p + 3); incomment = 0
+                            } else {
+                                p = index(line, "<!--")
+                                if (p == 0) { out = out line; line = ""; break }
+                                out = out substr(line, 1, p - 1)
+                                line = substr(line, p + 4); incomment = 1
+                            }
+                        }
+                        print out
+                    }'
+                local active_xml=$(awk "${strip_xml_comments}" "${xml_file}" 2>/dev/null || true)
+                local allow_linking=$(printf '%s\n' "${active_xml}" | grep -i 'allowLinking' 2>/dev/null || true)
 
                 if [ -n "${allow_linking}" ]; then
                     # allowLinking="true" 확인 (대소문자 구분 없이)
@@ -119,11 +139,11 @@ diagnose() {
     done
 
     if [ -n "${found_file}" ]; then
-        command_executed="grep -i 'allowLinking' ${found_file} 2>/dev/null | grep -v '^\\s*<!--' | head -3"
+        command_executed="strip_xml_comments ${found_file} | grep -i 'allowLinking' (다중 행 주석 제외 후 활성 설정만 점검)"
         command_result="${context_config}"
     else
         # 모든 파일에서 allowLinking이 없거나 true가 아닌 경우
-        command_executed="grep -ri 'allowLinking' /etc/tomcat*/server.xml /etc/tomcat*/context.xml /var/lib/tomcat*/conf/server.xml /var/lib/tomcat*/conf/context.xml 2>/dev/null | grep -v '^\\s*<!--'"
+        command_executed="strip_xml_comments /etc/tomcat*/server.xml /etc/tomcat*/context.xml | grep -i 'allowLinking' (다중 행 주석 제외 후 활성 설정만 점검)"
         command_result="No allowLinking=\"true\" configuration found"
     fi
 

@@ -100,7 +100,7 @@ diagnose() {
     # 불필요한 계정 확인 (test 계정, 데모 계정 등)
     # 연결 가드를 통과한 후이므로, 빈 결과는 "0행"이 아니라 쿼리 오류(권한 부족 등)를 의미함.
     # 정상 0행과 오류/공백을 구분하기 위해 종료 코드와 표식 행을 사용.
-    local unused_accounts_query="SELECT user, host FROM mysql.user WHERE user IN ('test', 'guest', 'demo', 'anonymous');"
+    local unused_accounts_query="SELECT user, host FROM mysql.user WHERE user IN ('test', 'guest', 'demo', 'anonymous', '');"
     command_executed="mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p*** -e \"${unused_accounts_query}\""
     local query_ok=1
     command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${unused_accounts_query}" 2>/dev/null) || query_ok=0

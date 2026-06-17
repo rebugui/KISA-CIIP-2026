@@ -109,10 +109,12 @@ diagnose() {
                 elif [ -L "$devfile" ] || [ -d "$devfile" ]; then
                     # 심볼릭 링크/디렉터리(pts, shm 등)는 위장 device 파일(major/minor 없는 일반 파일) 점검 대상 아님
                     :
+                elif [[ "$devfile" =~ ^/dev/shm/ ]] || [[ "$devfile" =~ ^/dev/mqueue/ ]]; then
+                    # /dev/shm, /dev/mqueue 파일은 시스템에서 생성/제거가 주기적으로 일어나므로 예외 (가이드라인 참고)
+                    :
                 elif [ -f "$devfile" ]; then
                     # 일반 파일인 경우 (major/minor 없는 위장 device 파일)
                     # 숨김 일반 파일(/dev/.rootkit.conf 등)도 rootkit 위장 패턴이므로 예외 없이 점검
-                    # (.udev, .mdadm, shm 등 정상 항목은 디렉터리/심볼릭 링크로 위 분기에서 처리됨)
                     ((invalid_count++)) || true
                     local perms=$(stat -c "%a" "$devfile" 2>/dev/null)
                     local owner=$(stat -c "%U:%G" "$devfile" 2>/dev/null)

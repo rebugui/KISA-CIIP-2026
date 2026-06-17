@@ -91,53 +91,38 @@ diagnose() {
         fi
     fi
 
-    # GRANT 권한 확인 (mysql.user 테이블의 Grant_priv는 MySQL 8.0에서 제거됨)
-    # MySQL 5.7 또는 MariaDB에서만 체크
-    # 연결 가드 통과 후이므로, 두 조회(Grant_priv 컬럼 / 역할 폴백)가 모두 공백/오류면
-    # "0행(양호)"이 아니라 자동 판단 불가(MANUAL)로 처리해야 함.
-    local grant_priv_query="SELECT user, host FROM mysql.user WHERE Grant_priv='Y' ORDER BY user, host;"
-    command_executed="mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e \"${grant_priv_query}\""
-    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${grant_priv_query}" 2>/dev/null || echo "")
-
-    if [ -z "$command_result" ]; then
-        # MySQL 8.0+의 경우 grants 테이블(역할 기반)에서 GRANT OPTION 확인 (폴백)
-        command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "SELECT grantee, table_schema FROM information_schema.role_table_grants WHERE is_grantable='YES' LIMIT 20;" 2>/dev/null || echo "")
-    fi
+    # 시스템 테이블 접근 권한 확인 (information_schema.schema_privileges + user_privileges)
+    # MySQL 5.7, 8.0, MariaDB에서 사용 가능
+    local sys_access_query="SELECT Grantee, Table_schema, Privilege_type FROM information_schema.schema_privileges WHERE Table_schema IN ('mysql','performance_schema','sys') UNION ALL SELECT GRANTEE, '*' as Table_schema, Privilege_type FROM information_schema.user_privileges WHERE Privilege_type IN ('SELECT','INSERT','UPDATE','DELETE','DROP','ALTER','CREATE','ALL PRIVILEGES') ORDER BY Grantee;"
+    command_executed="mysql -h \"${DB_HOST}\" -P \"${DB_PORT}\" -u \"${DB_USER}\" -p\"${DB_PASSWORD}\" -e \"${sys_access_query}\""
+    command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${sys_access_query}" 2>/dev/null || echo "")
 
     # 결과 분석
     if [ -n "$command_result" ]; then
-        local grant_count=$(echo "$command_result" | tail -n +2 | grep -v "^$" | wc -l)
+        local priv_count=$(echo "$command_result" | tail -n +2 | grep -v "^$" | grep -iv "'root'@" | wc -l)
 
-        if [ "$grant_count" -gt 0 ]; then
-            local grant_users=$(echo "$command_result" | tail -n +2 | grep -v "^$" || echo "")
-            # 첫 컬럼(grantee)의 계정명을 정규화하여 root 여부 판별.
-            # - MySQL 5.7/MariaDB(mysql.user): 첫 컬럼이 bare `root`
-            # - MySQL 8.0 폴백(role_table_grants): 첫 컬럼이 따옴표 형식 `'root'@'host'`
-            # 두 형식 모두에서 선행 작은따옴표를 제거하고 @ 이전 사용자명으로 root를 제외함.
-            local non_root_grant=$(echo "$grant_users" | awk '{ acct=$1; gsub(/^'\''/, "", acct); sub(/'\''?@.*$/, "", acct); if (acct != "root") print }' || echo "")
-
-            if [ -n "$non_root_grant" ]; then
-                # 비-root 계정이 GRANT(grantable) 권한을 보유. 해당 계정이 인가된 DBA인지
-                # 정적으로 확인할 수 없으므로 자동 취약 단정 대신 수동진단으로 라우팅.
+        if [ "$priv_count" -gt 0 ]; then
+            local non_root_privs=$(echo "$command_result" | tail -n +2 | grep -v "^$" | grep -iv "'root'@" || echo "")
+            # PUBLIC 또는 '%' broad grant 확인
+            if echo "$non_root_privs" | grep -qi "PUBLIC\|'%'"; then
+                diagnosis_result="VULNERABLE"
+                status="취약"
+                inspection_summary="PUBLIC 또는 모든 호스트(%)에 시스템 스키마 접근 권한이 부여되어 있습니다: $(echo "$non_root_privs" | head -5 | tr '\n' ', ')"
+            else
                 diagnosis_result="MANUAL"
                 status="수동진단"
-                inspection_summary="root 외 계정에 GRANT 권한이 부여되어 있습니다. 해당 계정이 인가된 DBA인지 수동 확인 필요: $(echo "$non_root_grant" | head -5 | tr '\n' ', ')"
-            else
-                diagnosis_result="GOOD"
-                status="양호"
-                inspection_summary="root 계정에만 GRANT 권한 부여됨 (총 ${grant_count}개)"
+                inspection_summary="root 외 계정에 시스템 테이블 접근 권한이 부여되어 있습니다. 해당 계정이 인가된 DBA인지 수동 확인 필요: $(echo "$non_root_privs" | head -5 | tr '\n' ', ')"
             fi
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="GRANT 권한을 가진 계정 없음"
+            inspection_summary="root 계정 외 시스템 테이블 접근 권한을 가진 계정 없음"
         fi
     else
-        # Grant_priv 컬럼 조회와 역할 기반 폴백이 모두 공백/오류임.
         # 연결은 성공했으나 결과를 얻지 못했으므로 "양호"로 단정할 수 없음 → 자동 판단 불가.
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="쿼리 결과 확인 불가 - 권한 부족 가능. Grant_priv 컬럼 및 역할 기반 GRANT OPTION 부여 계정을 수동으로 확인 필요"
+        inspection_summary="쿼리 결과 확인 불가 - 시스템 테이블 접근 권한 조회 실패. 수동 확인 필요"
     fi
 
     # Save results (only if library function exists)

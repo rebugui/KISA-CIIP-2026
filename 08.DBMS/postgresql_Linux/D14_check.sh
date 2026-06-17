@@ -106,7 +106,7 @@ diagnose() {
         mode="${file_stat%% *}"
         owner="$(stat -c '%U' "${target}" 2>/dev/null || echo "")"
         # 소유자가 postgres/root 가 아니면 취약
-        if [ "${owner}" != "postgres" ] && [ "${owner}" != "root" ]; then
+        if [ "${owner}" != "postgres" ] && [ "${owner}" != "root" ] && [ "${owner}" != "enterprisedb" ]; then
             bad_files+="${file_stat} (소유자 비정상: ${owner})"$'\n'
             continue
         fi
@@ -133,7 +133,7 @@ diagnose() {
     else
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="PostgreSQL 주요 설정 파일 권한 양호(640 이하, 소유자 postgres/root):"$'\n'"${checked}"
+        inspection_summary="PostgreSQL 주요 설정 파일 권한 양호(640 이하, 소유자 postgres/root/enterprisedb):"$'\n'"${checked}"
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

@@ -126,12 +126,12 @@ diagnose() {
         local proftpd_conf="/etc/proftpd.conf"
         [ ! -f "$proftpd_conf" ] && proftpd_conf="/etc/proftpd/proftpd.conf"
 
-        if grep -qE "^[\s]*<Limit.*LOGIN>" "$proftpd_conf" 2>/dev/null; then
+        if grep -qE "^[[:space:]]*<Limit.*LOGIN>" "$proftpd_conf" 2>/dev/null; then
             access_configured=true
             details="${details}[proftpd] <Limit LOGIN> 설정됨. "
         fi
 
-        if grep -qE "^[\s]*<Limit.*ALL>" "$proftpd_conf" 2>/dev/null; then
+        if grep -qE "^[[:space:]]*<Limit.*ALL>" "$proftpd_conf" 2>/dev/null; then
             access_configured=true
             details="${details}[proftpd] <Limit ALL> 설정됨. "
         fi

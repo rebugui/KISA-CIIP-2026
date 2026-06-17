@@ -311,6 +311,8 @@ function Invoke-TomcatWindowsCheck {
             # conf/server.xml and conf/context.xml; scan the combined text (mirrors Linux WEB06),
             # and accept single- or double-quoted true.
             $linkText = ($serverText + "`n" + $contextText)
+            # XML 주석(<!-- ... -->)을 제거한 활성 설정만 매칭해야 비활성(주석 처리) allowLinking을 오탐하지 않음
+            $linkText = [regex]::Replace($linkText, '(?s)<!--.*?-->', '')
             $allowLinking = @([regex]::Matches($linkText, '(?i)allowLinking\s*=\s*["'']true["'']') | ForEach-Object { $_.Value })
             if ($allowLinking.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat allowLinking is enabled and may allow traversal through linked paths.' ($allowLinking -join "`n") 'Parse context.xml allowLinking' }
             return New-TomcatResult 'GOOD' 'No Tomcat allowLinking=true evidence was found in server/context configuration.' "server.xml files: $($state.ServerXml -join ', '); context.xml files: $($state.ContextXml -join ', ')" 'Parse server.xml/context.xml allowLinking'

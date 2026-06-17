@@ -81,8 +81,9 @@ try {
         try {
             $null = secedit /export /cfg "$seceditFile" /areas SECURITYPOLICY 2>&1
             if (Test-Path $seceditFile) {
-                $secLine = Get-Content $seceditFile -ErrorAction Stop | Select-String -Pattern "PasswordComplexity"
-                if ($secLine -and $secLine.ToString() -match "PasswordComplexity\s*=\s*(\d+)") {
+                $cfgContent = Get-Content $seceditFile -ErrorAction Stop -Raw
+                # 비밀번호 복잡도 확인
+                if ($cfgContent -match "PasswordComplexity\s*=\s*(\d+)") {
                     if ([int]$matches[1] -eq 1) {
                         $complexityState = "Enabled"
                         $commandOutput += "[양호] 비밀번호 복잡도 요구사항이 활성화되어 있습니다. (PasswordComplexity=1)`r`n"
@@ -90,6 +91,16 @@ try {
                         $complexityState = "Disabled"
                         $commandOutput += "[취약] 비밀번호 복잡도 요구사항이 비활성화되어 있습니다. (PasswordComplexity=0)`r`n"
                         $hasVulnerablePassword = $true
+                    }
+                }
+                # 최소 암호 길이 확인 (secedit export는 로케일 독립적)
+                if ($cfgContent -match "MinimumPasswordLength\s*=\s*(\d+)") {
+                    $minPwdLen = [int]$matches[1]
+                    if ($minPwdLen -lt 8) {
+                        $commandOutput += "[취약] 최소 비밀번호 길이가 8자 미만입니다: ${minPwdLen}자`r`n"
+                        $hasVulnerablePassword = $true
+                    } else {
+                        $commandOutput += "[양호] 최소 비밀번호 길이: ${minPwdLen}자`r`n"
                     }
                 }
                 Remove-Item $seceditFile -Force -ErrorAction SilentlyContinue

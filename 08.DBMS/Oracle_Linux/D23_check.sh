@@ -60,18 +60,6 @@ diagnose() {
 
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    # FR-022: Check required tools (only if library function exists)
-    if declare -f check_oracle_tools >/dev/null 2>&1; then
-        if ! check_oracle_tools; then
-            if declare -f handle_missing_tools >/dev/null 2>&1; then
-                handle_missing_tools "oracle" "${ITEM_ID}" "${ITEM_NAME}" \
-                    "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-                    "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-            fi
-            return 0
-        fi
-    fi
-
 
     local diagnosis_result="N/A"
     local status="N/A"

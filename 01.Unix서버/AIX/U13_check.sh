@@ -130,6 +130,20 @@ diagnose() {
                 root_hash_info="root 비밀번호 해시: LPA 접두사 없음 (legacy crypt 추정)"
             fi
         fi
+
+        # root_hash_info에 취약한 해시 정보가 있을 경우 is_secure 조정
+        # (pwd_algorithm이 SHA-2 이상으로 설정되어 있어도, 실제 root 해시가
+        #  취약한 LPA 접두사이거나 legacy crypt인 경우 취약으로 판정)
+        if [ -n "$root_hash_info" ]; then
+            if echo "$root_hash_info" | grep -qiE 'SHA-2 이외 LPA|LPA 접두사 없음'; then
+                is_secure=false
+                if [ -n "$details" ]; then
+                    details="${details}${newline}${root_hash_info}"
+                else
+                    details="${root_hash_info}"
+                fi
+            fi
+        fi
     fi
 
     # 최종 판정

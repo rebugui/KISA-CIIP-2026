@@ -90,32 +90,39 @@ diagnose() {
         "/etc/apache2/sites-available/*.conf"
     )
 
-    # DocumentRoot 설정 확인
+    # DocumentRoot 설정 확인 - 모든 DocumentRoot 수집
+    local -a doc_roots=()
     for conf_pattern in "${apache_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
             if [ -f "${conf_file}" ]; then
-                # DocumentRoot 지시어 확인 (주석 제외)
-                local found_docroot=$(grep -E "^\s*DocumentRoot" "${conf_file}" 2>/dev/null | grep -v "^\s*#" | head -1 || true)
-                if [ -n "${found_docroot}" ]; then
-                    doc_root=$(echo "${found_docroot}" | awk '{print $2}' | tr -d '"')
-                    break 2
-                fi
+                # 주석을 제외한 모든 DocumentRoot 지시어 수집
+                while IFS= read -r line; do
+                    local root_val
+                    root_val=$(echo "${line}" | awk '{print $2}' | tr -d '"')
+                    if [ -n "${root_val}" ]; then
+                        doc_roots+=("${root_val}")
+                    fi
+                done < <(grep -E "^\s*DocumentRoot" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
             fi
         done
     done
+    # 중복 제거
+    if [ ${#doc_roots[@]} -gt 1 ]; then
+        local -a unique_roots=()
+        while IFS= read -r r; do
+            unique_roots+=("$r")
+        done < <(printf '%s\n' "${doc_roots[@]}" | sort -u)
+        doc_roots=("${unique_roots[@]}")
+    fi
 
-    command_executed="grep -E '^\s*DocumentRoot' /etc/apache2/sites-enabled/*.conf /etc/apache2/apache2.conf /etc/httpd/conf/httpd.conf 2>/dev/null | grep -v '^\s*#' | head -1"
-    command_result="${doc_root:-Not found}"
+    command_executed="grep -E '^\s*DocumentRoot' /etc/apache2/sites-enabled/*.conf /etc/apache2/apache2.conf /etc/httpd/conf/httpd.conf 2>/dev/null | grep -v '^\s*#'"
+    command_result="${doc_roots[*]:-Not found}"
 
-    if [ -z "${doc_root}" ]; then
+    if [ ${#doc_roots[@]} -eq 0 ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
         inspection_summary="DocumentRoot 설정을 찾을 수 없습니다. 수동 확인이 필요합니다."
     else
-        # 후행 슬래시 정규화
-        local norm_root="${doc_root%/}"
-        [ -z "${norm_root}" ] && norm_root="/"
-
         # OS 기본 DocumentRoot 경로 목록 (정확히 일치할 때만 '분리되지 않은 경로' = 취약)
         local exact_default_roots=(
             "/var/www/html"
@@ -133,22 +140,6 @@ diagnose() {
             "/usr/share/apache2"
             "/usr/share/nginx"
         )
-
-        local is_exact_default=false
-        for default_root in "${exact_default_roots[@]}"; do
-            if [ "${norm_root}" = "${default_root}" ]; then
-                is_exact_default=true
-                break
-            fi
-        done
-
-        local under_web_tree=false
-        for prefix in "${web_tree_prefixes[@]}"; do
-            if [ "${norm_root}" = "${prefix}" ] || [[ "${norm_root}" == "${prefix}/"* ]]; then
-                under_web_tree=true
-                break
-            fi
-        done
 
         # 시스템/위험 루트 경로 목록 (웹 서비스 영역과 분리되지 않은 시스템 영역 = 취약)
         # DocumentRoot가 루트('/') 또는 시스템 디렉터리와 정확히 일치하거나 그 하위인 경우,
@@ -170,35 +161,67 @@ diagnose() {
             "/var"
         )
 
-        local under_system_root=false
-        if [ "${norm_root}" = "/" ]; then
-            under_system_root=true
-        else
-            for sysroot in "${system_roots[@]}"; do
-                [ "${sysroot}" = "/" ] && continue
-                if [ "${norm_root}" = "${sysroot}" ] || [[ "${norm_root}" == "${sysroot}/"* ]]; then
-                    under_system_root=true
+        local overall_verdict="GOOD"
+        local -a vulnerable_roots=()
+        local -a manual_roots=()
+
+        for doc_root in "${doc_roots[@]}"; do
+            # 후행 슬래시 정규화
+            local norm_root="${doc_root%/}"
+            [ -z "${norm_root}" ] && norm_root="/"
+
+            local is_exact_default=false
+            for default_root in "${exact_default_roots[@]}"; do
+                if [ "${norm_root}" = "${default_root}" ]; then
+                    is_exact_default=true
                     break
                 fi
             done
-        fi
 
-        if [ "${is_exact_default}" = true ]; then
+            local under_web_tree=false
+            for prefix in "${web_tree_prefixes[@]}"; do
+                if [ "${norm_root}" = "${prefix}" ] || [[ "${norm_root}" == "${prefix}/"* ]]; then
+                    under_web_tree=true
+                    break
+                fi
+            done
+
+            local under_system_root=false
+            if [ "${norm_root}" = "/" ]; then
+                under_system_root=true
+            else
+                for sysroot in "${system_roots[@]}"; do
+                    [ "${sysroot}" = "/" ] && continue
+                    if [ "${norm_root}" = "${sysroot}" ] || [[ "${norm_root}" == "${sysroot}/"* ]]; then
+                        under_system_root=true
+                        break
+                    fi
+                done
+            fi
+
+            if [ "${is_exact_default}" = true ] || [ "${under_system_root}" = true ]; then
+                overall_verdict="VULNERABLE"
+                vulnerable_roots+=("${doc_root}")
+            elif [ "${under_web_tree}" = true ]; then
+                if [ "${overall_verdict}" != "VULNERABLE" ]; then
+                    overall_verdict="MANUAL"
+                fi
+                manual_roots+=("${doc_root}")
+            fi
+        done
+
+        if [ "${overall_verdict}" = "VULNERABLE" ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="DocumentRoot(${doc_root})가 OS 기본 웹 경로로 설정되어 있습니다. 업무 영역과 분리된 별도 경로로 변경 권장."
-        elif [ "${under_web_tree}" = true ]; then
+            inspection_summary="다음 DocumentRoot 경로가 OS 기본 웹 경로 또는 시스템 경로로 설정되어 있습니다: ${vulnerable_roots[*]}. 업무 영역과 분리된 별도 경로로 변경 권장."
+        elif [ "${overall_verdict}" = "MANUAL" ]; then
             diagnosis_result="MANUAL"
             status="수동진단"
-            inspection_summary="DocumentRoot(${doc_root})가 기본 웹 트리 하위의 사용자 정의 경로입니다. 업무 영역과의 분리 여부를 자동으로 확정할 수 없어 수동 확인이 필요합니다."
-        elif [ "${under_system_root}" = true ]; then
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="DocumentRoot(${doc_root})가 시스템 루트/디렉터리(예: /, /etc, /usr, /home, /root 등)로 설정되어 웹 서비스 영역이 시스템 영역과 분리되어 있지 않습니다. 별도의 분리된 경로로 변경 필요."
+            inspection_summary="다음 DocumentRoot 경로가 기본 웹 트리 하위의 사용자 정의 경로이거나 업무 영역과의 분리 여부를 자동으로 확정할 수 없어 수동 확인이 필요합니다: ${manual_roots[*]}."
         else
             diagnosis_result="GOOD"
             status="양호"
-            inspection_summary="DocumentRoot가 기본 웹 트리와 분리된 별도 경로(${doc_root})로 설정되어 있습니다. (보안 권고사항 준수)"
+            inspection_summary="모든 DocumentRoot가 기본 웹 트리와 분리된 별도 경로로 설정되어 있습니다. (보안 권고사항 준수)"
         fi
     fi
 

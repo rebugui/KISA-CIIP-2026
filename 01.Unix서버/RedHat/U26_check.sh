@@ -50,7 +50,7 @@ diagnose() {
     # find의 stderr와 종료 코드를 모두 캡처하여 탐색 실패(권한 거부 등)를 식별함.
     local find_err find_rc=0 fake_dev=""
     find_err=$(mktemp 2>/dev/null || echo "/tmp/u26_find_err.$$")
-    fake_dev=$(find /dev -type f 2>"$find_err") || find_rc=$?
+    fake_dev=$(find /dev -type f -not -path '/dev/shm/*' -not -path '/dev/mqueue/*' 2>"$find_err") || find_rc=$?
     local err_content=""
     [ -f "$find_err" ] && err_content=$(cat "$find_err" 2>/dev/null)
     rm -f "$find_err" 2>/dev/null || true

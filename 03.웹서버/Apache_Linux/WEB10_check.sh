@@ -129,6 +129,12 @@ diagnose() {
             status="취약"
             inspection_summary="ProxyRequests On 설정이 발견되었습니다. Forward Proxy 활성화로 인한 보안 위험."
             command_result="${proxy_settings}"
+        elif ! echo "${proxy_settings}" | grep -iqE "ProxyPass|ProxyPassReverse"; then
+            # ProxyRequests Off만 있는 경우 → 명시적 제한으로 양호
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="ProxyRequests Off 설정이 확인되었습니다. 불필요한 Proxy 설정을 제한한 경우."
+            command_result="${proxy_settings}"
         else
             # ProxyPass/ProxyPassReverse 등 Proxy 지시어 존재 → 불필요 여부는 자동 단정 불가.
             # 가이드라인상 '불필요한' Proxy 설정 점검이므로 수동 검토 필요(자동 GOOD 금지).

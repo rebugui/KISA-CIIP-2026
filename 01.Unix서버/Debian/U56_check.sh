@@ -112,7 +112,7 @@ diagnose() {
     if [ -f /etc/proftpd/proftpd.conf ]; then
         ftp_installed=true
         # proftpd 접근 제어 확인
-        if grep -qE "^[\s]*<Limit.*LOGIN>" /etc/proftpd/proftpd.conf 2>/dev/null; then
+        if grep -qE "^[[:space:]]*<Limit.*LOGIN>" /etc/proftpd/proftpd.conf 2>/dev/null; then
             access_configured=true
             access_details="${access_details}, proftpd <Limit LOGIN> 설정됨"
         fi

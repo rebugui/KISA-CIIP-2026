@@ -91,9 +91,9 @@ diagnose() {
 
     # Method 1: Check worker process user (most reliable)
     if command -v ps >/dev/null; then
-        command_executed="ps aux | grep 'nginx' | grep -v grep | awk '{print \$1, \$NF}'"
+        command_executed="ps aux | grep '[n]ginx' | grep -v grep"
         # worker process가 root로 실행되는지 확인
-        while IFS= read -r proc_user proc_cmd; do
+        while read -r proc_user proc_cmd; do
             if echo "$proc_cmd" | grep -q "worker process"; then
                 if [ "$proc_user" = "root" ]; then
                     worker_root=true

@@ -125,10 +125,10 @@ diagnose() {
     fi
 
     # Check for ErrorDocument directives
-    local error_docs=$(grep -rE "^\s*ErrorDocument\s+(400|401|403|404|500|503)" "${apache_conf}" /etc/apache2/sites-available/ /etc/apache2/conf-available/ 2>/dev/null | grep -v "^\s*#" | head -10 || true)
+    local error_docs=$(grep -rE "^\s*ErrorDocument\s+(400|401|403|404|500|503)" "${apache_conf}" /etc/apache2/sites-enabled/ /etc/apache2/conf-enabled/ 2>/dev/null | grep -v "^\s*#" | head -10 || true)
     local error_doc_count=$(echo "${error_docs}" | grep -c "ErrorDocument" || true)
 
-    command_executed="grep -rE '^\\s*ErrorDocument\\s+(400|401|403|404|500|503)' ${apache_conf} /etc/apache2/sites-available/ 2>/dev/null | grep -v '^\\s*#' | head -10"
+    command_executed="grep -rE '^\\s*ErrorDocument\\s+(400|401|403|404|500|503)' ${apache_conf} /etc/apache2/sites-enabled/ /etc/apache2/conf-enabled/ 2>/dev/null | grep -v '^\\s*#' | head -10"
     command_result="${error_docs:-No ErrorDocument directives found}"
 
     if [ ${error_doc_count} -eq 0 ]; then

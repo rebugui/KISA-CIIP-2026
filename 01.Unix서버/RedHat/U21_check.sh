@@ -60,8 +60,8 @@ diagnose() {
         fi
         command_result="설정 현황: [ ${ls_out} ]"
     else
-        status="N/A"
-        diagnosis_result="N/A"
+        status="수동진단"
+        diagnosis_result="MANUAL"
         inspection_summary="로그 설정 파일(/etc/rsyslog.conf, /etc/syslog.conf)이 존재하지 않습니다 (journald 단독 운용 등 (r)syslog 미사용 환경)."
         command_result="로그 설정 파일(/etc/syslog.conf 또는 rsyslog.conf)이 존재하지 않습니다."
     fi

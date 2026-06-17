@@ -48,7 +48,7 @@ diagnose() {
 
     # 점검 대상 파일: 표준 경로 + named.conf의 include 지시자 1단계 추적
     # (zone 별 allow-update가 custom include 파일에 있을 수 있음)
-    local scan_files="/etc/named.conf /etc/named.rfc1912.zones"
+    local scan_files="/etc/named.conf /etc/named.rfc1912.zones /var/named/chroot/etc/named.conf"
     if [ -f /etc/named.conf ]; then
         local inc
         for inc in $(grep -v "^[[:space:]]*//" /etc/named.conf 2>/dev/null | grep -v "^[[:space:]]*#" | grep -oE 'include[[:space:]]+"[^"]+"' | sed -E 's/include[[:space:]]+"([^"]+)"/\1/' || true); do
@@ -89,7 +89,17 @@ diagnose() {
     if [ "$conf_found" = true ]; then
         command_result="allow-update 설정 현황: ${evidence}"
     else
-        command_result="DNS 설정 파일(/etc/named.conf, /etc/named.rfc1912.zones)이 존재하지 않습니다."
+        if pgrep -x named &>/dev/null; then
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            inspection_summary="named 프로세스는 실행 중이나 표준 경로에서 설정 파일을 찾을 수 없습니다. 비표준/chroot 경로의 allow-update 설정을 수동으로 확인하십시오."
+            command_result="named 프로세스가 실행 중이나 DNS 설정 파일(/etc/named.conf, /etc/named.rfc1912.zones, /var/named/chroot/etc/named.conf)을 찾을 수 없습니다."
+        else
+            status="양호"
+            diagnosis_result="GOOD"
+            inspection_summary="DNS(BIND) 서비스 미사용 (설정 파일 없음 및 named 미실행)"
+            command_result="DNS 설정 파일(/etc/named.conf, /etc/named.rfc1912.zones, /var/named/chroot/etc/named.conf)이 존재하지 않습니다."
+        fi
     fi
 
     command_result=$(echo "$command_result" | tr -d '\n\r')

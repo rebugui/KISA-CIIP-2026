@@ -102,7 +102,7 @@ diagnose() {
         inspection_summary="sqlnet.ora 파일을 찾을 수 없거나 읽을 수 없습니다 (경로: ${sqlnet_file}). 수동으로 tcp.validnode_checking 및 tcp.invited_nodes 설정을 확인하세요."
         command_result="sqlnet.ora not found or unreadable: ${sqlnet_file}"
     else
-        command_result=$(grep -iE 'tcp\.validnode_checking|tcp\.invited_nodes|tcp\.excluded_nodes' "${sqlnet_file}" 2>/dev/null || true)
+        command_result=$(grep -iE 'tcp\.validnode_checking|tcp\.invited_nodes|tcp\.excluded_nodes' "${sqlnet_file}" 2>/dev/null | grep -v '^[[:space:]]*#' || true)
 
         local validnode_on=0 invited_set=0
         if echo "${command_result}" | grep -iE 'tcp\.validnode_checking[[:space:]]*=[[:space:]]*(yes|on|true)' >/dev/null 2>&1; then

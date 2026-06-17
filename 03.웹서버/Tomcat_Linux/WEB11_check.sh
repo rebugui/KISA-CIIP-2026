@@ -105,8 +105,8 @@ diagnose() {
                 local found_paths=$(grep -iE "appBase\s*=|docBase\s*=" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 if [ -n "${found_paths}" ]; then
                     path_config="${found_paths}"
-                    # 기본 경로(webapps 상대 경로) 사용 여부
-                    if echo "${found_paths}" | grep -qiE 'appBase\s*=\s*"webapps"'; then
+                    # 기본 경로(webapps 상대/절대 경로) 사용 여부
+                    if echo "${found_paths}" | grep -qiE 'appBase\s*=\s*"(webapps|/[^"]*/webapps)"'; then
                         has_default_path=true
                     fi
                     # 절대 경로(/로 시작)로 분리된 docBase/appBase 존재 여부

@@ -39,7 +39,7 @@ GUIDELINE_CRITERIA_BAD="해시 알고리즘 SHA-256 미만의 암호화 알고�
 GUIDELINE_REMEDIATION="SHA-256 이상의 암호화 알고리즘 적용"
 
 # Vulnerable versions based on FR-030
-VULNERABLE_VERSIONS=("10.2" "11.1" "11.2" "12.1")
+VULNERABLE_VERSIONS=("10.1" "10.2" "11.1" "11.2" "12.1")
 SAFE_VERSIONS=("12.2" "18" "19" "21")
 
 diagnose() {

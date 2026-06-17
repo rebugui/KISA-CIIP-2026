@@ -127,15 +127,15 @@ diagnose() {
             status="수동진단"
             inspection_summary="Apache 설정 파일을 읽을 수 없어 LimitRequestBody 설정을 확인할 수 없습니다. 설정 파일에서 업로드/다운로드 용량 제한(LimitRequestBody)을 수동으로 확인하세요."
             command_result="Apache configuration file not readable"
-        elif [ "${limit_nonzero_found}" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="LimitRequestBody 지시자로 파일 업로드/다운로드 용량이 제한되어 있습니다. (보안 권고사항 준수)"
-            command_result="${limit_lines#$'\n'}"
         elif [ "${limit_zero_found}" = true ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="LimitRequestBody가 0(무제한)으로 설정되어 있습니다. 파일 업로드/다운로드 용량이 제한되지 않습니다. 허용 가능한 최소 범위로 제한하세요."
+            command_result="${limit_lines#$'\n'}"
+        elif [ "${limit_nonzero_found}" = true ]; then
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="LimitRequestBody 지시자로 파일 업로드/다운로드 용량이 제한되어 있습니다. (보안 권고사항 준수)"
             command_result="${limit_lines#$'\n'}"
         else
             diagnosis_result="VULNERABLE"

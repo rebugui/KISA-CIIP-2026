@@ -95,7 +95,7 @@ diagnose() {
                 # 가이드라인 기준: 로그 디렉터리 및 파일에 일반 사용자(other)의 접근 권한이
                 # 있는 경우 취약 (조치: chmod o-rwx). 읽기(004)만 있어도 정보 유출 위험.
                 # 따라서 world-write(002)만이 아닌 read/write/exec 전체(-perm /007)를 점검.
-                local found_logs=$(find "${log_dir}" -type f -name "*.log*" -perm /007 2>/dev/null || true)
+                local found_logs=$(find "${log_dir}" -type f \( -name "*.log*" -o -name "*.out" -o -name "*access*" \) -perm /007 2>/dev/null || true)
                 if [ -n "${found_logs}" ]; then
                     log_info="${log_info}"$'\n'"${found_logs}"
                     local file_hits=$(echo "${found_logs}" | grep -c . || true)
@@ -113,7 +113,7 @@ diagnose() {
         done
     done
 
-    command_executed="find /var/log/tomcat* /usr/share/tomcat*/logs -type f -name '*.log*' -perm /007 2>/dev/null | head -5; stat -c '%a %n' /var/log/tomcat* /usr/share/tomcat*/logs 2>/dev/null"
+    command_executed="find /var/log/tomcat* /usr/share/tomcat*/logs -type f \( -name '*.log*' -o -name '*.out' -o -name '*access*' \) -perm /007 2>/dev/null | head -5; stat -c '%a %n' /var/log/tomcat* /usr/share/tomcat*/logs 2>/dev/null"
     command_result="${log_info:-No log directories found}"
 
     if [ ${insecure_logs} -gt 0 ]; then

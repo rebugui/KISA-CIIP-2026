@@ -137,6 +137,11 @@ diagnose() {
         diagnosis_result="MANUAL"
         status="수동진단"
         inspection_summary="Apache 설정 파일을 읽을 수 없어 링크(FollowSymLinks/Alias) 설정을 확인할 수 없습니다. 설정 파일에서 Options 및 Alias 지시자를 수동으로 확인하세요."
+    elif [ "${followsymlinks_found}" = true ] && [ "${followsymlinks_disabled}" = true ]; then
+        # +FollowSymLinks와 -FollowSymLinks가 함께 존재 -> 각 Directory 블록별 유효 설정을 정적으로 판단 불가
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Options에 +FollowSymLinks와 -FollowSymLinks가 함께 설정되어 있습니다. 각 Directory 블록별 유효 설정을 수동으로 확인하세요."
     elif [ "${followsymlinks_found}" = true ] && [ "${followsymlinks_disabled}" = false ]; then
         diagnosis_result="VULNERABLE"
         status="취약"

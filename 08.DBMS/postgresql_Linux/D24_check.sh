@@ -41,15 +41,6 @@ GUIDELINE_REMEDIATION="guest/public에게 부여된 시스템 확장 저장 프�
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    # FR-022: Check required tools
-    if ! check_postgresql_tools; then
-        handle_missing_tools "postgresql" "${ITEM_ID}" "${ITEM_NAME}" \
-            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        return 0
-    fi
-
-
     local diagnosis_result="N/A"
     local status="N/A"
     local inspection_summary="이 항목은 MSSQL(Windows) 전용입니다. PostgreSQL은 Windows 레지스트리를 사용하지 않습니다."

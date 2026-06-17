@@ -89,23 +89,35 @@ diagnose() {
 
     if [ -f "$security_file" ] && [ -r "$security_file" ]; then
         # Raw output 저장
-        security_output=$(grep -E "^[[:space:]]*(MIN_PASSWORD_LENGTH|PASSWORD_MAXDAYS|PASSWORD_MINDAYS|HISTORY)=" "$security_file" 2>/dev/null || echo "관련 정책 키 미설정")
+        security_output=$(grep -E "^[[:space:]]*(MIN_PASSWORD_LENGTH|PASSWORD_MAXDAYS|PASSWORD_MINDAYS|HISTORY|PASSWORD_MIN_UPPER_CASE_CHARS|PASSWORD_MIN_LOWER_CASE_CHARS|PASSWORD_MIN_DIGIT_CASE_CHARS|PASSWORD_MIN_SPECIAL_CASE_CHARS)=" "$security_file" 2>/dev/null || echo "관련 정책 키 미설정")
 
         local min_password_length=""
         local password_maxdays=""
         local password_mindays=""
         local history_depth=""
+        local min_upper=""
+        local min_lower=""
+        local min_digit=""
+        local min_special=""
         min_password_length=$(u02_get_key "MIN_PASSWORD_LENGTH" "$security_file")
         password_maxdays=$(u02_get_key "PASSWORD_MAXDAYS" "$security_file")
         password_mindays=$(u02_get_key "PASSWORD_MINDAYS" "$security_file")
         history_depth=$(u02_get_key "HISTORY" "$security_file")
+        min_upper=$(u02_get_key "PASSWORD_MIN_UPPER_CASE_CHARS" "$security_file")
+        min_lower=$(u02_get_key "PASSWORD_MIN_LOWER_CASE_CHARS" "$security_file")
+        min_digit=$(u02_get_key "PASSWORD_MIN_DIGIT_CASE_CHARS" "$security_file")
+        min_special=$(u02_get_key "PASSWORD_MIN_SPECIAL_CASE_CHARS" "$security_file")
 
-        config_details="MIN_PASSWORD_LENGTH=${min_password_length:-미설정}, PASSWORD_MAXDAYS=${password_maxdays:-미설정}, PASSWORD_MINDAYS=${password_mindays:-미설정}, HISTORY=${history_depth:-미설정}"
+        config_details="MIN_PASSWORD_LENGTH=${min_password_length:-미설정}, PASSWORD_MAXDAYS=${password_maxdays:-미설정}, PASSWORD_MINDAYS=${password_mindays:-미설정}, HISTORY=${history_depth:-미설정}, PASSWORD_MIN_UPPER_CASE_CHARS=${min_upper:-미설정}, PASSWORD_MIN_LOWER_CASE_CHARS=${min_lower:-미설정}, PASSWORD_MIN_DIGIT_CASE_CHARS=${min_digit:-미설정}, PASSWORD_MIN_SPECIAL_CASE_CHARS=${min_special:-미설정}"
 
         local minlen_ok=false
         local maxdays_ok=false
         local mindays_ok=false
         local history_ok=false
+        local upper_ok=false
+        local lower_ok=false
+        local digit_ok=false
+        local special_ok=false
 
         # MIN_PASSWORD_LENGTH >= 8
         if u02_is_number "$min_password_length" && [ "$min_password_length" -ge 8 ]; then
@@ -127,14 +139,34 @@ diagnose() {
             history_ok=true
         fi
 
-        if [ "$minlen_ok" = true ] && [ "$maxdays_ok" = true ] && [ "$mindays_ok" = true ] && [ "$history_ok" = true ]; then
+        # PASSWORD_MIN_UPPER_CASE_CHARS >= 1
+        if u02_is_number "$min_upper" && [ "$min_upper" -ge 1 ]; then
+            upper_ok=true
+        fi
+
+        # PASSWORD_MIN_LOWER_CASE_CHARS >= 1
+        if u02_is_number "$min_lower" && [ "$min_lower" -ge 1 ]; then
+            lower_ok=true
+        fi
+
+        # PASSWORD_MIN_DIGIT_CASE_CHARS >= 1
+        if u02_is_number "$min_digit" && [ "$min_digit" -ge 1 ]; then
+            digit_ok=true
+        fi
+
+        # PASSWORD_MIN_SPECIAL_CASE_CHARS >= 1
+        if u02_is_number "$min_special" && [ "$min_special" -ge 1 ]; then
+            special_ok=true
+        fi
+
+        if [ "$minlen_ok" = true ] && [ "$maxdays_ok" = true ] && [ "$mindays_ok" = true ] && [ "$history_ok" = true ] && [ "$upper_ok" = true ] && [ "$lower_ok" = true ] && [ "$digit_ok" = true ] && [ "$special_ok" = true ]; then
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="비밀번호 관리 정책이 적절하게 설정됨 (${config_details}) [${trusted_note}]"
         else
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="비밀번호 관리 정책 미흡: ${config_details} (기준: MIN_PASSWORD_LENGTH>=8, PASSWORD_MAXDAYS 1~90, PASSWORD_MINDAYS>=1, HISTORY>=4) [${trusted_note}]"
+            inspection_summary="비밀번호 관리 정책 미흡: ${config_details} (기준: MIN_PASSWORD_LENGTH>=8, PASSWORD_MAXDAYS 1~90, PASSWORD_MINDAYS>=1, HISTORY>=4, PASSWORD_MIN_UPPER_CASE_CHARS>=1, PASSWORD_MIN_LOWER_CASE_CHARS>=1, PASSWORD_MIN_DIGIT_CASE_CHARS>=1, PASSWORD_MIN_SPECIAL_CASE_CHARS>=1) [${trusted_note}]"
         fi
     else
         # 파일이 없거나 읽을 수 없는 경우 → 수동 점검
@@ -147,7 +179,7 @@ diagnose() {
     # 명령어 실행 결과 결합 (raw output)
     command_result="[/etc/default/security 비밀번호 정책]${newline}${security_output}${newline}${newline}[Trusted Mode 확인]${newline}${trusted_note}"
 
-    command_executed="grep -E '^(MIN_PASSWORD_LENGTH|PASSWORD_MAXDAYS|PASSWORD_MINDAYS|HISTORY)=' /etc/default/security; ls -d /tcb"
+    command_executed="grep -E '^(MIN_PASSWORD_LENGTH|PASSWORD_MAXDAYS|PASSWORD_MINDAYS|HISTORY|PASSWORD_MIN_UPPER_CASE_CHARS|PASSWORD_MIN_LOWER_CASE_CHARS|PASSWORD_MIN_DIGIT_CASE_CHARS|PASSWORD_MIN_SPECIAL_CASE_CHARS)=' /etc/default/security; ls -d /tcb"
 
     #echo ""
     #echo "진단 결과: ${status}"

@@ -70,7 +70,14 @@ try {
             "Unlimited values: $($unlimited.Count)"
         )
 
-        if ($limited.Count -gt 0) {
+        if ($unlimited.Count -gt 0) {
+            $finalResult = "VULNERABLE"
+            $status = "취약"
+            $summary = "Apache LimitRequestBody is set to 0, which does not enforce an upload/download request body limit."
+            $evidence += "Matched unlimited directives:"
+            $evidence += @($unlimited | ForEach-Object { $_.Line } | Select-Object -Unique)
+        }
+        elseif ($limited.Count -gt 0) {
             $finalResult = "GOOD"
             $status = "양호"
             $summary = "Apache request body size is limited with LimitRequestBody."
@@ -80,15 +87,8 @@ try {
         else {
             $finalResult = "VULNERABLE"
             $status = "취약"
-            if ($unlimited.Count -gt 0) {
-                $summary = "Apache LimitRequestBody is set to 0, which does not enforce an upload/download request body limit."
-                $evidence += "Matched unlimited directives:"
-                $evidence += @($unlimited | ForEach-Object { $_.Line } | Select-Object -Unique)
-            }
-            else {
-                $summary = "Apache LimitRequestBody was not found. Configure a minimum acceptable file upload/download size limit."
-                $evidence += "No active LimitRequestBody directive found."
-            }
+            $summary = "Apache LimitRequestBody was not found. Configure a minimum acceptable file upload/download size limit."
+            $evidence += "No active LimitRequestBody directive found."
         }
 
         $commandOutput = $evidence -join "`n"
