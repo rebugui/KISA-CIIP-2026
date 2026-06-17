@@ -154,20 +154,23 @@ diagnose() {
         fi
     done || true
 
-    # /etc/cron.d 디렉토리 내 파일 권한 확인
-    if [ -d /etc/cron.d ]; then
-        file_info="${file_info}${newline}/etc/cron.d 디렉토리 파일:${newline}"
-        while IFS= read -r -d '' file; do
-            local perms=$(stat -c "%a" "$file" 2>/dev/null || echo "000")
-            local owner=$(stat -c "%U" "$file" 2>/dev/null || echo "unknown")
-            file_info="${file_info}  $(basename "$file"): ${perms}, ${owner}${newline}"
+    # /etc/cron.d 및 /var/spool/cron 디렉토리 내 파일 권한 확인
+    local scan_dir=""
+    for scan_dir in /etc/cron.d /var/spool/cron; do
+        if [ -d "$scan_dir" ]; then
+            file_info="${file_info}${newline}${scan_dir} 디렉토리 파일:${newline}"
+            while IFS= read -r -d '' file; do
+                local perms=$(stat -c "%a" "$file" 2>/dev/null || echo "000")
+                local owner=$(stat -c "%U" "$file" 2>/dev/null || echo "unknown")
+                file_info="${file_info}  $(basename "$file"): ${perms}, ${owner}${newline}"
 
-            if perm_exceeds_640 "$perms"; then
-                is_secure=false
-                issues+=("cron.d/$(basename "$file") 권한=${perms}")
-            fi
-        done < <(find /etc/cron.d -type f -print0 2>/dev/null) || true
-    fi
+                if perm_exceeds_640 "$perms"; then
+                    is_secure=false
+                    issues+=("${scan_dir}/$(basename "$file") 권한=${perms}")
+                fi
+            done < <(find "$scan_dir" -type f -print0 2>/dev/null) || true
+        fi
+    done
 
     # 최종 판정
     if [ "$is_secure" = true ]; then
@@ -175,13 +178,13 @@ diagnose() {
         status="양호"
         inspection_summary="crontab 관련 파일 권한 적절함"
         command_result="${file_info}"
-        command_executed="stat -c '%a %U' /usr/bin/crontab /usr/bin/at /etc/crontab /etc/cron.deny /etc/cron.allow /etc/at.deny /etc/at.allow 2>/dev/null"
+        command_executed="stat -c '%a %U' /usr/bin/crontab /usr/bin/at /etc/crontab /etc/cron.deny /etc/cron.allow /etc/at.deny /etc/at.allow 2>/dev/null; find /etc/cron.d /var/spool/cron -type f -exec stat -c '%n %a %U' {} \\;"
     else
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="crontab 파일 권한 미흡: ${issues[*]}"
         command_result="${file_info}"
-        command_executed="stat -c '%a %U' /usr/bin/crontab /usr/bin/at /etc/crontab /etc/cron.deny /etc/cron.allow 2>/dev/null; find /etc/cron.d -type f -exec stat -c '%n %a %U' {} \\;"
+        command_executed="stat -c '%a %U' /usr/bin/crontab /usr/bin/at /etc/crontab /etc/cron.deny /etc/cron.allow /etc/at.deny /etc/at.allow 2>/dev/null; find /etc/cron.d /var/spool/cron -type f -exec stat -c '%n %a %U' {} \\;"
     fi
 
     # echo ""

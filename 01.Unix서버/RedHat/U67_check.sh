@@ -107,10 +107,12 @@ diagnose() {
         local vulnerable_files=""
         local vuln_count=0
         local file_scan=""
-        file_scan=$(find "$log_dir" -xdev -type f -printf '%m %u %p\n' 2>/dev/null) || true
+        local evidence_found=false
+        file_scan=$(find "$log_dir" -type f -printf '%m %u %p\n' 2>/dev/null) || true
         local f_perms="" f_owner="" f_path=""
         while IFS=' ' read -r f_perms f_owner f_path; do
             [ -n "${f_path:-}" ] || continue
+            evidence_found=true
             # 소유자가 root(또는 정당한 로그 데몬 시스템 계정)가 아니거나 권한이 644 초과(644 비트 외
             # 권한 보유)인 경우 취약. systemd 호스트의 /var/log/journal/* 는 systemd-journal 소유,
             # 일부 배포판 로그는 syslog 소유가 표준이므로 이들 데몬 계정은 허용한다(그 외 비-root는 취약).
@@ -129,7 +131,30 @@ diagnose() {
         done <<< "$file_scan"
 
         if [ "$vuln_count" -eq 0 ]; then
-            is_secure=true
+            if [ "$evidence_found" = true ]; then
+                is_secure=true
+            else
+                diagnosis_result="MANUAL"
+                status="수동진단"
+                inspection_summary="/var/log 디렉터리 내 점검 가능한 로그 파일이 존재하지 않습니다"
+                command_result="${raw_output}"
+                command_executed="stat -c '%a %U %G' /var/log && find /var/log -type f -printf '%m %u %p\n' 2>/dev/null"
+                save_dual_result \
+                    "${ITEM_ID}" \
+                    "${ITEM_NAME}" \
+                    "${status}" \
+                    "${diagnosis_result}" \
+                    "${inspection_summary}" \
+                    "${command_result}" \
+                    "${command_executed}" \
+                    "${GUIDELINE_PURPOSE}" \
+                    "${GUIDELINE_THREAT}" \
+                    "${GUIDELINE_CRITERIA_GOOD}" \
+                    "${GUIDELINE_CRITERIA_BAD}" \
+                    "${GUIDELINE_REMEDIATION}"
+                verify_result_saved "${ITEM_ID}"
+                return 0
+            fi
         else
             is_secure=false
             details="${details}, 취약 파일 ${vuln_count}건(최대 10건 표시): ${vulnerable_files}"

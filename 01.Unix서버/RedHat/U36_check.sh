@@ -57,7 +57,7 @@ diagnose() {
     for xsvc in rsh rlogin rexec; do
         local xfile="/etc/xinetd.d/${xsvc}"
         if [ -f "$xfile" ]; then
-            local disable_val=$(grep -i "disable" "$xfile" 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
+            local disable_val=$(grep -v '^[[:space:]]*#' "$xfile" 2>/dev/null | grep -i "disable" | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
             disable_val=$(echo "$disable_val" | tr '[:upper:]' '[:lower:]')
             if [ "$disable_val" != "yes" ]; then
                 findings="${findings}${xfile} 활성(disable=${disable_val:-미설정}). "

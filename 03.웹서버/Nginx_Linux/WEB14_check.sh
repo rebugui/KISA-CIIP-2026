@@ -65,6 +65,7 @@ diagnose() {
         web_root=$(grep -rhE "^\s*root\s+" /etc/nginx/ 2>/dev/null | grep -v "^\s*#" \
             | sed -E 's/^\s*root\s+//; s/;.*$//' | tr -d ' ' | head -1 || true)
         [ -z "${web_root}" ] && web_root="/usr/share/nginx/html"
+        web_root="${web_root%/}"  # 후행 슬래시 제거
 
         local targets=(
             "/etc/nginx/nginx.conf"
@@ -80,6 +81,7 @@ diagnose() {
         command_executed="stat -c '%a %U %n' /etc/nginx/nginx.conf /etc/nginx/conf.d ${web_root}"
 
         local insecure_list=""
+        local webroot_manual_needed=false
         local detail=""
         local t perm operm gperm
         for t in "${targets[@]}"; do
@@ -97,8 +99,17 @@ diagnose() {
             # 판단기준(chmod 750): 일반 사용자(group/other)에게 불필요한 접근 권한이 부여되면 취약.
             # - others에 어떤 권한이든(r/w/x, 8진수 마지막 자리 != 0) 부여 → 민감 파일(nginx.conf 등) 읽기 노출 포함하여 취약
             # - group에 쓰기 비트(2) 부여 → 취약
-            if [ "${operm}" -ne 0 ] || [ $(( gperm & 2 )) -ne 0 ]; then
-                insecure_list="${insecure_list} ${t}(${perm})"
+            if [ "${t}" = "${web_root}" ]; then
+                # 웹 루트 디렉터리: others 읽기/실행은 nginx worker에 필요하므로 쓰기 권한 검사만 수행
+                if [ $(( ${operm} & 2 )) -ne 0 ] || [ $(( gperm & 2 )) -ne 0 ]; then
+                    insecure_list="${insecure_list} ${t}(${perm})"
+                elif [ "${operm}" -ne 0 ]; then
+                    webroot_manual_needed=true
+                fi
+            else
+                if [ "${operm}" -ne 0 ] || [ $(( gperm & 2 )) -ne 0 ]; then
+                    insecure_list="${insecure_list} ${t}(${perm})"
+                fi
             fi
         done
 
@@ -107,6 +118,9 @@ diagnose() {
         if [ -n "${insecure_list}" ]; then
             diagnosis_result="VULNERABLE"; status="취약"
             inspection_summary="주요 설정 파일/디렉터리 또는 웹 루트에 일반 사용자(group 쓰기 또는 other 읽기/쓰기/실행)의 불필요한 접근 권한이 부여되어 있습니다:${insecure_list}. 불필요한 접근 권한을 제거하세요(chmod 750 등)."
+        elif [ "${webroot_manual_needed}" = true ]; then
+            diagnosis_result="MANUAL"; status="수동진단"
+            inspection_summary="웹 루트 디렉터리(${web_root})에 타 사용자(other) 읽기/실행 권한이 설정되어 있습니다. 웹 서비스 제공을 위해 필요한 권한일 수 있으나, 기관 정책에 따라 불필요한 접근 권한 존재 여부를 확인하세요."
         else
             diagnosis_result="GOOD"; status="양호"
             inspection_summary="주요 설정 파일/디렉터리 및 웹 루트에 타 사용자(other) 접근 권한 및 group 쓰기 권한 등 불필요한 접근 권한이 부여되어 있지 않습니다."

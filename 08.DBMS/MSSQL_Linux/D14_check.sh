@@ -48,15 +48,6 @@ GUIDELINE_REMEDIATION="주요 설정 파일 및 디렉터리의 권한 설정 �
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    # FR-022: Check required tools
-    if ! check_mssql_tools; then
-        handle_missing_tools "mssql" "${ITEM_ID}" "${ITEM_NAME}" \
-            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        return 0
-    fi
-
-
     local diagnosis_result="UNKNOWN"
     local status="미진단"
     local inspection_summary=""

@@ -80,7 +80,7 @@ diagnose() {
         for xfile in /etc/xinetd.d/*; do
             [ -f "$xfile" ] || continue
             basename "$xfile" | grep -Eqi "$rpc_pattern" || continue
-            if grep -Eqi '^[[:space:]]*disable[[:space:]]*=[[:space:]]*no' "$xfile" 2>/dev/null; then
+            if ! grep -qEi '^[[:space:]]*disable[[:space:]]*=[[:space:]]*yes' "$xfile" 2>/dev/null; then
                 is_vulnerable=true
                 findings="${findings}[xinetd] $(basename "$xfile") (disable = no)${newline}"
             fi

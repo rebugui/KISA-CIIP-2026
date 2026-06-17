@@ -42,16 +42,16 @@ try {
         $minor = $version.Minor
         $osVersion = "$major.$minor"
 
-        # Windows Server 2012 R2 = 6.3, Windows Server 2016 = 10.0
-        # Get-NetFirewallProfile requires 6.3 (2012 R2) or higher
-        if ($major -lt 6 -or ($major -eq 6 -and $minor -lt 3)) {
+        # Windows Server 2012 = 6.2, 2012 R2 = 6.3, Windows Server 2016 = 10.0
+        # Get-NetFirewallProfile (NetSecurity module) requires 6.2 (2012) or higher
+        if ($major -lt 6 -or ($major -eq 6 -and $minor -lt 2)) {
             $finalResult = "MANUAL"
-            $summary = "Windows Server 2012 R2 이전 버전 (Get-NetFirewallProfile 미지원): 수동 확인 필요 (OS 버전: $osVersion)"
+            $summary = "Windows Server 2012 이전 버전 (Get-NetFirewallProfile 미지원): 수동 확인 필요 (OS 버전: $osVersion)"
             $status = "수동진단"
-            $commandExecuted = "OS 버전 확인: $osVersion (2012 R2 이전에서는 수동진단 필요)"
+            $commandExecuted = "OS 버전 확인: $osVersion (2012 이전에서는 수동진단 필요)"
             $commandOutput = "OS Version: $osVersion (Get-NetFirewallProfile 미지원)"
         } else {
-            # OS is 2012 R2 or later, use Get-NetFirewallProfile
+            # OS is 2012 or later, use Get-NetFirewallProfile
             $firewallProfiles = Get-NetFirewallProfile -ErrorAction SilentlyContinue
 
             if ($firewallProfiles) {

@@ -102,7 +102,7 @@ diagnose() {
     # 불필요 계정(데모/샘플/테스트) 확인 - KISA 가이드 D-02 (dba_users)
     # 데모/샘플 계정: SCOTT, HR, OE, PM, IX, SH, BI, ADAMS, CLARK, BLAKE, JONES, DEMO 및 TEST% 명명 계정
     local unnecessary_query="SET HEADING OFF FEEDBACK OFF PAGESIZE 0 LINESIZE 200
-SELECT username FROM dba_users WHERE username IN ('SCOTT','HR','OE','PM','IX','SH','BI','ADAMS','CLARK','BLAKE','JONES','DEMO') OR username LIKE 'TEST%';"
+SELECT username, account_status FROM dba_users WHERE username IN ('SCOTT','HR','OE','PM','IX','SH','BI','ADAMS','CLARK','BLAKE','JONES','DEMO') OR username LIKE 'TEST%';"
     command_executed="echo \"<unnecessary account query>\" | sqlplus -s ${DBMS_USER}/***@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}"
     command_result=$(echo "${unnecessary_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>&1 || true)
 
@@ -110,17 +110,52 @@ SELECT username FROM dba_users WHERE username IN ('SCOTT','HR','OE','PM','IX','S
     if echo "${command_result}" | grep -qiE 'ORA-[0-9]+|SP2-[0-9]+|ERROR|TNS-[0-9]+'; then
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary="Oracle 접속/쿼리 실행 실패로 자동 판단 불가 (수동진단 필요). 확인 쿼리: SELECT username FROM dba_users WHERE username IN ('SCOTT','HR',...) OR username LIKE 'TEST%';"
+        inspection_summary="Oracle 접속/쿼리 실행 실패로 자동 판단 불가 (수동진단 필요). 확인 쿼리: SELECT username, account_status FROM dba_users WHERE username IN ('SCOTT','HR',...) OR username LIKE 'TEST%';"
     else
-        local account_list
-        account_list=$(echo "${command_result}" | sed '/^[[:space:]]*$/d' | grep -viE 'no rows selected|SQL>' | sed 's/[[:space:]]//g' | grep -v '^$' || true)
-        local user_count
-        user_count=$(echo "${account_list}" | grep -c '.' || true)
+        # Filter out empty lines and sqlplus artifacts; preserve two-column (username, account_status)
+        local raw_lines
+        raw_lines=$(echo "${command_result}" | sed '/^[[:space:]]*$/d' | grep -viE 'no rows selected|SQL>' || true)
 
-        if [ "${user_count}" -gt 0 ]; then
+        # Separate OPEN accounts from locked/expired accounts
+        local open_accounts=""
+        local locked_accounts=""
+
+        while IFS= read -r line; do
+            local uname status_val
+            uname=$(echo "${line}" | awk '{print $1}')
+            status_val=$(echo "${line}" | awk '{print $2}')
+            if [ -n "${uname}" ] && [ -n "${status_val}" ]; then
+                if echo "${status_val}" | grep -qiE '^OPEN$'; then
+                    open_accounts="${open_accounts}${uname}"$'\n'
+                else
+                    locked_accounts="${locked_accounts}${uname}(${status_val})"$'\n'
+                fi
+            fi
+        done <<< "${raw_lines}"
+
+        local open_count=0
+        local locked_count=0
+        [ -n "${open_accounts}" ] && open_count=$(echo "${open_accounts}" | grep -c '.' || true)
+        [ -n "${locked_accounts}" ] && locked_count=$(echo "${locked_accounts}" | grep -c '.' || true)
+
+        if [ "${open_count}" -gt 0 ] && [ "${locked_count}" -gt 0 ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="불필요 계정(데모/샘플/테스트) ${user_count}개 발견: $(echo "${account_list}" | head -5 | tr '\n' ',' )"
+            local open_summary
+            open_summary=$(echo "${open_accounts}" | tr '\n' ',' | sed 's/,$//')
+            inspection_summary="잠금 해제된 불필요 계정(데모/샘플/테스트) ${open_count}개 발견: ${open_summary} (잠금 계정 ${locked_count}개 포함)"
+        elif [ "${open_count}" -gt 0 ]; then
+            diagnosis_result="VULNERABLE"
+            status="취약"
+            local open_summary
+            open_summary=$(echo "${open_accounts}" | tr '\n' ',' | sed 's/,$//')
+            inspection_summary="잠금 해제된 불필요 계정(데모/샘플/테스트) ${open_count}개 발견: ${open_summary}"
+        elif [ "${locked_count}" -gt 0 ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            local locked_summary
+            locked_summary=$(echo "${locked_accounts}" | tr '\n' ',' | sed 's/,$//')
+            inspection_summary="잠금 설정된 불필요 계정(데모/샘플/테스트) ${locked_count}개 발견 (잠금 설정 확인 후 삭제 또는 유지 결정 필요): ${locked_summary}"
         else
             diagnosis_result="GOOD"
             status="양호"

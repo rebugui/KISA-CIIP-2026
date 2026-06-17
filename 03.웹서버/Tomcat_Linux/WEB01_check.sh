@@ -48,6 +48,7 @@ diagnose() {
     local command_result=""
     local command_executed=""
     local has_default_account=false
+    local found_config=false
 
     # Tomcat 프로세스 확인
     if command -v pgrep >/dev/null; then
@@ -94,7 +95,7 @@ diagnose() {
 
     for xml_pattern in "${tomcat_users_locations[@]}"; do
         for xml_file in $xml_pattern; do
-            if [ -f "${xml_file}" ]; then
+            if [ -r "${xml_file}" ]; then
                 # 기본 계정명(tomcat, admin) 확인 (활성 설정만; 주석 제외)
                 # 기본 Tomcat conf/tomcat-users.xml 은 예시 계정(tomcat/both/role1)을 여러 줄
                 # <!-- ... --> 블록 안에 비활성(주석) 상태로 배포한다. 줄 시작(^\s*<!--) 필터만으로는
@@ -124,6 +125,7 @@ diagnose() {
                     user_entries="${default_users}"
                     has_default_account=true
                 fi
+                found_config=true
                 break 2
             fi
         done
@@ -136,10 +138,14 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="기본 관리자 계정명(tomcat, admin)이 사용 중입니다. 추측하기 어려운 계정명으로 변경 권장."
-    else
+    elif [ "${found_config}" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="기본 관리자 계정명이 사용되고 있지 않습니다. (보안 권고사항 준수)"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="tomcat-users.xml 파일을 찾을 수 없거나 읽을 수 없어 자동 판정이 불가능합니다. 관리자 계정 설정을 수동으로 확인하십시오."
     fi
 
     # Run-all 모드 확인

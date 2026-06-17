@@ -110,9 +110,32 @@ diagnose() {
         local vulnerable_evidence=""
         local good_evidence=""
 
-        # user 요소를 한 줄씩 정규화하여 처리
+        # user 요소를 한 줄씩 정규화하여 처리 (주석 처리된 비활성 계정 제외)
+        # 기본 Tomcat conf/tomcat-users.xml 은 예시 계정(tomcat 등)을 여러 줄
+        # <!-- ... --> 블록 안에 비활성(주석) 상태로 배포한다. 줄 시작(^\s*<!--) 필터만으로는
+        # 블록 내부의 <user username="tomcat" .../> 줄(공백+<user 로 시작)을 제거하지 못해
+        # 비활성 예시 계정을 VULNERABLE 로 오판한다. 따라서 awk 로 <!-- ... --> 주석 구간을
+        # 먼저 제거한 뒤 매칭하여 활성(미주석) 계정만 탐지한다.
+        local strip_xml_comments='
+            {
+                line = $0; out = ""
+                while (length(line) > 0) {
+                    if (incomment) {
+                        p = index(line, "-->")
+                        if (p == 0) { line = ""; break }
+                        line = substr(line, p + 3); incomment = 0
+                    } else {
+                        p = index(line, "<!--")
+                        if (p == 0) { out = out line; line = ""; break }
+                        out = out substr(line, 1, p - 1)
+                        line = substr(line, p + 4); incomment = 1
+                    }
+                }
+                print out
+            }'
+        local active_xml=$(awk "${strip_xml_comments}" "${xml_file}" 2>/dev/null || true)
         local user_lines
-        user_lines="$(grep -ioE '<user[[:space:]][^>]*>' "${xml_file}" 2>/dev/null || true)"
+        user_lines="$(printf '%s\n' "${active_xml}" | grep -ioE '<user[[:space:]][^>]*>' 2>/dev/null || true)"
 
         while IFS= read -r line; do
             [ -z "${line}" ] && continue

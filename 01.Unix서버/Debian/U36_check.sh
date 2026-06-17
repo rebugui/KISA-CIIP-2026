@@ -94,8 +94,9 @@ diagnose() {
         # /etc/xinetd.d/ 확인
         for svc_file in rlogin rsh rexec; do
             if [ -f "/etc/xinetd.d/$svc_file" ]; then
-                local xinetd_enabled=$(grep -v "^#" "/etc/xinetd.d/$svc_file" 2>/dev/null | grep -i "disable.*=.*no" || echo "")
-                if [ -n "$xinetd_enabled" ]; then
+                local xinetd_disabled=$(grep -E '^[[:space:]]*disable' "/etc/xinetd.d/$svc_file" 2>/dev/null | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | tail -1 || echo "")
+                xinetd_disabled=$(echo "$xinetd_disabled" | tr '[:upper:]' '[:lower:]')
+                if [ "$xinetd_disabled" != "yes" ]; then
                     r_services_active=true
                     active_services="${active_services}${svc_file} "
                     raw_output="${raw_output}[/etc/xinetd.d/${svc_file}] 활성화됨${newline}"

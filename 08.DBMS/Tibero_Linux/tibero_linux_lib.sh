@@ -201,8 +201,10 @@ invoke_tibero_linux_check() {
             tibero_sql_check "SELECT resource_name||'='||limit FROM dba_profiles WHERE profile='DEFAULT' AND resource_name IN ('PASSWORD_LIFE_TIME','PASSWORD_VERIFY_FUNCTION','FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME');" "password lifetime and complexity" || return 0
             if ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[^[:space:]]'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DEFAULT profile returned no password lifetime/complexity/lockout policy rows; the control is not configured." "No rows returned (no DEFAULT profile password policy configured)." "${TIBERO_LAST_COMMAND}"
-            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'PASSWORD_VERIFY_FUNCTION=NULL|PASSWORD_LIFE_TIME=UNLIMITED|FAILED_LOGIN_ATTEMPTS=UNLIMITED'; then
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'PASSWORD_VERIFY_FUNCTION=(|NULL)|PASSWORD_LIFE_TIME=UNLIMITED|FAILED_LOGIN_ATTEMPTS=UNLIMITED'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DEFAULT profile password lifetime/complexity/lockout controls are weak." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+            elif ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq 'PASSWORD_VERIFY_FUNCTION='; then
+                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DEFAULT profile is missing a PASSWORD_VERIFY_FUNCTION row; no password complexity verification is configured." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
                 tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero DEFAULT profile password controls appear configured." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             fi
@@ -286,11 +288,11 @@ invoke_tibero_linux_check() {
             fi
             ;;
         D-18)
-            tibero_sql_check "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE grantee='PUBLIC' AND owner NOT IN ('SYS','SYSCAT') AND ROWNUM <= 100;" "public role restriction" || return 0
+            tibero_sql_check "SELECT granted_role FROM dba_role_privs WHERE grantee='PUBLIC';" "DBA role granted to PUBLIC" || return 0
             if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[[:alnum:]]'; then
-                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero object permissions granted to PUBLIC were found." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero roles granted to PUBLIC were found (DBA-level role assigned to PUBLIC)." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
-                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "No non-system Tibero object permissions granted to PUBLIC were returned." "No rows returned." "${TIBERO_LAST_COMMAND}"
+                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "No Tibero DBA-level roles granted to PUBLIC were returned." "No rows returned." "${TIBERO_LAST_COMMAND}"
             fi
             ;;
         D-19)
@@ -301,7 +303,7 @@ invoke_tibero_linux_check() {
             tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Application-owned Tibero objects were found or queried; confirm owners are authorized." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             ;;
         D-21)
-            tibero_sql_check "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE grantable='YES' AND grantee NOT IN ('SYS','SYSCAT','DBA') AND ROWNUM <= 100;" "GRANT OPTION restriction" || return 0
+            tibero_sql_check "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE grantable='YES' AND grantee NOT IN (SELECT grantee FROM dba_role_privs WHERE granted_role = 'DBA') AND ROWNUM <= 100;" "GRANT OPTION restriction" || return 0
             if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[[:alnum:]]'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero object privileges with grant option were found." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else

@@ -73,8 +73,10 @@ try {
             }
         }
 
+        $verifiedPaths = [System.Collections.Generic.List[string]]::new()
         $aclEvidence = foreach ($path in $logPaths) {
             if (Test-Path -LiteralPath $path) {
+                $verifiedPaths.Add($path) | Out-Null
                 Get-NginxBroadAclEvidence -Path $path -Role 'LogPath'
             }
         }
@@ -107,6 +109,11 @@ try {
             $finalResult = "MANUAL"
             $status = "수동진단"
             $summary = "Nginx log path ACLs could not be read; inspect log directory/file permissions manually."
+        }
+        elseif ($logPaths.Count -gt 0 -and $verifiedPaths.Count -eq 0) {
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Nginx log paths were resolved from configuration, but the directories do not exist or are not readable on this host, so their NTFS ACLs could not be inspected. Manually verify the log directory permissions (general users must not have access)."
         }
         else {
             $finalResult = "GOOD"

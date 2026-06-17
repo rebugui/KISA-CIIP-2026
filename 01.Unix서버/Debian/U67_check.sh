@@ -141,9 +141,11 @@ diagnose() {
                 # Check specific critical logs
                 local critical_logs=("syslog" "auth.log" "kern.log" "daemon.log" "mail.log")
                 local crit_issue=false
+                local crit_found=false
 
                 for log in "${critical_logs[@]}"; do
                     if [ -f "$log_dir/$log" ]; then
+                        crit_found=true
                         local l_perm=$(stat -c "%a" "$log_dir/$log")
                         local l_owner=$(stat -c "%U" "$log_dir/$log")
 
@@ -167,6 +169,10 @@ diagnose() {
 
                 if [ "$crit_issue" = true ]; then
                     is_secure=false
+                elif [ "$crit_found" = false ]; then
+                    is_secure=false
+                    diagnosis_result="MANUAL"
+                    details="${details}, 주요 로그 파일을 찾을 수 없어 확인 불가 (수동 점검 필요)"
                 else
                     is_secure=true
                 fi
@@ -183,7 +189,11 @@ diagnose() {
     command_executed="stat -c '%a %U %G' /var/log && find /var/log -type f \\( -perm -g+w -o -perm -o+w \\) && find /var/log -type f ! -user root ! -user syslog"
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$diagnosis_result" = "MANUAL" ]; then
+        status="수동진단"
+        inspection_summary="/var/log 로그 설정을 확정하지 못함 (${details})"
+        command_result="${raw_output}"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="/var/log 디렉터리 및 주요 로그 파일 설정이 양호합니다 (${details})"

@@ -61,7 +61,7 @@ diagnose() {
     local checked_users=""
     
     # Valid nologin shells
-    local nologin_patterns="/bin/false|/sbin/nologin|/usr/sbin/nologin|/dev/null"
+    local nologin_patterns="/bin/false|/sbin/nologin|/usr/sbin/nologin|/dev/null|/usr/bin/false"
 
     local raw_output=""
     

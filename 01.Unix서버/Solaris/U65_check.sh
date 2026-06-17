@@ -82,7 +82,7 @@ diagnose() {
             config_files="${config_files}/etc/ntp.conf"
 
             # NTP 서버 설정 확인 (server 또는 pool 지시자)
-            local ntp_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/ntp.conf 2>/dev/null | grep -v "^#" | head -5)
+            local ntp_servers=$(grep -E "^[[:space:]]*server|^[[:space:]]*pool" /etc/ntp.conf 2>/dev/null | grep -v "^#" | head -5)
             if [ -n "$ntp_servers" ]; then
                 ntp_configured=true
                 ntp_details="NTP 서버 설정됨: $(echo "$ntp_servers" | head -3 | tr '\n' ' ')"
@@ -95,7 +95,7 @@ diagnose() {
         if [ -f /etc/inet/ntp.conf ]; then
             config_files="${config_files} /etc/inet/ntp.conf"
 
-            local inet_ntp_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/inet/ntp.conf 2>/dev/null | grep -v "^#" | head -5)
+            local inet_ntp_servers=$(grep -E "^[[:space:]]*server|^[[:space:]]*pool" /etc/inet/ntp.conf 2>/dev/null | grep -v "^#" | head -5)
             if [ -n "$inet_ntp_servers" ]; then
                 ntp_configured=true
                 ntp_details="${ntp_details:+${ntp_details}, }NTP 서버 설정됨(/etc/inet/ntp.conf): $(echo "$inet_ntp_servers" | head -3 | tr '\n' ' ')"
@@ -106,7 +106,7 @@ diagnose() {
             config_files="${config_files} /etc/chrony.conf"
 
             # Chrony 서버 설정 확인
-            local chrony_servers=$(grep -E "^[\s]*server|^[\s]*pool" /etc/chrony.conf 2>/dev/null | grep -v "^#" | head -5)
+            local chrony_servers=$(grep -E "^[[:space:]]*server|^[[:space:]]*pool" /etc/chrony.conf 2>/dev/null | grep -v "^#" | head -5)
             if [ -n "$chrony_servers" ]; then
                 ntp_configured=true
                 ntp_details="${ntp_details}, Chrony 서버 설정됨"
@@ -117,7 +117,7 @@ diagnose() {
         if [ -f /etc/systemd/timesyncd.conf ]; then
             config_files="${config_files} /etc/systemd/timesyncd.conf"
 
-            local timesyncd_servers=$(grep "^[\s]*NTP=" /etc/systemd/timesyncd.conf 2>/dev/null | grep -v "^#" | grep -v "^NTP=$")
+            local timesyncd_servers=$(grep "^[[:space:]]*NTP=" /etc/systemd/timesyncd.conf 2>/dev/null | grep -v "^#" | grep -v "^NTP=$")
             if [ -n "$timesyncd_servers" ]; then
                 ntp_configured=true
                 ntp_details="${ntp_details}, systemd-timesyncd: ${timesyncd_servers}"

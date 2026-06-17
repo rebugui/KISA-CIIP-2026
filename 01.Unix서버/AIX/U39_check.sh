@@ -55,6 +55,7 @@ diagnose() {
     local newline=$'\n'
 
     local is_secure=true
+    local nfs_active=false
     local active_services=()
     local service_status=""
 
@@ -64,6 +65,7 @@ diagnose() {
         local state=$(lssrc -s "$svc" 2>/dev/null | grep -E "$svc" | awk '{print $NF}' || echo "inoperative")
         if [ "$state" = "active" ]; then
             is_secure=false
+            nfs_active=true
             active_services+=("${svc} (active)")
         fi
         service_status="${service_status}${svc}: ${state}\\n"
@@ -73,6 +75,7 @@ diagnose() {
     local nfs_procs=$(ps -ef 2>/dev/null | grep -Ei "nfsd|mountd|rpcbind|portmap" | grep -v grep || echo "")
     if [ -n "$nfs_procs" ]; then
         is_secure=false
+        nfs_active=true
         local proc_names=$(echo "$nfs_procs" | awk '{print $8}' | sort -u | xargs)
         active_services+=("NFS 프로세스: ${proc_names}")
     fi
@@ -81,6 +84,7 @@ diagnose() {
     local nfs_port=$(netstat -an 2>/dev/null | grep "\.2049 " | grep LISTEN || echo "")
     if [ -n "$nfs_port" ]; then
         is_secure=false
+        nfs_active=true
         active_services+=("NFS 포트 2049 활성화")
     fi
 
@@ -88,7 +92,7 @@ diagnose() {
     local exports=""
     if [ -f /etc/exports ]; then
         exports=$(grep -v "^#" /etc/exports 2>/dev/null | grep -v "^$" || echo "")
-        if [ -n "$exports" ]; then
+        if [ -n "$exports" ] && [ "$nfs_active" = true ]; then
             is_secure=false
             active_services+=("/etc/exports에 공유 설정 존재")
         fi

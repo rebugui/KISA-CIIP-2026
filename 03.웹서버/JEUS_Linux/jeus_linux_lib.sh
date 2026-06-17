@@ -271,7 +271,9 @@ invoke_jeus_linux_check() {
             jeus_acl_check "security account/policy" "strict" "${web03_pwfiles[@]:-}"
             ;;
         WEB-04)
-            lines="$(jeus_config_grep '<allow-indexing>[[:space:]]*true|<allow-indexing>[[:space:]]*false|listings' || true)"
+            # Use the comment-stripped grep so that a directory-listing directive disabled
+            # via a SINGLE-LINE or MULTI-LINE <!-- ... --> comment is not counted as active.
+            lines="$(jeus_config_grep_stripped '<allow-indexing>[[:space:]]*true|<allow-indexing>[[:space:]]*false|listings' || true)"
             if printf '%s' "${lines}" | grep -Eiq '<allow-indexing>[[:space:]]*true|listings[[:space:]]*=[[:space:]]*true'; then
                 jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS directory listing appears enabled." "${lines}" "Inspect jeus-web-dd.xml/web.xml directory listing settings"
             elif printf '%s' "${lines}" | grep -Eiq '<allow-indexing>[[:space:]]*false|listings[[:space:]]*=[[:space:]]*false'; then
@@ -419,7 +421,9 @@ invoke_jeus_linux_check() {
             fi
             ;;
         WEB-16)
-            lines="$(jeus_config_grep 'serverInfo=false|server-header|ServerTokens' || true)"
+            # Use the comment-stripped grep so a serverInfo directive disabled via a
+            # SINGLE-LINE or MULTI-LINE <!-- ... --> comment is not counted as active.
+            lines="$(jeus_config_grep_stripped 'serverInfo=false|server-header|ServerTokens' || true)"
             printf '%s' "${lines}" | grep -Eiq 'serverInfo=false' && jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS server header suppression evidence was found." "${lines}" "Inspect JEUS serverInfo/header settings" || jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS server header suppression evidence was not conclusive." "$(jeus_join_lines "${lines}" "$(jeus_evidence)")" "Inspect JEUS serverInfo/header settings"
             ;;
         WEB-17)

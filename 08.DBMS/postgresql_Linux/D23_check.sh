@@ -41,15 +41,6 @@ GUIDELINE_REMEDIATION="xp_cmdshell 설정 값을 0 또는 False로 설정"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    # FR-022: Check required tools
-    if ! check_postgresql_tools; then
-        handle_missing_tools "postgresql" "${ITEM_ID}" "${ITEM_NAME}" \
-            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        return 0
-    fi
-
-
     local diagnosis_result="N/A"
     local status="N/A"
     local inspection_summary="이 항목은 MSSQL 전용입니다. PostgreSQL에는 xp_cmdshell 기능이 없습니다."

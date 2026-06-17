@@ -95,7 +95,7 @@ diagnose() {
             fi
             checked_details="${checked_details}${f} ${file_perms} ${file_owner}; "
             # 소유자 root:root + 600 초과 비트 없음 (400 등 더 강한 권한은 양호)
-            if ! { [ "$file_owner" = "root:root" ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#600 & 07777 ))" -eq 0 ]; }; then
+            if ! { [ "${file_owner%%:*}" = "root" ] && [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$file_perms & ~8#600 & 07777 ))" -eq 0 ]; }; then
                 bad_details="${bad_details}${f} (권한 ${file_perms}, 소유자 ${file_owner}), "
             fi
         done

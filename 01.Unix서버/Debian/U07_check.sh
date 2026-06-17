@@ -122,25 +122,32 @@ diagnose() {
     # - lastlog -t 90: 90일 내 로그인한 계정 표시
     # - 이 목록에 없는 계정 = 90일 이상 미사용
     local recent_login_accounts=""
+    local lastlog_rc=0
     if command -v lastlog >/dev/null 2>&1; then
-        recent_login_accounts=$(lastlog -t 90 2>/dev/null | awk 'NR>1 {print $1}' | sort -u || echo "")
+        recent_login_accounts=$(lastlog -t 90 2>/dev/null | awk 'NR>1 {print $1}' | sort -u) || lastlog_rc=$?
     fi
 
     # 3단계: 교차 검증 - 점검 대상 계정 중 90일 이상 미사용 계정 식별
     if [ -n "$checkable_accounts" ]; then
         if command -v lastlog >/dev/null 2>&1; then
-            while IFS= read -r account; do
-                # 빈 계정명 건너뜀
-                [ -z "$account" ] && continue
+            if [ "$lastlog_rc" -ne 0 ]; then
+                # lastlog 실행 실패 (예: /var/log/lastlog 없음): 90일 기준 자동 판정 불가 → 수동진단
+                inactive_leg="MANUAL"
+                undetermined_accounts=$(echo "$checkable_accounts" | tr '\n' ' ')
+            else
+                while IFS= read -r account; do
+                    # 빈 계정명 건너뜀
+                    [ -z "$account" ] && continue
 
-                # recent_login_accounts에 없으면 90일 이상 미사용
-                if [ -z "$recent_login_accounts" ] || ! echo "$recent_login_accounts" | grep -qx "$account"; then
-                    unused_accounts="${unused_accounts}${account} "
+                    # recent_login_accounts에 없으면 90일 이상 미사용
+                    if ! echo "$recent_login_accounts" | grep -qx "$account"; then
+                        unused_accounts="${unused_accounts}${account} "
+                    fi
+                done <<< "$checkable_accounts"
+
+                if [ -n "$unused_accounts" ]; then
+                    inactive_leg="VULNERABLE"
                 fi
-            done <<< "$checkable_accounts"
-
-            if [ -n "$unused_accounts" ]; then
-                inactive_leg="VULNERABLE"
             fi
         else
             # lastlog 미지원 환경: 90일 기준 자동 판정 불가 → 수동진단

@@ -130,7 +130,7 @@ diagnose() {
         status="취약"
         inspection_summary="ftpusers 파일이 비어있습니다(${found_file}). 시스템 계정(root, bin, daemon 등)을 등록하세요."
         local ftpusers_content=$(cat "$found_file" 2>/dev/null || echo "File empty or not found")
-        command_result="[Command: cat ${found_file}]\${newline}${ftpusers_content}"
+        command_result="[Command: cat ${found_file}]${newline}${ftpusers_content}"
     else
         # 파일이 존재하고 내용이 있는 경우
         # 주요 시스템 계정이 등록되어 있는지 확인
@@ -150,7 +150,7 @@ diagnose() {
         done || true
 
         local ftpusers_content=$(cat "$found_file" 2>/dev/null || echo "File not found")
-        command_result="[Command: cat ${found_file}]\${newline}${ftpusers_content}"
+        command_result="[Command: cat ${found_file}]${newline}${ftpusers_content}"
 
         # 판정 기준: root 계정 FTP 접속 차단 여부 (가이드라인 criteria_good="root 계정 접속을 차단한 경우")
         local missing_list=""
@@ -162,13 +162,13 @@ diagnose() {
             status="양호"
             inspection_summary="ftpusers 파일에 root 계정이 등록되어 root FTP 직접 접속이 차단되어 있습니다(${found_file})."
             if [ ${#missing_accounts[@]} -ne 0 ]; then
-                command_result="${command_result}\${newline}[참고: 미등록 시스템 계정] ${missing_list%, }"
+                command_result="${command_result}${newline}[참고: 미등록 시스템 계정] ${missing_list%, }"
             fi
         else
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="ftpusers 파일에 root 계정이 등록되어 있지 않아 root FTP 직접 접속이 허용됩니다(${found_file})."
-            command_result="${command_result}\${newline}[root: NOT blocked]"
+            command_result="${command_result}${newline}[root: NOT blocked]"
         fi
     fi
 

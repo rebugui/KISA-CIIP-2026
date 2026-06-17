@@ -90,8 +90,10 @@ diagnose() {
     fi
 
     # Check for unnecessary files in document roots
+    local doc_root_found=false
     for doc_root in ${doc_roots}; do
         if [ -d "${doc_root}" ]; then
+            doc_root_found=true
             # Check for backup files, sample files, test files
             local found_files=$(find "${doc_root}" -type f \( -name "*.bak" -o -name "*.old" -o -name "*.tmp" -o -name "*.orig" -o -name "*sample*" -o -name "*test*" -o -name "*.backup" -o -name "*.swp" -o -name "README*" -o -name "INSTALL*" \) 2>/dev/null | head -10 || true)
 
@@ -105,7 +107,14 @@ diagnose() {
     command_executed="find /usr/share/nginx/html /var/www/html -type f \\( -name '*.bak' -o -name '*.old' -o -name '*.tmp' -o -name '*sample*' \\) 2>/dev/null | head -10"
     command_result="${unnecessary_files:-No unnecessary files found}"
 
-    if [ "${file_count}" -eq 0 ]; then
+    if [ "${file_count}" -eq 0 ] && [ "${doc_root_found}" = false ]; then
+        # nginx 프로세스는 실행 중이나 문서 루트 디렉터리를 확인할 수 없음.
+        # 실제 웹 루트에 불필요한 파일이 있을 수 있으므로 GOOD로 단정할 수 없어 수동진단으로 분류.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Nginx가 실행 중이나 문서 루트 디렉터리를 확인할 수 없습니다. 웹 서비스 경로 내 불필요한 파일 존재 여부를 수동으로 확인하세요."
+        command_result="Document root could not be determined (config not found, fallback directories do not exist)"
+    elif [ "${file_count}" -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="불필요한 파일(백업, 테스트, 샘플 파일 등)이 발견되지 않았습니다."

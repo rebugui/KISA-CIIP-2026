@@ -150,7 +150,7 @@ diagnose() {
     if [ "$telnet_on" = true ]; then
         local telnet_banner=$(grep -E '^[[:space:]]*BANNER=' /etc/default/telnetd 2>/dev/null | tail -1 || true)
         svc_evidence="${svc_evidence}[/etc/default/telnetd BANNER] ${telnet_banner:-미설정}${newline}"
-        if [ -z "$telnet_banner" ]; then
+        if [ -z "$telnet_banner" ] || ! echo "$telnet_banner" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
             svc_missing="${svc_missing}Telnet(/etc/default/telnetd BANNER) "
         fi
     fi
@@ -165,7 +165,7 @@ diagnose() {
     if [ "$ftp_on" = true ]; then
         local ftp_banner=$(grep -E '^[[:space:]]*BANNER=' /etc/default/ftpd 2>/dev/null | tail -1 || true)
         svc_evidence="${svc_evidence}[/etc/default/ftpd BANNER] ${ftp_banner:-미설정}${newline}"
-        if [ -z "$ftp_banner" ]; then
+        if [ -z "$ftp_banner" ] || ! echo "$ftp_banner" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
             svc_missing="${svc_missing}FTP(/etc/default/ftpd BANNER) "
         fi
     fi

@@ -185,23 +185,35 @@ diagnose() {
         fi
     fi
 
-    # [SMTP] Postfix: smtpd_banner 설정 확인
+    # [SMTP] Postfix: smtpd_banner 설정 및 경고 메시지 포함 확인
     if echo "$proc_list" | grep "postfix" | grep -v grep >/dev/null; then
         if [ ! -f /etc/postfix/main.cf ]; then
             svc_manual="${svc_manual}Postfix(SMTP) 사용 중이나 main.cf를 찾지 못해 배너 수동 확인 필요. "
         elif grep -qE "^[[:space:]]*smtpd_banner[[:space:]]*=" /etc/postfix/main.cf 2>/dev/null; then
-            svc_info="${svc_info}Postfix: smtpd_banner 설정됨. "
+            local smtpd_banner_val
+            smtpd_banner_val=$(grep -E "^[[:space:]]*smtpd_banner[[:space:]]*=" /etc/postfix/main.cf 2>/dev/null | tail -1 | sed 's/^[[:space:]]*smtpd_banner[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            if echo "$smtpd_banner_val" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
+                svc_info="${svc_info}Postfix: smtpd_banner 경고 메시지 설정됨(${smtpd_banner_val}). "
+            else
+                svc_issues="${svc_issues}Postfix(SMTP) 사용 중이나 smtpd_banner에 경고 메시지 미설정(현재: ${smtpd_banner_val}). "
+            fi
         else
             svc_issues="${svc_issues}Postfix(SMTP) 사용 중이나 smtpd_banner 미설정. "
         fi
     fi
 
-    # [SMTP] Sendmail: SmtpGreetingMessage 설정 확인
+    # [SMTP] Sendmail: SmtpGreetingMessage 설정 및 경고 메시지 포함 확인
     if echo "$proc_list" | grep -w "sendmail" | grep -v grep >/dev/null; then
         if [ ! -f /etc/mail/sendmail.cf ]; then
             svc_manual="${svc_manual}Sendmail(SMTP) 사용 중이나 sendmail.cf를 찾지 못해 배너 수동 확인 필요. "
-        elif grep -qi "GreetingMessage" /etc/mail/sendmail.cf 2>/dev/null; then
-            svc_info="${svc_info}Sendmail: SmtpGreetingMessage 설정됨. "
+        elif grep -qE '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null; then
+            local smtp_greeting_val
+            smtp_greeting_val=$(grep -E '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null | tail -1 | sed 's/^O[[:space:]]*SmtpGreetingMessage[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            if echo "$smtp_greeting_val" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
+                svc_info="${svc_info}Sendmail: SmtpGreetingMessage 경고 메시지 설정됨(${smtp_greeting_val}). "
+            else
+                svc_issues="${svc_issues}Sendmail(SMTP) 사용 중이나 SmtpGreetingMessage에 경고 메시지 미설정(현재: ${smtp_greeting_val}). "
+            fi
         else
             svc_issues="${svc_issues}Sendmail(SMTP) 사용 중이나 SmtpGreetingMessage 미설정. "
         fi

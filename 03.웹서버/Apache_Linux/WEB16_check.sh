@@ -128,10 +128,10 @@ diagnose() {
     fi
 
     # Check ServerTokens directive
-    local server_tokens_settings=$(grep -r "ServerTokens" "${apache_conf}" /etc/httpd/conf.d/ /etc/apache2/conf-available/ /etc/apache2/conf-enabled/ /etc/apache2/sites-available/ 2>/dev/null | grep -v "^\s*#" | head -5 || true)
-    local server_signature_settings=$(grep -r "ServerSignature" "${apache_conf}" /etc/httpd/conf.d/ /etc/apache2/conf-available/ /etc/apache2/conf-enabled/ /etc/apache2/sites-available/ 2>/dev/null | grep -v "^\s*#" | head -5 || true)
+    local server_tokens_settings=$(grep -r "ServerTokens" "${apache_conf}" /etc/httpd/conf.d/ /etc/apache2/conf-enabled/ /etc/apache2/sites-enabled/ 2>/dev/null | grep -v "^\s*#" | head -5 || true)
+    local server_signature_settings=$(grep -r "ServerSignature" "${apache_conf}" /etc/httpd/conf.d/ /etc/apache2/conf-enabled/ /etc/apache2/sites-enabled/ 2>/dev/null | grep -v "^\s*#" | head -5 || true)
 
-    command_executed="grep -r 'ServerTokens' ${apache_conf} /etc/httpd/conf.d/ /etc/apache2/conf-available/ /etc/apache2/conf-enabled/ 2>/dev/null | grep -v '^\\s*#'; grep -r 'ServerSignature' ${apache_conf} /etc/httpd/conf.d/ /etc/apache2/conf-available/ /etc/apache2/conf-enabled/ 2>/dev/null | grep -v '^\\s*#'"
+    command_executed="grep -r 'ServerTokens' ${apache_conf} /etc/httpd/conf.d/ /etc/apache2/conf-enabled/ /etc/apache2/sites-enabled/ 2>/dev/null | grep -v '^\\s*#'; grep -r 'ServerSignature' ${apache_conf} /etc/httpd/conf.d/ /etc/apache2/conf-enabled/ /etc/apache2/sites-enabled/ 2>/dev/null | grep -v '^\\s*#'"
 
     # Analyze ServerTokens setting
     if echo "${server_tokens_settings}" | grep -iq "ServerTokens.*Prod"; then

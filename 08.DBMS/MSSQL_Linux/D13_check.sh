@@ -48,26 +48,7 @@ GUIDELINE_REMEDIATION="불필요한 ODBC/OLE-DB 제거"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    # FR-022: Check required tools
-    if ! check_mssql_tools; then
-        handle_missing_tools "mssql" "${ITEM_ID}" "${ITEM_NAME}" \
-            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        return 0
-    fi
-
-
-    local diagnosis_result="UNKNOWN"
-    local status="미진단"
-    local inspection_summary=""
-    local command_result=""
-    local command_executed=""
-
-    # D-13은 Windows OS용 ODBC/OLE-DB 점검 항목
-    # MSSQL은 Windows에서 실행될 수 있으므로 MANUAL 진단
-    # Linux 환경에서는 N/A 처리
-
-    # OS 확인
+    # D-13은 Windows OS 전용 항목 — Linux 환경에서는 N/A
     local os_type=""
     if [ -f "/etc/os-release" ]; then
         os_type="Linux"
@@ -101,6 +82,20 @@ diagnose() {
         verify_result_saved "${ITEM_ID}"
         return 0
     fi
+
+    # Windows 경로 — 먼저 도구 확인
+    if ! check_mssql_tools; then
+        handle_missing_tools "mssql" "${ITEM_ID}" "${ITEM_NAME}" \
+            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
+            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        return 0
+    fi
+
+    local diagnosis_result="UNKNOWN"
+    local status="미진단"
+    local inspection_summary=""
+    local command_result=""
+    local command_executed=""
 
     # Windows 환경인 경우 수동 진단 유도
     diagnosis_result="MANUAL"

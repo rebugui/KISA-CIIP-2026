@@ -206,17 +206,17 @@ diagnose() {
         inspection_summary="root 권한이 아니고 root 환경 설정 파일에서 PATH를 확인할 수 없어 root PATH 수동 점검 필요"
         command_result="확인 시도 파일: ${checked_files:-접근 가능한 파일 없음} | ${root_home_perms}"
         command_executed="grep -E '^(export )?PATH=' /.profile /root/.profile /root/.bashrc /etc/profile"
-    elif [ -n "$path_dirs_issues" ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="PATH 디렉토리 권한 문제: ${path_dirs_issues%, }"
-        command_result="${root_home_perms} | ${path_dirs_issues%, }"
-        command_executed="ls -ld \$(echo \$PATH | tr ':' ' ')"
     else
+        # 판단 기준은 PATH 내 '.'/빈 경로 위치이므로 PATH 디렉토리 권한 문제는
+        # 판정에 반영하지 않고 참고 증거로만 기록 (기준 외 과탐 방지)
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="root PATH 맨 앞/중간에 '.' 또는 빈 경로 없음 (${root_home_perms})"
-        command_result="${path_evidence}${root_home_perms}"
+        if [ -n "$path_dirs_issues" ]; then
+            inspection_summary="root PATH 맨 앞/중간에 '.' 또는 빈 경로 없음 (참고: PATH 디렉토리 권한 ${path_dirs_issues%, })"
+        else
+            inspection_summary="root PATH 맨 앞/중간에 '.' 또는 빈 경로 없음 (${root_home_perms})"
+        fi
+        command_result="${path_evidence}${root_home_perms}${path_dirs_issues:+ | 참고: ${path_dirs_issues%, }}"
         command_executed="echo \$PATH && ls -ld /root"
     fi
 

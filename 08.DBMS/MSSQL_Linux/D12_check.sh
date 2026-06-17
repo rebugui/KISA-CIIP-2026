@@ -44,15 +44,6 @@ GUIDELINE_REMEDIATION="Listener 비밀번호 설정"
 diagnose() {
     echo "진단 항목: ${ITEM_ID} - ${ITEM_NAME}"
 
-    # FR-022: Check required tools
-    if ! check_mssql_tools; then
-        handle_missing_tools "mssql" "${ITEM_ID}" "${ITEM_NAME}" \
-            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" \
-            "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
-        return 0
-    fi
-
-
     local diagnosis_result="N/A"
     local status="N/A"
     local inspection_summary="이 항목은 Oracle 전용입니다. MSSQL에는 Oracle Listener 기능이 없습니다."

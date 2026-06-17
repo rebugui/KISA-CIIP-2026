@@ -265,13 +265,18 @@ function Invoke-TomcatWindowsCheck {
         }
         'WEB-02' {
             if ($state.TomcatUsersXml.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Tomcat was found, but tomcat-users.xml was not located.' $evidencePrefix 'Locate tomcat-users.xml and inspect password policy' }
-            $weak = @([regex]::Matches($usersText, '(?is)<user\b[^>]*username\s*=\s*"([^"]+)"[^>]*password\s*=\s*"([^"]*)"[^>]*') | Where-Object {
-                $u = $_.Groups[1].Value; $p = $_.Groups[2].Value
-                $p -eq $u -or $p -match '^(?i)(admin|tomcat|password|1234|12345|123456|qwerty|manager|root|changeme)$'
-            } | ForEach-Object { $_.Value.Trim() })
-            if ($weak.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Weak Tomcat user passwords were found in tomcat-users.xml.' ($weak -join "`n") 'Parse tomcat-users.xml password attributes' }
-            $users = @([regex]::Matches($usersText, '(?is)<user\b[^>]*password\s*=') | ForEach-Object { $_.Value })
-            if ($users.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Tomcat user password attributes exist. Static checks found no common weak password, but complexity and rotation policy require manual review.' "Password-bearing user entries: $($users.Count)" 'Parse tomcat-users.xml password attributes' }
+            # Strip XML comments before matching to avoid false VULNERABLE on commented-out example users
+            $usersTextActive = [regex]::Replace($usersText, '(?s)<!--.*?-->', '')
+            # Hash/encryption detection: MD5(32) / SHA-1(40) / SHA-256(64) hex digests = encrypted
+            $all = @([regex]::Matches($usersTextActive, '(?is)<user\b[^>]*username\s*=\s*"([^"]+)"[^>]*password\s*=\s*"([^"]*)"[^>]*') | ForEach-Object { $_ })
+            $plaintext = @(); $encrypted = @()
+            foreach ($e in $all) {
+                $p = $e.Groups[2].Value; $plen = $p.Length
+                $isHash = ($plen -eq 32 -or $plen -eq 40 -or $plen -eq 64) -and ($p -match '^[0-9a-fA-F]+$')
+                if ($isHash) { $encrypted += $e.Value.Trim() } else { $plaintext += $e.Value.Trim() }
+            }
+            if ($plaintext.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Plaintext (unencrypted) Tomcat user passwords were found in tomcat-users.xml.' ($plaintext -join "`n") 'Parse tomcat-users.xml password attributes' }
+            if ($encrypted.Count -gt 0) { return New-TomcatResult 'GOOD' 'Tomcat user passwords are hashed/encrypted in tomcat-users.xml.' ($encrypted -join "`n") 'Parse tomcat-users.xml password attributes' }
             return New-TomcatResult 'GOOD' 'No local Tomcat password attributes were found in tomcat-users.xml.' "Files: $($state.TomcatUsersXml -join ', ')" 'Parse tomcat-users.xml password attributes'
         }
         'WEB-03' {
@@ -313,11 +318,11 @@ function Invoke-TomcatWindowsCheck {
         'WEB-07' {
             $findings = [System.Collections.Generic.List[string]]::new()
             foreach ($root in $state.Webapps) {
-                foreach ($name in 'docs','examples','sample','samples','test','backup','tmp') {
+                foreach ($name in 'docs','examples','manager','host-manager','sample','samples','test','backup','tmp') {
                     $candidate = Join-Path $root $name
                     if (Test-Path -LiteralPath $candidate) { $findings.Add($candidate) | Out-Null }
                 }
-                foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue -Include '*.bak','*.old','*.orig','*readme*','*install*' | Select-Object -First 50)) {
+                foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue -Include '*.bak','*.old','*.orig','*readme*','*install*','BUILDING.*','RELEASE-NOTES*','RUNNING.*','*sample*','*example*','jndi-resources-howto*' | Select-Object -First 50)) {
                     $findings.Add($file.FullName) | Out-Null
                 }
             }
@@ -328,8 +333,10 @@ function Invoke-TomcatWindowsCheck {
         'WEB-08' {
             $limits = @([regex]::Matches($serverText, '(?i)(maxPostSize|maxSavePostSize)\s*=\s*"([^"]+)"') | ForEach-Object { "$($_.Groups[1].Value)=$($_.Groups[2].Value)" })
             $bad = @($limits | Where-Object { $_ -match '=(-1|0)$' })
-            if ($bad.Count -gt 0 -or $limits.Count -eq 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat upload/request size limits are missing or unlimited.' (($limits + "server.xml files: $($state.ServerXml -join ', ')") -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize' }
-            return New-TomcatResult 'GOOD' 'Tomcat upload/request size limits are configured.' ($limits -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize'
+            # Also check web.xml multipart-config for upload size limits (criteria_good: Step 2)
+            $webLimits = @([regex]::Matches($webText, '(?is)<max-(?:file|request)-size>\s*(\d+)\s*</max-(?:file|request)-size>') | Where-Object { [int]$_.Groups[1].Value -gt 0 } | ForEach-Object { $_.Value.Trim() })
+            if ($bad.Count -gt 0 -or ($limits.Count -eq 0 -and $webLimits.Count -eq 0)) { return New-TomcatResult 'VULNERABLE' 'Tomcat upload/request size limits are missing or unlimited.' (($limits + $webLimits + "server.xml files: $($state.ServerXml -join ', ')") -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config' }
+            return New-TomcatResult 'GOOD' 'Tomcat upload/request size limits are configured.' (($limits + $webLimits) -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config'
         }
         'WEB-09' {
             $accounts = @($state.Services | ForEach-Object { $_.StartName } | Where-Object { $_ })
@@ -493,7 +500,7 @@ function Invoke-TomcatWindowsCheck {
             # so general-user log access cannot be confirmed present or absent either way -> MANUAL, not VULNERABLE (mirrors WEB-03/WEB-14).
             $unreadable = @($acl | Where-Object { $_.Access -eq 'Unknown' })
             if ($unreadable.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Tomcat log path ACL could not be read; permission state is unobtainable. Verify manually that general users have no access to the log directory and files.' (($unreadable | ForEach-Object { "$($_.Path) => $($_.Rights)" }) -join "`n") 'Inspect Tomcat logs directory ACLs' }
-            if ($acl) { return New-TomcatResult 'MANUAL' 'Tomcat log paths have broad local read ACL evidence; confirm whether this is required.' (($acl | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Inspect Tomcat logs directory ACLs' }
+            if ($acl) { return New-TomcatResult 'VULNERABLE' 'Tomcat log paths have broad local read ACL evidence (general user access exists).' (($acl | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Inspect Tomcat logs directory ACLs' }
             return New-TomcatResult 'GOOD' 'No broad local user ACL entries were found on resolved Tomcat log paths.' "Logs: $($state.Logs -join ', ')" 'Inspect Tomcat logs directory ACLs'
         }
         default {

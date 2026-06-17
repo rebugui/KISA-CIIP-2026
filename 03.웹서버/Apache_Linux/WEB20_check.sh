@@ -47,7 +47,7 @@ diagnose() {
     local inspection_summary=""
     local command_result=""
     local command_executed=""
-    local has_ssl=false
+    local has_ssl=""
 
         # Process check
     if command -v pgrep >/dev/null; then
@@ -102,7 +102,7 @@ diagnose() {
         "/etc/apache2/conf-enabled/"*.conf
     )
 
-    local has_https=false
+    local has_https=""
     for conf_pattern in "${apache_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
             if [ -f "${conf_file}" ]; then

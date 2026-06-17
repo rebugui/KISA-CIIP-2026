@@ -216,7 +216,7 @@ diagnose() {
             securetty_output="${securetty_ls}"
         fi
 
-        # Check /etc/pam.d/login for pam_securetty.so (HP-UX도 PAM 사용)
+        # Check /etc/pam.d/login for pam_securetty.so (HP-UX는 /etc/securetty 기준)
         local pam_login_file="/etc/pam.d/login"
         if [ -f "$pam_login_file" ]; then
             pam_login_output=$(grep -E "^[\s]*auth.*required.*pam_securetty.so" "$pam_login_file" 2>/dev/null || echo "")
@@ -224,9 +224,8 @@ diagnose() {
                 # pam_securetty.so가 설정되어 있으면 /etc/securetty가 있어야 함
                 telnet_details="${telnet_details}, [PAM] pam_securetty.so 설정됨"
             else
-                # securetty 파일이 있지만 모듈이 없으면 securetty가 무시됨
-                telnet_secure=false
-                telnet_details="${telnet_details}, [PAM] pam_securetty.so 설정 없음 (취약)"
+                # HP-UX는 pam_securetty.so를 기본 제공하지 않음 (/etc/securetty 기준으로 판단)
+                telnet_details="${telnet_details}, [PAM] pam_securetty.so 설정 없음 (HP-UX는 /etc/securetty 기준)"
             fi
         else
             telnet_details="${telnet_details}, [PAM] /etc/pam.d/login 파일 없음"

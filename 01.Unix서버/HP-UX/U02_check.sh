@@ -122,8 +122,8 @@ diagnose() {
             mindays_ok=true
         fi
 
-        # HISTORY >= 1 (미설정/0은 비밀번호 재사용 제한 없음 → 취약)
-        if u02_is_number "$history_depth" && [ "$history_depth" -ge 1 ]; then
+        # HISTORY >= 4 (미설정/0~3은 비밀번호 재사용 제한 부족 → 취약)
+        if u02_is_number "$history_depth" && [ "$history_depth" -ge 4 ]; then
             history_ok=true
         fi
 
@@ -134,7 +134,7 @@ diagnose() {
         else
             diagnosis_result="VULNERABLE"
             status="취약"
-            inspection_summary="비밀번호 관리 정책 미흡: ${config_details} (기준: MIN_PASSWORD_LENGTH>=8, PASSWORD_MAXDAYS 1~90, PASSWORD_MINDAYS>=1, HISTORY>=1) [${trusted_note}]"
+            inspection_summary="비밀번호 관리 정책 미흡: ${config_details} (기준: MIN_PASSWORD_LENGTH>=8, PASSWORD_MAXDAYS 1~90, PASSWORD_MINDAYS>=1, HISTORY>=4) [${trusted_note}]"
         fi
     else
         # 파일이 없거나 읽을 수 없는 경우 → 수동 점검

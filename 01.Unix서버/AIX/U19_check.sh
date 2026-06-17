@@ -118,8 +118,10 @@ diagnose() {
         fi
     fi
 
-    # 최종 판정
-    if [ "$hosts_secure" = true ] && [ "$equiv_secure" = true ]; then
+    # 최종 판정 (MANUAL이 설정된 경우 덮어쓰지 않음)
+    if [ "$diagnosis_result" = "MANUAL" ]; then
+        :
+    elif [ "$hosts_secure" = true ] && [ "$equiv_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="/etc/hosts 보안 설정 적절${equiv_details}"

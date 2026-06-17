@@ -69,6 +69,19 @@ diagnose() {
         done
     fi
 
+    # wheel 그룹 멤버에서 root 외 계정 존재 여부 확인 (root는 기본 포함, 불필요한 계정 아님)
+    local has_extra_wheel_member=false
+    if [ -n "$wheel_members" ]; then
+        IFS=',' read -ra wheel_member_arr <<< "$wheel_members"
+        for m in "${wheel_member_arr[@]}"; do
+            m=$(echo "$m" | xargs)  # trim whitespace
+            if [ -n "$m" ] && [ "$m" != "root" ]; then
+                has_extra_wheel_member=true
+                break
+            fi
+        done
+    fi
+
     # root 그룹 행을 확인할 수 없으면 수동진단 (취약 판정이 우선)
     if [ -z "$root_group_row" ]; then
         status="수동진단"
@@ -76,7 +89,7 @@ diagnose() {
         inspection_summary="root 그룹 설정을 확인할 수 없음 (/etc/group)"
     fi
 
-    if [[ -n "$wheel_members" ]] || [[ "$has_extra_root_member" == true ]] || [[ -n "$gid0_users" ]]; then
+    if [[ "$has_extra_wheel_member" == true ]] || [[ "$has_extra_root_member" == true ]] || [[ -n "$gid0_users" ]]; then
         status="취약"  # 또는 "검토필요"
         diagnosis_result="VULNERABLE"
         inspection_summary="관리자 그룹에 등록된 계정이 식별되었습니다. 인가된 사용자인지 수동 점검이 필요합니다. (발견: ${root_members:-root}, ${wheel_members:-wheel없음}, 기본 GID 0 계정: ${gid0_users:-없음})"

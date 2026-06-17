@@ -90,14 +90,41 @@ diagnose() {
         fi
     fi
 
-    # 4. SMTP 사용 시: postfix smtpd_banner / sendmail SmtpGreetingMessage 설정 필요
+    # 3b. FTP(proftpd) 사용 시: DisplayLogin 설정 필요
+    if pgrep -x proftpd >/dev/null 2>&1; then
+        local proftpd_conf=""
+        local pc
+        for pc in /etc/proftpd/proftpd.conf /etc/proftpd.conf; do
+            if [ -f "$pc" ]; then
+                proftpd_conf="$pc"
+                break
+            fi
+        done
+        if [ -z "$proftpd_conf" ] || ! grep -qiE '^[[:space:]]*DisplayLogin' "$proftpd_conf" 2>/dev/null; then
+            missing="${missing}[FTP: proftpd DisplayLogin 미설정] "
+        fi
+    fi
+
+    # 4. SMTP 사용 시: postfix smtpd_banner / sendmail SmtpGreetingMessage 설정 필요 (값에 경고 문구 포함 확인)
     if pgrep -x master >/dev/null 2>&1 && [ -f /etc/postfix/main.cf ]; then
-        if ! grep -qE '^[[:space:]]*smtpd_banner[[:space:]]*=' /etc/postfix/main.cf 2>/dev/null; then
+        if grep -qE '^[[:space:]]*smtpd_banner[[:space:]]*=' /etc/postfix/main.cf 2>/dev/null; then
+            local banner_val
+            banner_val=$(grep -E '^[[:space:]]*smtpd_banner[[:space:]]*=' /etc/postfix/main.cf 2>/dev/null | tail -1 | sed 's/^[[:space:]]*smtpd_banner[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            if ! echo "$banner_val" | grep -qiE "$warn_regex"; then
+                missing="${missing}[SMTP: postfix smtpd_banner 경고 문구 없음 (${banner_val})] "
+            fi
+        else
             missing="${missing}[SMTP: postfix smtpd_banner 미설정] "
         fi
     fi
     if pgrep -x sendmail >/dev/null 2>&1 && [ -f /etc/mail/sendmail.cf ]; then
-        if ! grep -qE '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null; then
+        if grep -qE '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null; then
+            local greeting_val
+            greeting_val=$(grep -E '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null | tail -1 | sed 's/^O[[:space:]]*SmtpGreetingMessage[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            if ! echo "$greeting_val" | grep -qiE "$warn_regex"; then
+                missing="${missing}[SMTP: sendmail SmtpGreetingMessage 경고 문구 없음 (${greeting_val})] "
+            fi
+        else
             missing="${missing}[SMTP: sendmail SmtpGreetingMessage 미설정] "
         fi
     fi

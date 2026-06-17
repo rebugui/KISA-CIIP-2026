@@ -51,7 +51,7 @@ diagnose() {
         [ -f "$f" ] && all_sources="$all_sources $f"
     done
     for src in $all_sources; do
-        local found=$(grep -iE "^(export\s+)?TMOUT=" "$src" 2>/dev/null | head -1 | sed -E 's/^(export\s+)?TMOUT=//i' | tr -d "[:space:]'\"" | sed -E 's/;.*$//' || true)
+        local found=$(grep -iE "^(export\s+)?TMOUT=" "$src" 2>/dev/null | head -1 | sed -E 's/^(export\s+)?TMOUT=//i' | tr -d "[:space:]'\"" | sed -E 's/[;#].*$//' || true)
         if [ -n "$found" ]; then
             tmout_val="$found"
             break

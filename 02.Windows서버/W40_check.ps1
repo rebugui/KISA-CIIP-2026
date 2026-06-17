@@ -60,12 +60,14 @@ try {
         # column in the single installed OS display language only (Korean OR
         # English, never both), so each concept lists both variants and is
         # satisfied if EITHER variant is found-and-configured (OR within a
-        # concept, AND across the 4 concepts).
+        # concept, AND across the 6 concepts).
         $criticalAuditConcepts = @(
-            @{ Name = '로그온';     Keywords = @('로그온', 'Logon') },
-            @{ Name = '계정 관리';   Keywords = @('계정 관리', 'Account Management') },
-            @{ Name = '정책 변경';   Keywords = @('정책 변경', 'Policy Change') },
-            @{ Name = '권한 사용';   Keywords = @('권한 사용', 'Privilege Use') }
+            @{ Name = '로그온';     Keywords = @('로그온', 'Logon'); RequiredLevel = 'SuccessAndFailure' },
+            @{ Name = '계정 관리';   Keywords = @('계정 관리', 'Account Management'); RequiredLevel = 'Failure' },
+            @{ Name = '정책 변경';   Keywords = @('정책 변경', 'Policy Change'); RequiredLevel = 'SuccessAndFailure' },
+            @{ Name = '권한 사용';   Keywords = @('권한 사용', 'Privilege Use'); RequiredLevel = 'SuccessAndFailure' },
+            @{ Name = '계정 로그온 이벤트'; Keywords = @('계정 로그온', 'Account Logon', '자격 증명', 'Credential Validation', 'Kerberos'); RequiredLevel = 'SuccessAndFailure' },
+            @{ Name = '디렉터리 서비스 액세스'; Keywords = @('디렉터리 서비스', 'Directory Service'); RequiredLevel = 'Failure' }
         )
         # Flattened keyword list (used only for the detailed status dump below).
         $criticalAudits = $criticalAuditConcepts | ForEach-Object { $_.Keywords } | Select-Object -Unique
@@ -84,13 +86,22 @@ try {
         })
 
         # Check each concept. The audit state lives in the InclusionSetting
-        # column ('없음'/'No Auditing' means not configured). A concept
-        # is configured if ANY of its language variants matches a configured row.
+        # column. A concept is configured if ANY of its language variants
+        # matches a row with the required audit level (Failure or SuccessAndFailure).
         foreach ($concept in $criticalAuditConcepts) {
             $found = $auditPolicy | Where-Object {
                 $row = $_
-                ($concept.Keywords | Where-Object { $row.Subcategory -like "*$_*" }) -and `
-                $row.InclusionSetting -ne '없음' -and $row.InclusionSetting -ne 'No Auditing'
+                $keywordMatch = $false
+                foreach ($kw in $concept.Keywords) { if ($row.Subcategory -like "*$kw*") { $keywordMatch = $true; break } }
+                if (-not $keywordMatch) { return $false }
+                $inclusion = $row.InclusionSetting
+                if ($concept.RequiredLevel -eq 'Failure') {
+                    return ($inclusion -match '실패|Failure')
+                } elseif ($concept.RequiredLevel -eq 'SuccessAndFailure') {
+                    return (($inclusion -match '성공|Success') -and ($inclusion -match '실패|Failure'))
+                } else {
+                    return ($inclusion -ne '없음' -and $inclusion -ne 'No Auditing')
+                }
             }
 
             if (-not $found) {

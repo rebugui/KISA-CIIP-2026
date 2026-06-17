@@ -142,15 +142,28 @@ diagnose() {
     local smtp_proc=$(ps -ef 2>/dev/null | grep -E '[s]endmail|[p]ostfix/master' || true)
     if [ -n "$smtp_proc" ]; then
         local smtp_banner_ok=false
-        if grep -qE '^[[:space:]]*O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null; then
-            smtp_banner_ok=true
+        local smtp_has_config=false
+        local sendmail_line=$(grep -E '^[[:space:]]*O[[:space:]]*SmtpGreetingMessage[= 	]' /etc/mail/sendmail.cf 2>/dev/null | tail -1 || true)
+        if [ -n "$sendmail_line" ]; then
+            smtp_has_config=true
+            if echo "$sendmail_line" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
+                smtp_banner_ok=true
+                svc_evidence="${svc_evidence}[SMTP Sendmail] 배너에 경고 메시지 포함${newline}"
+            else
+                unverified_services="${unverified_services}SMTP(Sendmail 배너 경고 메시지 없음) "
+            fi
         fi
-        if grep -qE '^[[:space:]]*smtpd_banner' /etc/postfix/main.cf 2>/dev/null; then
-            smtp_banner_ok=true
+        local postfix_line=$(grep -E '^[[:space:]]*smtpd_banner[[:space:]=]' /etc/postfix/main.cf 2>/dev/null | tail -1 || true)
+        if [ -n "$postfix_line" ]; then
+            smtp_has_config=true
+            if echo "$postfix_line" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
+                smtp_banner_ok=true
+                svc_evidence="${svc_evidence}[SMTP Postfix] 배너에 경고 메시지 포함${newline}"
+            else
+                unverified_services="${unverified_services}SMTP(Postfix 배너 경고 메시지 없음) "
+            fi
         fi
-        if [ "$smtp_banner_ok" = true ]; then
-            svc_evidence="${svc_evidence}[SMTP] 배너 설정 존재${newline}"
-        else
+        if [ "$smtp_banner_ok" = false ] && [ "$smtp_has_config" = false ]; then
             unverified_services="${unverified_services}SMTP(배너 설정 미확인) "
         fi
     fi
