@@ -111,7 +111,7 @@ diagnose() {
         config_readable=true
         # Check for FastCGI/SCGI/UWSGI/CGI configurations
         local found_cgi
-        found_cgi=$(grep -E "^\s*(fastcgi_pass|scgi_pass|uwsgi_pass|cgi_pass)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" || true)
+        found_cgi=$(grep -E "(fastcgi_pass|scgi_pass|uwsgi_pass|cgi_pass)" "${conf_file}" 2>/dev/null | grep -v "^\s*#" | grep -v "^\s*$" || true)
         if [ -n "${found_cgi}" ]; then
             cgi_locations="${cgi_locations}"$'\n'"${conf_file}: ${found_cgi}"
             ((cgi_count++)) || true

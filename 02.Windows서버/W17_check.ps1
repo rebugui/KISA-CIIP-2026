@@ -56,10 +56,10 @@ try {
         $status = "취약"
         $commandOutput = "AutoShareServer = $autoShare, Default shares: $shareNames"
     } else {
-        $finalResult = "GOOD"
-        $summary = "기본 공유가 존재하지 않음"
-        $status = "양호"
-        $commandOutput = "No default shares found"
+        $finalResult = "MANUAL"
+        $summary = "기본 공유 상태를 확인할 수 없음 (AutoShareServer 레지스트리 값이 없거나 예상치 못한 값이며 기본 공유는 발견되지 않음). 수동 검토 필요."
+        $status = "수동진단"
+        $commandOutput = "AutoShareServer = $autoShare, No default shares found (indeterminate)"
     }
 
     $commandExecuted = "reg query '$path' /v AutoShareServer"

@@ -60,7 +60,8 @@ try {
         foreach ($line in $optionsLines) {
             $trimmed = $line.Trim()
             $tokens = @($trimmed -replace '^\s*Options\s+', '' -split '\s+' | Where-Object { $_ })
-            if ($tokens | Where-Object { $_ -match '^\+?(Indexes|All)$' }) {
+            if (($tokens | Where-Object { $_ -match '^\+?(Indexes|All)$' }) -and
+                -not ($tokens | Where-Object { $_ -match '^-Indexes$' })) {
                 $indexesEnabled += $trimmed
             }
             elseif ($tokens | Where-Object { $_ -match '^-Indexes$' }) {

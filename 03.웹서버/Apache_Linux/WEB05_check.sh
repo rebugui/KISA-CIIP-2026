@@ -223,11 +223,13 @@ diagnose() {
         inspection_summary="CGI가 사용 중이나 Include/IncludeOptional로 포함된 설정 파일을 모두 확인할 수 없어 CGI 실행 디렉터리 제한 여부를 자동으로 판단할 수 없습니다. 포함된 모든 설정 파일에서 Options ExecCGI 및 cgi-script 핸들러가 ScriptAlias로 지정된 디렉터리에 한정되는지 수동으로 확인하세요."
         command_result="CGI in use but configuration could not be fully enumerated (unresolved Include directives)"
     else
-        # CGI is in use but ScriptAlias restricts execution to designated directories.
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="CGI 실행이 ScriptAlias로 지정된 디렉터리로 제한되어 있습니다. CGI 스크립트 실행이 적절하게 제한됩니다."
-        command_result="ScriptAlias restriction found: ${scriptalias_found}"
+        # CGI is in use and a ScriptAlias exists, but flat grep cannot prove that
+        # every ExecCGI/cgi-script handler is scoped within a ScriptAlias'd directory
+        # (ScriptAlias is per-directory, not a global gate). Manual judgment required.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="CGI가 사용 중이고 ScriptAlias가 존재하나, ScriptAlias가 모든 CGI 활성화 디렉터리를 제한하는지 평면 검사로는 확인할 수 없습니다. ExecCGI/cgi-script 핸들러가 모두 ScriptAlias로 지정된 디렉터리 내에 있는지 수동으로 확인하세요."
+        command_result="ScriptAlias found, but scope-level restriction cannot be confirmed automatically: ${scriptalias_found}"
     fi
 
     # Run-all 모드 확인

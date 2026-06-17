@@ -99,9 +99,9 @@ try {
             $evidence += $cgiHandlerMatches
         }
         else {
-            $finalResult = "GOOD"
-            $status = "양호"
-            $summary = "Apache CGI execution is either disabled or restricted by ScriptAlias."
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Apache CGI may be in use with ScriptAlias present, but a flat config scan cannot prove every CGI-enabled directory is restricted (ScriptAlias is per-directory, not global). Verify all ExecCGI/cgi-script handler paths fall within ScriptAlias'd directories."
             if ($scriptAliasMatches.Count -gt 0) {
                 $evidence += "Matched ScriptAlias restrictions:"
                 $evidence += $scriptAliasMatches

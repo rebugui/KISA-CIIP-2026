@@ -84,8 +84,11 @@ try {
             if ($cfgContent -match 'MinimumPasswordLength\s*=\s*(\d+)') {
                 $seceditMinLen = [int]$matches[1]
                 if ($seceditMinLen -ne $minLength) {
-                    if ($seceditMinLen -lt 8 -and $minLength -ge 8) {
+                    if ($seceditMinLen -lt 8) {
                         $issues += "최소 암호 길이가 8자 미만임 (secedit 기준: ${seceditMinLen}자)"
+                    } else {
+                        # secedit shows compliant length; remove stale net-accounts issue
+                        $issues = @($issues | Where-Object { $_ -notmatch '최소 암호 길이|암호 최소 길이|MinimumPasswordLength' })
                     }
                     $minLength = $seceditMinLen
                 }

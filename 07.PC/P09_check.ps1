@@ -59,8 +59,8 @@ if (Test-Path $gpPath) {
     }
     $gpValue = Get-ItemProperty -Path $gpPath -ErrorAction SilentlyContinue
     if ($gpValue.PSObject.Properties.Name -contains 'Persistent') {
+        $isConfigured = $true
         if ($gpValue.Persistent -eq 0) {
-            $isConfigured = $true
             $isEnabled = $true
         }
     }
