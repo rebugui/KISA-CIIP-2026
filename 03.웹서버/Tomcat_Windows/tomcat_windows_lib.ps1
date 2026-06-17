@@ -355,7 +355,12 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'MANUAL' 'Tomcat was found, but service/process account evidence could not be determined.' $evidencePrefix 'Inspect Tomcat service StartName and process owner'
         }
         'WEB-10' {
-            $proxy = @([regex]::Matches($serverText, '(?i)(proxyName|proxyPort|AJP/1\.3|protocol\s*=\s*"AJP|secretRequired\s*=\s*"false")') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
+            # XML 주석 제거 후 활성 설정만 점검 (commented-out proxy/AJP 설정을 오탐하지 않도록)
+            $serverTextActive = [regex]::Replace($serverText, '(?s)<!--.*?-->', '')
+            # AJP Connector secretRequired="false"는 Ghostcat(CVE-2020-1938) 취약점으로 명백히 취약
+            $insecureAjp = @([regex]::Matches($serverTextActive, '(?i)secretRequired\s*=\s*["'']false["'']') | ForEach-Object { $_.Value.Trim() })
+            if ($insecureAjp.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat AJP Connector with secretRequired=false was found (Ghostcat CVE-2020-1938). Set a secret and restrict access to trusted interfaces.' ($insecureAjp -join "`n") 'Parse server.xml AJP Connector secretRequired attribute' }
+            $proxy = @([regex]::Matches($serverTextActive, '(?i)(proxyName|proxyPort|AJP/1\.3|protocol\s*=\s*"AJP)') | ForEach-Object { $_.Value.Trim() } | Select-Object -Unique)
             # proxyName/proxyPort 등 어떤 Proxy/AJP 설정이라도 존재하면 그 필요성(불필요 여부)은 정적으로 판정할 수 없으므로
             # GOOD으로 흘려보내지 않고 MANUAL 처리한다(Linux WEB10 점검과 동일하게 proxyName/proxyPort도 포함). 증거가 전혀 없을 때만 GOOD.
             if ($proxy.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Tomcat proxy/AJP configuration evidence was found. Verify it is required, bound to trusted interfaces, and protected by a secret.' ($proxy -join "`n") 'Parse server.xml proxy and AJP connector settings' }
@@ -375,7 +380,9 @@ function Invoke-TomcatWindowsCheck {
                     $links.Add($item.FullName) | Out-Null
                 }
             }
-            $allowLinking = @([regex]::Matches($contextText, '(?i)allowLinking\s*=\s*"true"') | ForEach-Object { $_.Value })
+            $linkText = ($serverText + "`n" + $contextText)
+            $linkText = [regex]::Replace($linkText, '(?s)<!--.*?-->', '')
+            $allowLinking = @([regex]::Matches($linkText, '(?i)allowLinking\s*=\s*["'']true["'']') | ForEach-Object { $_.Value })
             if ($links.Count -gt 0 -or $allowLinking.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat webapps contain links/reparse points or allowLinking=true.' (($links + $allowLinking) -join "`n") 'Inspect Tomcat webapps links and context allowLinking' }
             return New-TomcatResult 'GOOD' 'No Tomcat webapp links/reparse points or allowLinking=true evidence was found.' "Webapps: $($state.Webapps -join ', ')" 'Inspect Tomcat webapps links and context allowLinking'
         }
@@ -460,6 +467,8 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'MANUAL' 'No Tomcat HTTPS enforcement evidence was found (redirectPort alone is a default attribute and is not sufficient). Confirm HTTPS redirection is enforced by a security-constraint, an SSL Connector, a reverse proxy, or network control.' "server.xml/web.xml files inspected" 'Parse web.xml transport-guarantee and server.xml SSL Connector'
         }
         'WEB-22' {
+            # web.xml이 존재/판독되지 않으면(빈 WebXml) 정상 설정과 부재/판독불가를 구분할 수 없으므로 MANUAL 처리
+            if ($state.WebXml.Count -eq 0 -or [string]::IsNullOrWhiteSpace($webText)) { return New-TomcatResult 'MANUAL' 'No readable Tomcat web.xml was found; cannot confirm custom error page mappings. Verify web.xml manually.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml error-page mappings' }
             $errors = @([regex]::Matches($webText, '(?is)<error-page>.*?</error-page>') | ForEach-Object { $_.Value.Trim() })
             if ($errors.Count -ge 4) { return New-TomcatResult 'GOOD' 'Tomcat custom error page mappings cover multiple error conditions.' "error-page entries: $($errors.Count)" 'Parse web.xml error-page mappings' }
             if ($errors.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Some Tomcat custom error page mappings exist; confirm all major errors are covered.' "error-page entries: $($errors.Count)" 'Parse web.xml error-page mappings' }

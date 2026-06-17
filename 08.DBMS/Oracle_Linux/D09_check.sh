@@ -134,10 +134,10 @@ diagnose() {
         status="취약"
         inspection_summary="FAILED_LOGIN_ATTEMPTS가 0으로 설정되어 있습니다. 로그인 실패 잠금 정책이 비활성화되어 있습니다."
     else
-        # Value > 20
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="FAILED_LOGIN_ATTEMPTS가 너무 높게 설정되어 있습니다(현재: ${failed_attempts}회). 3-10회로 권장됩니다."
+        # Value > 20 (a finite limit IS set, so GOOD per the guideline)
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="로그인 실패 잠금 정책이 설정되어 있습니다(FAILED_LOGIN_ATTEMPTS: ${failed_attempts}회). (권장: 3-10회, 현재: ${failed_attempts}회)"
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

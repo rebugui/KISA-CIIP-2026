@@ -100,7 +100,7 @@ diagnose() {
             if [ -f "${conf_file}" ]; then
                 found_conf="${found_conf} ${conf_file}"
                 # allowLinking="true"는 심볼릭 링크 추적을 허용 (웹루트 외부 노출 위험)
-                local hit=$(grep -iE "allowLinking[[:space:]]*=[[:space:]]*\"?true" "${conf_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                local hit=$(grep -iE "allowLinking[[:space:]]*=[[:space:]]*[\"']?true[\"']?" "${conf_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
                 if [ -n "${hit}" ]; then
                     allow_linking_hits="${allow_linking_hits}"$'\n'"${conf_file}: ${hit}"
                 fi

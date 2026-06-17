@@ -109,7 +109,7 @@ diagnose() {
     # ------------------------------------------------------------------
     local checkable_accounts=""
     if [ -f /etc/passwd ]; then
-        checkable_accounts=$(awk -F: '$3 >= 1000 && $7 !~ /nologin|false/ {print $1}' /etc/passwd 2>/dev/null || true)
+        checkable_accounts=$(awk -F: '$3 >= 100 && $7 !~ /nologin|false/ {print $1}' /etc/passwd 2>/dev/null || true)
     fi
 
     local last_output=""
@@ -215,7 +215,7 @@ diagnose() {
         default_check_output="${default_check_output}${newline}해당 기본 계정 없음"
     fi
 
-    local inactive_check_output="장기 미사용(${inactive_threshold_days}일) 점검 대상 (UID>=1000, 로그인 가능):"
+    local inactive_check_output="장기 미사용(${inactive_threshold_days}일) 점검 대상 (UID>=100, 로그인 가능):"
     if [ -n "$checkable_accounts" ]; then
         inactive_check_output="${inactive_check_output}${newline}$(echo "$checkable_accounts" | tr '\n' ' ')"
     else

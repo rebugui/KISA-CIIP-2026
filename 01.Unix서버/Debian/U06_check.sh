@@ -67,8 +67,8 @@ diagnose() {
     local details=""
 
     # 1. PAM 설정 확인 (Primary Check)
-    # 강제(enforcing) 조건: control 필드가 required/requisite 이고 trust 옵션이 없는
-    # pam_wheel.so 라인 (optional/sufficient 또는 trust 사용 시 비-wheel 사용자 제한 효과 없음)
+    # 강제(enforcing) 조건: control 필드가 required/requisite 이고 deny 옵션이 없는
+    # pam_wheel.so 라인 (optional/sufficient 사용 시 비-wheel 사용자 제한 효과 없음)
     if [ -f "$pam_file" ]; then
         pam_output=$(grep -vE '^[[:space:]]*#' "$pam_file" | grep "pam_wheel\.so" || true)
 
@@ -78,13 +78,12 @@ diagnose() {
                 local pam_control
                 pam_control=$(echo "$pam_line" | awk '{print $2}')
                 if { [ "$pam_control" = "required" ] || [ "$pam_control" = "requisite" ]; } \
-                    && ! echo "$pam_line" | grep -qw "trust" \
                     && ! echo "$pam_line" | grep -qw "deny"; then
                     # deny 옵션은 동작을 반전시켜(해당 그룹만 거부, 그 외 전원 허용)
                     # wheel 그룹 제한 효과가 없으므로 강제 설정으로 인정하지 않음
                     pam_enforcing=true
                     check_type="PAM"
-                    details="pam_wheel.so 강제 설정(required/requisite, trust/deny 미사용) 확인됨"
+                    details="pam_wheel.so 강제 설정(required/requisite, deny 미사용) 확인됨"
                     break
                 fi
             done <<< "$pam_output"

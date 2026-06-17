@@ -75,7 +75,7 @@ diagnose() {
         local owner=$(ls -ld "/etc/hosts.lpd" 2>/dev/null | awk '{print $3":"$4}')
 
         # 보안 설정 확인: root:root 600 또는 400
-        if [ "$owner" = "root:root" ] || [ "$owner" = "root:system" ]; then
+        if [ "${owner%%:*}" = "root" ]; then
             if [ "$perms" = "600" ] || [ "$perms" = "400" ]; then
                 ((hosts_lpd_secure++)) || true
                 hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (보안 양호)"

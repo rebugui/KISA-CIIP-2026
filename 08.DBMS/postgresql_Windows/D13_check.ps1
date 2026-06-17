@@ -4,6 +4,7 @@ $ErrorActionPreference = 'Stop'
 $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LIB_DIR = Join-Path $SCRIPT_DIR "..\..\lib"
 . "${LIB_DIR}\result_manager.ps1"
+. "${SCRIPT_DIR}\postgresql_windows_lib.ps1"
 
 $ITEM_ID = "D-13"
 $ITEM_NAME = "불필요한 ODBC/OLE-DB 데이터 소스와 드라이브를 제거하여 사용"
@@ -15,24 +16,37 @@ $criteria_good = "불필요한 ODBC/OLE-DB가 설치되지 않은 경우"
 $criteria_bad = "불필요한 ODBC/OLE-DB가 설치된 경우"
 $remediation = "불필요한 ODBC/OLE-DB 제거"
 
-$finalResult = "N/A"
-$status = "N/A"
-$summary = "postgresql_Windows is not a target platform for D-13 according to docs/guideline_metadata.json."
-$commandOutput = "D-13 target: Windows OS"
-$commandExecuted = "guideline_metadata.json D-13 target platform review"
+try {
+    $diagnostic = Invoke-PostgreSqlWindowsCheck -ItemId $ITEM_ID -ItemName $ITEM_NAME
+    $finalResult = $diagnostic.FinalResult
+    $status = $diagnostic.Status
+    $summary = $diagnostic.Summary
+    $commandOutput = $diagnostic.CommandOutput
+    $commandExecuted = $diagnostic.CommandExecuted
+}
+catch {
+    $finalResult = "MANUAL"
+    $status = "수동진단"
+    $summary = "Diagnostic execution failed; manual review required."
+    $commandOutput = "Diagnostic execution failed: " + $_.Exception.Message
+    $commandExecuted = "PostgreSQL Windows diagnostic discovery"
+}
+$resultParams = @{
+    ItemId = $ITEM_ID
+    ItemName = $ITEM_NAME
+    Status = $status
+    FinalResult = $finalResult
+    InspectionSummary = $summary
+    CommandResult = $commandOutput
+    CommandExecuted = $commandExecuted
+    GuidelinePurpose = $purpose
+    GuidelineThreat = $threat
+    GuidelineCriteriaGood = $criteria_good
+    GuidelineCriteriaBad = $criteria_bad
+    GuidelineRemediation = $remediation
+    ScriptDir = $SCRIPT_DIR
+}
 
-Save-DualResult -ItemId $ITEM_ID `
-    -ItemName $ITEM_NAME `
-    -Status $status `
-    -FinalResult $finalResult `
-    -InspectionSummary $summary `
-    -CommandResult $commandOutput `
-    -CommandExecuted $commandExecuted `
-    -GuidelinePurpose $purpose `
-    -GuidelineThreat $threat `
-    -GuidelineCriteriaGood $criteria_good `
-    -GuidelineCriteriaBad $criteria_bad `
-    -GuidelineRemediation $remediation `
-    -ScriptDir $SCRIPT_DIR
+Save-DualResult @resultParams
 
 exit 0

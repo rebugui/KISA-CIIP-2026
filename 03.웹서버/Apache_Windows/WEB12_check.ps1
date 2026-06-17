@@ -85,6 +85,13 @@ try {
             $evidence += "Matched disabling directives:"
             $evidence += $followDisabled
         }
+        elseif ($aliasDirectives.Count -gt 0) {
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Alias/AliasMatch directives are present. Business necessity must be verified manually."
+            $evidence += "Alias directives requiring business review:"
+            $evidence += $aliasDirectives
+        }
         elseif ($followDisabled.Count -gt 0 -or $ownerMatch.Count -gt 0) {
             $finalResult = "GOOD"
             $status = "양호"

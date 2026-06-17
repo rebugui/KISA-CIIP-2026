@@ -201,7 +201,7 @@ diagnose() {
         local max_days_ok=false
         local min_days_ok=false
 
-        if [ -n "$pass_max_days" ] && [ "$pass_max_days" -le 90 ]; then
+        if [ -n "$pass_max_days" ] && [ "$pass_max_days" -ge 1 ] && [ "$pass_max_days" -le 90 ]; then
             max_days_ok=true
         fi
 

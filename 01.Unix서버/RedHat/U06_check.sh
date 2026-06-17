@@ -56,7 +56,6 @@ diagnose() {
             local pam_control
             pam_control=$(echo "$pam_line" | awk '{print $2}')
             if { [ "$pam_control" = "required" ] || [ "$pam_control" = "requisite" ]; } \
-                && ! echo "$pam_line" | grep -qw "trust" \
                 && ! echo "$pam_line" | grep -qw "deny"; then
                 pam_enforcing=true
                 break

@@ -201,7 +201,7 @@ invoke_tibero_linux_check() {
             tibero_sql_check "SELECT resource_name||'='||limit FROM dba_profiles WHERE profile='DEFAULT' AND resource_name IN ('PASSWORD_LIFE_TIME','PASSWORD_VERIFY_FUNCTION','FAILED_LOGIN_ATTEMPTS','PASSWORD_LOCK_TIME');" "password lifetime and complexity" || return 0
             if ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[^[:space:]]'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DEFAULT profile returned no password lifetime/complexity/lockout policy rows; the control is not configured." "No rows returned (no DEFAULT profile password policy configured)." "${TIBERO_LAST_COMMAND}"
-            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'PASSWORD_VERIFY_FUNCTION=(|NULL)|PASSWORD_LIFE_TIME=UNLIMITED|FAILED_LOGIN_ATTEMPTS=UNLIMITED'; then
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq 'PASSWORD_VERIFY_FUNCTION=$|PASSWORD_VERIFY_FUNCTION=NULL|PASSWORD_LIFE_TIME=UNLIMITED|FAILED_LOGIN_ATTEMPTS=UNLIMITED'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DEFAULT profile password lifetime/complexity/lockout controls are weak." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             elif ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq 'PASSWORD_VERIFY_FUNCTION='; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DEFAULT profile is missing a PASSWORD_VERIFY_FUNCTION row; no password complexity verification is configured." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
@@ -254,7 +254,13 @@ invoke_tibero_linux_check() {
             lines="$(tibero_config_grep '(LSNR_INVITED_IP|LSNR_DENIED_IP)[[:space:]]*=[[:space:]]*[^[:space:]]' || true)"
             # Drop commented-out directives. tibero_config_grep runs grep -Ein on ONE file at a time, so output is single-file form 'NNN:content' (line number at column 0, no filename and no leading colon); anchor on the leading line number to skip lines whose content starts with #, ;, or -- so an inert commented LSNR_*_IP does not yield GOOD.
             lines="$(printf '%s\n' "${lines}" | grep -Ev '^[0-9]+:[[:space:]]*(#|;|--)' || true)"
-            [ -n "${lines}" ] && tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero listener IP restriction evidence (active LSNR_INVITED_IP/LSNR_DENIED_IP with a value) was found." "${lines}" "grep Tibero listener IP access controls" || tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "No active Tibero listener IP restriction (LSNR_INVITED_IP/LSNR_DENIED_IP) was found; confirm firewall/listener source-IP policy." "$(tibero_evidence)" "grep Tibero listener IP access controls"
+            if printf '%s\n' "${lines}" | grep -Eq 'LSNR_INVITED_IP[[:space:]]*=[[:space:]]*[^[:space:]]'; then
+                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero listener IP restriction evidence (active LSNR_INVITED_IP with a value) was found." "${lines}" "grep Tibero listener IP access controls"
+            elif [ -n "${lines}" ]; then
+                tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Only LSNR_DENIED_IP (denylist) was found without LSNR_INVITED_IP (allowlist); a denylist alone does not restrict to only specified IPs. Confirm the actual IP-access restriction policy (firewall, listener, or host-based)." "${lines}" "grep Tibero listener IP access controls"
+            else
+                tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "No active Tibero listener IP restriction (LSNR_INVITED_IP/LSNR_DENIED_IP) was found; confirm firewall/listener source-IP policy." "$(tibero_evidence)" "grep Tibero listener IP access controls"
+            fi
             ;;
         D-11)
             tibero_sql_check "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE owner IN ('SYS','SYSCAT') AND grantee NOT IN ('SYS','SYSCAT','DBA') AND ROWNUM <= 100;" "system table access restriction" || return 0
@@ -300,7 +306,11 @@ invoke_tibero_linux_check() {
             ;;
         D-20)
             tibero_sql_check "SELECT owner||'.'||object_name FROM dba_objects WHERE owner NOT IN ('SYS','SYSCAT','OUTLN') AND object_type IN ('TABLE','PROCEDURE','PACKAGE') AND ROWNUM <= 100;" "unauthorized object owner restriction" || return 0
-            tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Application-owned Tibero objects were found or queried; confirm owners are authorized." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+            if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[[:alnum:]]'; then
+                tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Application-owned Tibero objects were found or queried; confirm owners are authorized." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+            else
+                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "No non-system Tibero object owner evidence was returned." "No rows returned." "${TIBERO_LAST_COMMAND}"
+            fi
             ;;
         D-21)
             tibero_sql_check "SELECT grantee||' '||owner||'.'||table_name||' '||privilege FROM dba_tab_privs WHERE grantable='YES' AND grantee NOT IN (SELECT grantee FROM dba_role_privs WHERE granted_role = 'DBA') AND ROWNUM <= 100;" "GRANT OPTION restriction" || return 0

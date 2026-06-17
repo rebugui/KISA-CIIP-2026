@@ -98,11 +98,13 @@ try {
 
         $details += "Site: $siteName, 활성 매핑: $($activeMappings -join '|'), 거부목록: $($deniedExts -join '|'), 거부목록 미등록: $($missingDeny -join '|')"
 
-        # 취약 판정: 활성 *.asa/*.asax 스크립트 매핑이 존재(미제거)하는 경우에만 취약.
-        # 처리기 매핑이 제거되면 1차 완화가 충족되므로(criteria_good) 거부 목록 미등록만으로는 취약 아님.
-        # (거부 목록 등록은 매핑 제거에 대한 보조/대체 통제임)
+        # 취약 판정: 활성 *.asa/*.asax 스크립트 매핑이 존재(미제거)하거나,
+        # 요청 필터링 파일 확장명 거부 목록에 .asa/.asax가 등록되지 않은(접근 제한 미비) 경우 취약.
+        # (가이드 criteria_bad: 접근을 제한하지 않거나 불필요한 스크립트 매핑이 제거되지 않은 경우)
         if ($activeMappings.Count -gt 0) {
             $vulnSites += "Site: $siteName, 활성 asa/asax 매핑 존재: $($activeMappings -join ', ')"
+        } elseif ($missingDeny.Count -gt 0) {
+            $vulnSites += "Site: $siteName, 확장명 거부 목록 미등록: $($missingDeny -join ', ')"
         }
     }
 
@@ -115,7 +117,7 @@ try {
         $commandOutput = $commandOutput + "`n`n취약 항목:`n" + ($vulnSites -join "`n")
     } else {
         $finalResult = "GOOD"
-        $summary = "모든 웹사이트에서 불필요한 asa/asax 스크립트 매핑이 제거되어 있습니다. (보안 권고사항 준수)"
+        $summary = "모든 웹사이트에서 불필요한 asa/asax 스크립트 매핑이 제거되고 파일 확장명 거부 목록에 .asa/.asax가 등록되어 있습니다. (보안 권고사항 준수)"
         $status = "양호"
     }
 
