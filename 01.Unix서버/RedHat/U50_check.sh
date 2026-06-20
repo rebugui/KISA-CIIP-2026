@@ -54,14 +54,20 @@ diagnose() {
 
     if [ -n "$named_conf" ]; then
         # include 지시자 1단계 추적 (zone 별 allow-transfer가 include 파일에 있을 수 있음)
+        # 미해결 include(절대 경로/conf_dir 상대 경로/글롭 등)는 GOOD으로 묻히지 않도록 별도 플래그로 표시
         local conf_dir=$(dirname "$named_conf")
         local conf_files="$named_conf"
+        local include_unresolved=false
+        local unresolved_list=""
         local inc
         for inc in $(grep -v "^[[:space:]]*//" "$named_conf" 2>/dev/null | grep -v "^[[:space:]]*#" | grep -oE 'include[[:space:]]+"[^"]+"' | sed -E 's/include[[:space:]]+"([^"]+)"/\1/' || true); do
             if [ -f "$inc" ]; then
                 conf_files="$conf_files $inc"
             elif [ -f "${conf_dir}/${inc}" ]; then
                 conf_files="$conf_files ${conf_dir}/${inc}"
+            else
+                include_unresolved=true
+                unresolved_list="${unresolved_list}${unresolved_list:+ }${inc}"
             fi
         done
 
@@ -72,8 +78,16 @@ diagnose() {
             status="취약"
             diagnosis_result="VULNERABLE"
             inspection_summary="DNS 존 전송이 제한되지 않았거나 모든 호스트(any)에 허용되어 있습니다."
+        elif [ "$include_unresolved" = true ]; then
+            # 기본 설정의 allow-transfer는 안전하나, 미확인 include(예: chroot/글롭 패턴) 내 per-zone override 가능성 존재
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            inspection_summary="기본 설정의 allow-transfer는 제한되어 있으나, 확인할 수 없는 include 지시자가 존재합니다. include 파일 내 per-zone allow-transfer 설정을 수동으로 확인하십시오."
         fi
         command_result="점검 파일: [ ${conf_files} ] / allow-transfer 설정 현황: [ ${transfer_opt} ]"
+        if [ "$include_unresolved" = true ]; then
+            command_result="${command_result} / 미해결 include: [ ${unresolved_list} ]"
+        fi
     else
         if pgrep -x named >/dev/null 2>&1; then
             status="수동진단"

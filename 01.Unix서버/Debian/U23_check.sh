@@ -64,9 +64,13 @@ diagnose() {
         ping ping6 traceroute traceroute6 tracepath
         su sudo doas passwd gpasswd chsh chfn chage expiry newgrp
         mount umount fusermount fusermount3
-        pkexec at crontab ssh-keysign ssh-agent unix_chkpwd Xorg
+        mount.cifs mount.nfs mount.nfs4 umount.nfs umount.nfs4
+        pkexec at crontab ssh-keysign ssh-agent ssh-add unix_chkpwd Xorg Xorg.wrap
         wall write bsd-write dotlockfile locate mlocate sperl uptime
         chown chmod rsh rcp rlogin rshd telnet ftp ftpd nc tcpdump wbem expire
+        dbus-daemon-launch-helper polkit-agent-helper-1
+        pam_extrausers_chkpwd pam_timestamp_check
+        pppd staprun snap-confine postdrop postqueue
     )
 
     local raw_find_output=""
@@ -83,8 +87,13 @@ diagnose() {
     local find_cmd="find / -xdev \\( -perm -4000 -o -perm -2000 \\) -type f 2>/dev/null"
 
     # 허용 목록 비교 (basename 완전 일치 - 부분 일치 허용 안 함)
+    # 허용 목록 외 파일은 명백한 위험 신호(스크립트 확장자 또는 그룹/기타 쓰기 가능)만
+    # 취약으로 판정하고, 그 외에는 수동 점검(MANUAL)으로 라우팅함
+    # (RedHat/HP-UX/AIX/Solaris 자매 플랫폼과 정합)
     local vulnerable_count=0
+    local manual_count=0
     local vulnerable_files=""
+    local manual_files=""
     if [ -n "$raw_find_output" ]; then
         while IFS= read -r file; do
             [ -n "$file" ] || continue
@@ -99,9 +108,33 @@ diagnose() {
                 fi
             done
             if [ "$allowed" = false ]; then
-                ((vulnerable_count++)) || true
-                if [ "$vulnerable_count" -le 30 ]; then
-                    vulnerable_files="${vulnerable_files}${file}${newline}"
+                # 명백한 위험 신호만 취약으로 판정
+                local is_suspicious=0
+                case "$fname" in
+                    *.sh|*.pl|*.py|*.rb)
+                        is_suspicious=1 ;;
+                esac
+                if [ "$is_suspicious" -eq 0 ]; then
+                    local perms=""
+                    perms=$(stat -c "%a" "$file" 2>/dev/null || true)
+                    if [ -n "$perms" ]; then
+                        local last2="${perms: -2}"
+                        local gperm="${last2:0:1}"
+                        local operm="${last2:1:1}"
+                        case "$gperm" in 2|3|6|7) is_suspicious=1 ;; esac
+                        case "$operm" in 2|3|6|7) is_suspicious=1 ;; esac
+                    fi
+                fi
+                if [ "$is_suspicious" -eq 1 ]; then
+                    ((vulnerable_count++)) || true
+                    if [ "$vulnerable_count" -le 30 ]; then
+                        vulnerable_files="${vulnerable_files}${file}${newline}"
+                    fi
+                else
+                    ((manual_count++)) || true
+                    if [ "$manual_count" -le 30 ]; then
+                        manual_files="${manual_files}${file}${newline}"
+                    fi
                 fi
             fi
         done <<< "$raw_find_output" || true
@@ -123,8 +156,14 @@ diagnose() {
     elif [ "$vulnerable_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="허용 목록에 없는 SUID/SGID 설정 파일이 발견되었습니다. (전체 ${total_count}개 중 ${vulnerable_count}개 의심) 불필요한 SUID/SGID 권한을 제거하시기 바랍니다."
-        command_result="[Command: ${find_cmd}]${newline}${evidence_output}${newline}${newline}[허용 목록 외 SUID/SGID 파일 (${vulnerable_count}개)]${newline}${vulnerable_files}"
+        inspection_summary="명백히 의심스러운 SUID/SGID 설정 파일이 발견되었습니다. (전체 ${total_count}개 중 ${vulnerable_count}개 취약, ${manual_count}개 수동확인) 불필요한 SUID/SGID 권한을 제거하시기 바랍니다."
+        command_result="[Command: ${find_cmd}]${newline}${evidence_output}${newline}${newline}[취약(스크립트 확장자 또는 그룹/기타 쓰기) SUID/SGID 파일 (${vulnerable_count}개)]${newline}${vulnerable_files}${newline}[허용 목록 외 SUID/SGID 파일 - 수동 확인 필요 (${manual_count}개)]${newline}${manual_files}"
+        command_executed="${find_cmd}"
+    elif [ "$manual_count" -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="허용 목록에 없는 SUID/SGID 설정 파일이 발견되었으나 명백한 위험 신호(스크립트 확장자 또는 그룹/기타 쓰기)는 없습니다. (전체 ${total_count}개 중 ${manual_count}개) 필요성을 수동으로 확인하시기 바랍니다."
+        command_result="[Command: ${find_cmd}]${newline}${evidence_output}${newline}${newline}[허용 목록 외 SUID/SGID 파일 - 수동 확인 필요 (${manual_count}개)]${newline}${manual_files}"
         command_executed="${find_cmd}"
     else
         diagnosis_result="MANUAL"

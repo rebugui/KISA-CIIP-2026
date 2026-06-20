@@ -162,7 +162,20 @@ diagnose() {
         if [ -z "$ftp_conf" ]; then
             svc_manual="${svc_manual}vsFTP 사용 중이나 설정 파일을 찾지 못해 배너 수동 확인 필요. "
         elif grep -qE "^[[:space:]]*(ftpd_banner|banner_file)[[:space:]]*=" "$ftp_conf" 2>/dev/null; then
-            svc_info="${svc_info}vsFTP: 배너 설정됨(${ftp_conf}). "
+            local vsftpd_banner_val=""
+            local vsftpd_banner_file_val=""
+            local vsftpd_banner_text=""
+            vsftpd_banner_val=$(grep -E "^[[:space:]]*ftpd_banner[[:space:]]*=" "$ftp_conf" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*ftpd_banner[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            vsftpd_banner_file_val=$(grep -E "^[[:space:]]*banner_file[[:space:]]*=" "$ftp_conf" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*banner_file[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            vsftpd_banner_text="${vsftpd_banner_val}"
+            if [ -n "$vsftpd_banner_file_val" ] && [ -f "$vsftpd_banner_file_val" ]; then
+                vsftpd_banner_text="${vsftpd_banner_text}${newline}$(cat "$vsftpd_banner_file_val" 2>/dev/null || true)"
+            fi
+            if [ -n "$vsftpd_banner_text" ] && echo "$vsftpd_banner_text" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
+                svc_info="${svc_info}vsFTP: 배너 경고 메시지 설정됨(${ftp_conf}). "
+            else
+                svc_issues="${svc_issues}vsFTP 사용 중이나 배너에 경고 메시지 미설정(${ftp_conf}). "
+            fi
         else
             svc_issues="${svc_issues}vsFTP 사용 중이나 ftpd_banner 미설정(${ftp_conf}). "
         fi
@@ -179,7 +192,23 @@ diagnose() {
         if [ -z "$pro_conf" ]; then
             svc_manual="${svc_manual}ProFTP 사용 중이나 설정 파일을 찾지 못해 배너 수동 확인 필요. "
         elif grep -qiE "^[[:space:]]*DisplayLogin" "$pro_conf" 2>/dev/null; then
-            svc_info="${svc_info}ProFTP: DisplayLogin 설정됨(${pro_conf}). "
+            local proftp_display_val=""
+            local proftp_display_text=""
+            proftp_display_val=$(grep -iE "^[[:space:]]*DisplayLogin" "$pro_conf" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*[Dd][Ii][Ss][Pp][Ll][Aa][Yy][Ll][Oo][Gg][Ii][Nn][[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            proftp_display_text=""
+            if [ -n "$proftp_display_val" ] && [ -f "$proftp_display_val" ]; then
+                proftp_display_text=$(cat "$proftp_display_val" 2>/dev/null || true)
+            else
+                # DisplayLogin may reference welcome.msg relative path or contain inline text fallback
+                proftp_display_text="${proftp_display_val}"
+            fi
+            if [ -n "$proftp_display_text" ] && echo "$proftp_display_text" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
+                svc_info="${svc_info}ProFTP: DisplayLogin 경고 메시지 설정됨(${pro_conf}). "
+            elif [ -n "$proftp_display_val" ] && [ ! -f "$proftp_display_val" ]; then
+                svc_manual="${svc_manual}ProFTP DisplayLogin 파일(${proftp_display_val})을 찾지 못해 배너 수동 확인 필요(${pro_conf}). "
+            else
+                svc_issues="${svc_issues}ProFTP 사용 중이나 DisplayLogin 배너에 경고 메시지 미설정(${pro_conf}). "
+            fi
         else
             svc_issues="${svc_issues}ProFTP 사용 중이나 DisplayLogin 미설정(${pro_conf}). "
         fi
@@ -230,7 +259,15 @@ diagnose() {
         if [ -z "$dns_conf" ]; then
             svc_manual="${svc_manual}DNS(BIND) 사용 중이나 설정 파일을 찾지 못해 version 지시자 수동 확인 필요. "
         elif grep -qE '^[[:space:]]*version[[:space:]]+"' "$dns_conf" 2>/dev/null; then
-            svc_info="${svc_info}DNS: version 지시자 설정됨(${dns_conf}). "
+            local dns_version_val=""
+            dns_version_val=$(grep -E '^[[:space:]]*version[[:space:]]+"' "$dns_conf" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*version[[:space:]]\+"//; s/".*$//' || true)
+            if [ -z "$dns_version_val" ]; then
+                svc_issues="${svc_issues}DNS(BIND) version 지시자 값 비어있음(${dns_conf}). "
+            elif echo "$dns_version_val" | grep -qiE 'BIND|[0-9]+\.[0-9]+'; then
+                svc_issues="${svc_issues}DNS(BIND) version 지시자가 실제 버전 정보를 노출함(현재: ${dns_version_val}, ${dns_conf}). "
+            else
+                svc_info="${svc_info}DNS: version 지시자 마스킹됨(현재: ${dns_version_val}, ${dns_conf}). "
+            fi
         else
             svc_issues="${svc_issues}DNS(BIND) 사용 중이나 version 지시자 미설정(${dns_conf}). "
         fi

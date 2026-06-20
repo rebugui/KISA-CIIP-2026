@@ -40,7 +40,7 @@ diagnose() {
     local status="미진단"
     local inspection_summary=""
     local command_result=""
-    local command_executed="systemctl is-active sendmail postfix; ps -ef | grep -E 'sendmail|postfix'; grep -E '^[[:space:]]*O[[:space:]]*PrivacyOptions' /etc/mail/sendmail.cf; postconf -h disable_vrfy_command"
+    local command_executed="systemctl is-active sendmail postfix exim; ps -ef | grep -E 'sendmail|postfix|exim'; grep -E '^[[:space:]]*O[[:space:]]*PrivacyOptions' /etc/mail/sendmail.cf; postconf -h disable_vrfy_command; grep -E '^[[:space:]]*acl_smtp_(vrfy|expn)' /etc/exim*/exim*.conf"
 
     # ==========================================================================
     # 1. 메일 서비스(MTA) 사용 여부 확인 (systemd + 설정 파일 + 프로세스)
@@ -57,32 +57,52 @@ diagnose() {
         postfix_present=true
     fi
 
+    local exim_conf=""
+    if [ -f /etc/exim/exim.conf ]; then
+        exim_conf="/etc/exim/exim.conf"
+    elif [ -f /etc/exim4/exim4.conf ]; then
+        exim_conf="/etc/exim4/exim4.conf"
+    elif [ -f /etc/exim4/exim4.conf.template ]; then
+        exim_conf="/etc/exim4/exim4.conf.template"
+    fi
+    local exim_present=false
+    if [ -n "$exim_conf" ] || command -v exim >/dev/null 2>&1 || command -v exim4 >/dev/null 2>&1; then
+        exim_present=true
+    fi
+
     local sendmail_running=false
     local postfix_running=false
+    local exim_running=false
     if systemctl is-active --quiet sendmail 2>/dev/null; then
         sendmail_running=true
     fi
     if systemctl is-active --quiet postfix 2>/dev/null; then
         postfix_running=true
     fi
+    if systemctl is-active --quiet exim 2>/dev/null || systemctl is-active --quiet exim4 2>/dev/null; then
+        exim_running=true
+    fi
     local smtp_daemon=""
-    smtp_daemon=$(ps -ef 2>/dev/null | grep -E '[s]endmail|[p]ostfix/master' || true)
+    smtp_daemon=$(ps -ef 2>/dev/null | grep -E '[s]endmail|[p]ostfix/master|[e]xim4? ' || true)
     if echo "$smtp_daemon" | grep -q "endmail"; then
         sendmail_running=true
     fi
     if echo "$smtp_daemon" | grep -q "ostfix"; then
         postfix_running=true
     fi
+    if echo "$smtp_daemon" | grep -q "xim"; then
+        exim_running=true
+    fi
 
     # ==========================================================================
     # 2. 메일 서비스 미사용 시 양호 / 사용 중인 MTA별 expn/vrfy 제한 설정 확인
     # ==========================================================================
-    if [ -z "$sendmail_conf" ] && [ "$postfix_present" = false ] && \
-       [ "$sendmail_running" = false ] && [ "$postfix_running" = false ]; then
+    if [ -z "$sendmail_conf" ] && [ "$postfix_present" = false ] && [ "$exim_present" = false ] && \
+       [ "$sendmail_running" = false ] && [ "$postfix_running" = false ] && [ "$exim_running" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
-        inspection_summary="메일 서비스(SMTP)를 사용하지 않습니다. (sendmail/postfix 설정 및 데몬 없음)"
-        command_result="sendmail.cf: 없음 / postfix: 없음 / SMTP 데몬: 미실행"
+        inspection_summary="메일 서비스(SMTP)를 사용하지 않습니다. (sendmail/postfix/exim 설정 및 데몬 없음)"
+        command_result="sendmail.cf: 없음 / postfix: 없음 / exim: 없음 / SMTP 데몬: 미실행"
     else
         local leg_vulnerable=false
         local details=""
@@ -127,6 +147,26 @@ diagnose() {
             else
                 leg_vulnerable=true
                 details="${details}[Postfix] disable_vrfy_command=${disable_vrfy:-no(기본값)} - vrfy 명령 허용 상태; "
+            fi
+        fi
+
+        # 2-3. Exim: acl_smtp_vrfy/acl_smtp_expn = accept 설정 시 취약
+        #      (Exim 기본값은 vrfy/expn 거부 - 가이드 조치방법은 accept 라인 삭제)
+        if [ "$exim_present" = true ] || [ "$exim_running" = true ]; then
+            local vrfy_acl=""
+            local expn_acl=""
+            if [ -n "$exim_conf" ]; then
+                vrfy_acl=$(grep -E '^[[:space:]]*acl_smtp_vrfy[[:space:]]*=' "$exim_conf" 2>/dev/null | tail -1 || true)
+                expn_acl=$(grep -E '^[[:space:]]*acl_smtp_expn[[:space:]]*=' "$exim_conf" 2>/dev/null | tail -1 || true)
+            fi
+            if echo "${vrfy_acl}${expn_acl}" | grep -qi "accept"; then
+                leg_vulnerable=true
+                details="${details}[Exim] vrfy/expn 허용(accept) 설정 발견 (${vrfy_acl} ${expn_acl}); "
+            elif [ -z "$exim_conf" ] && [ "$exim_running" = true ]; then
+                # 실행 중이나 설정 파일을 찾지 못한 경우 수동 점검 권고
+                details="${details}[Exim] 데몬 실행 중이나 설정 파일 미발견 - acl_smtp_vrfy/acl_smtp_expn 수동 확인 필요; "
+            else
+                details="${details}[Exim] acl_smtp_vrfy/acl_smtp_expn 허용(accept) 설정 없음 (Exim 기본값: vrfy/expn 거부); "
             fi
         fi
 

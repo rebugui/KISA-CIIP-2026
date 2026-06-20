@@ -195,17 +195,35 @@ diagnose() {
     fi
     if [ "$dns_on" = true ]; then
         local named_version_ok=false
+        local named_version_line=""
+        local named_version_value=""
         local named_conf
         for named_conf in /etc/named.conf /etc/bind/named.conf.options /etc/bind/named.conf; do
             [ -f "$named_conf" ] || continue
-            if grep -E '^[[:space:]]*version[[:space:]]+["'\'']?[^;]+' "$named_conf" 2>/dev/null | grep -v '^[[:space:]]*//' >/dev/null 2>&1; then
-                named_version_ok=true
-                svc_evidence="${svc_evidence}[DNS] ${named_conf} version 디렉티브 설정됨${newline}"
-                break
+            named_version_line=$(grep -E '^[[:space:]]*version[[:space:]]+["'\'']?[^;]+' "$named_conf" 2>/dev/null | grep -v '^[[:space:]]*//' | tail -1 || true)
+            if [ -n "$named_version_line" ]; then
+                # version 디렉티브의 값을 추출 (따옴표 안 또는 공백 뒤 값)
+                named_version_value=$(echo "$named_version_line" | sed -E 's/^[[:space:]]*version[[:space:]]+["'\'']?([^"'\'';]*).*/\1/' | sed -E 's/[[:space:]]+$//')
+                # 실제 BIND 버전 노출 여부 검증: BIND 또는 숫자.숫자 형태가 있으면 노출로 간주.
+                # 단, 경고 키워드를 포함하면 양호로 인정.
+                if echo "$named_version_value" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지|none|hidden"; then
+                    named_version_ok=true
+                    svc_evidence="${svc_evidence}[DNS] ${named_conf} version 은닉/경고 설정됨: ${named_version_value}${newline}"
+                    break
+                elif echo "$named_version_value" | grep -qiE "BIND|[0-9]+\.[0-9]"; then
+                    svc_evidence="${svc_evidence}[DNS] ${named_conf} version 실제 버전 노출: ${named_version_value}${newline}"
+                    # named_version_ok stays false -> svc_missing 추가됨
+                    break
+                else
+                    # 비표준 값(빈 문자열 또는 임의 문자열) — 노출 패턴 미일치, 경고도 없음
+                    # 보수적으로 양호로 인정하지 않음
+                    svc_evidence="${svc_evidence}[DNS] ${named_conf} version 값 판단 불가: ${named_version_value}${newline}"
+                    break
+                fi
             fi
         done
         if [ "$named_version_ok" = false ]; then
-            svc_missing="${svc_missing}DNS(named.conf version 은닉 미설정) "
+            svc_missing="${svc_missing}DNS(named.conf version 은닉 미설정 또는 실제 버전 노출) "
         fi
     fi
 

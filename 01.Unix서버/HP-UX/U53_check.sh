@@ -187,6 +187,14 @@ diagnose() {
         fi
     fi
 
+    # HP-UX 기본(native) ftpd 사용 여부는 설정 파일 유무와 무관하게 항상 확인
+    # (vsftpd/proftpd 설정이 양호해도 inetd 기반 기본 ftpd가 ftpaccess 배너를 노출할 수 있음)
+    local inetd_ftp_global=$(grep -E "^[[:space:]]*ftp[[:space:]]" /etc/inetd.conf 2>/dev/null | head -1 || true)
+    if [ -n "$inetd_ftp_global" ]; then
+        manual_needed=true
+        manual_details="${manual_details}HP-UX 기본 ftpd 활성(inetd): FTP 접속 배너(ftpaccess) 설정 수동 확인 필요, "
+    fi
+
     if [ "$ftp_banner_issue" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"

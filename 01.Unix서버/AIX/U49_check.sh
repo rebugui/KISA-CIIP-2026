@@ -71,11 +71,11 @@ diagnose() {
         dns_info="${dns_info}버전 번호: ${version_number}\\n"
     fi
 
-    # 2) bind9-utils 확인
-    if lslpp -L | grep -q "bind9"; then
+    # 2) BIND 패키지 확인 (AIX는 bind.rte / bos.net.tcp.client_core)
+    if lslpp -L 2>/dev/null | grep -qiE 'bind\.rte|bos\.net\.tcp\.client|bind9'; then
         dns_installed=true
-        local bind_version=$(lslpp -L | grep "bind9" | awk '{print $3}' | head -1)
-        dns_info="${dns_info}설치된 bind9 버전: ${bind_version}\\n"
+        local bind_version=$(lslpp -L 2>/dev/null | grep -iE 'bind\.rte|bos\.net\.tcp\.client|bind9' | awk '{print $2}' | head -1)
+        dns_info="${dns_info}설치된 BIND 패키지 버전: ${bind_version}\\n"
     fi
 
     # 3) DNS 서비스 실행 확인
@@ -91,6 +91,12 @@ diagnose() {
             dns_installed=true
             dns_info="${dns_info}DNS 포트 53 활성화\\n"
         fi
+    fi
+
+    # 5) named 프로세스 확인 (비표준 경로/수동 기동 대비 fallback)
+    if ps -ef 2>/dev/null | grep -w named | grep -v grep &>/dev/null; then
+        dns_installed=true
+        dns_info="${dns_info}named 프로세스 실행 중\\n"
     fi
 
     # 최종 판정

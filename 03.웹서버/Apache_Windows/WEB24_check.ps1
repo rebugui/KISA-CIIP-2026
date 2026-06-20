@@ -97,26 +97,17 @@ try {
             @($docRoots | Where-Object { $p.StartsWith($_, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
         })
 
-        $aclEvidence = foreach ($path in $uploadPaths) {
-            try {
-                $acl = Get-Acl -LiteralPath $path -ErrorAction Stop
-                foreach ($rule in $acl.Access) {
-                    if ($rule.AccessControlType -eq 'Allow' -and (Test-BroadUploadPrincipal -Identity $rule.IdentityReference)) {
-                        "$path => $($rule.IdentityReference) $($rule.FileSystemRights)"
-                    }
-                }
-            }
-            catch {
-                "$path => ACL read failed: $($_.Exception.Message)"
-            }
-        }
+        $aclInspection = Get-ApacheWindowsAclInspection -Paths $uploadPaths -BroadPrincipalTest { param($id) Test-BroadUploadPrincipal -Identity $id }
+        $aclBroad = @($aclInspection.Broad)
+        $aclErrors = @($aclInspection.Errors)
 
         $commandExecuted = "Parse upload-related Apache Alias/config lines and inspect upload directory ACLs"
         $commandOutput = (@(
             if ($docRoots) { "DocumentRoot:`n" + ($docRoots -join "`n") }
             if ($uploadMappings) { "Upload-related directives:`n" + ($uploadMappings -join "`n") }
             if ($uploadPaths) { "Resolved upload paths:`n" + ($uploadPaths -join "`n") }
-            if ($aclEvidence) { "Broad write ACL evidence:`n" + ($aclEvidence -join "`n") }
+            if ($aclBroad.Count -gt 0) { "Broad write ACL evidence:`n" + ($aclBroad -join "`n") }
+            if ($aclErrors.Count -gt 0) { "ACL read failures (manual verification required):`n" + ($aclErrors -join "`n") }
             if (-not $uploadMappings) { "No upload-related Apache directives found." }
         ) -join "`n`n")
 
@@ -125,10 +116,15 @@ try {
             $status = "수동진단"
             $summary = "No upload path was identified from Apache configuration; confirm application upload handling manually."
         }
-        elseif ($docRootUpload.Count -gt 0 -or $aclEvidence.Count -gt 0) {
+        elseif ($docRootUpload.Count -gt 0 -or $aclBroad.Count -gt 0) {
             $finalResult = "VULNERABLE"
             $status = "취약"
             $summary = "Upload path evidence indicates DocumentRoot placement or broad access permissions."
+        }
+        elseif ($aclErrors.Count -gt 0) {
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Upload path ACLs could not be read for one or more paths; manual ACL review required."
         }
         elseif ($uploadPaths.Count -gt 0 -and $docRoots.Count -eq 0) {
             $finalResult = "MANUAL"

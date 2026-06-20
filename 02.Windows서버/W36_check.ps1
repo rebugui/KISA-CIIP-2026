@@ -38,42 +38,84 @@ Write-Host ""
 try {
     $regPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
     $userPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+    $winStationsPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations'
 
     $maxIdleTime = $null
     $minutes = 0
     $out = ""
+    $sourceFound = $false
 
-    # Check policy path first
+    # Check policy path first (GPO)
     $policyProps = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
     if ($policyProps -and $policyProps.MaxIdleTime) {
         $maxIdleTime = $policyProps.MaxIdleTime
         $minutes = $maxIdleTime / 60000
         $out = "Policy MaxIdleTime: $maxIdleTime ($minutes minutes)"
+        $sourceFound = $true
     }
 
-    # If not found in policy, check user path
-    if (-not $maxIdleTime) {
+    # If not found in policy, check Terminal Server\UserTimeout
+    if (-not $sourceFound) {
         $userProps = Get-ItemProperty -Path $userPath -ErrorAction SilentlyContinue
         if ($userProps -and $userProps.UserTimeout) {
             $maxIdleTime = $userProps.UserTimeout
             $minutes = $maxIdleTime / 60000
             $out = "UserTimeout: $maxIdleTime ($minutes minutes)"
+            $sourceFound = $true
+        }
+    }
+
+    # If still not found, enumerate all WinStations\* subkeys (RDP-Tcp 등 per-connection 설정)
+    # 가이드 Step3: TSCC.MSC > RDP-Tcp 속성 > 세션 > 유휴 세션 제한 시간 -> WinStations\RDP-Tcp\MaxIdleTime
+    if (-not $sourceFound) {
+        $winStationKeys = Get-ChildItem -Path $winStationsPath -ErrorAction SilentlyContinue
+        if ($winStationKeys) {
+            $maxFound = $null
+            $details = @()
+            foreach ($ws in $winStationKeys) {
+                $wsProps = Get-ItemProperty -Path $ws.PSPath -ErrorAction SilentlyContinue
+                if ($wsProps -and ($wsProps.PSObject.Properties.Name -contains 'MaxIdleTime')) {
+                    $val = $wsProps.MaxIdleTime
+                    $mins = $val / 60000
+                    $details += ("{0}\MaxIdleTime={1} ({2} minutes)" -f $ws.PSChildName, $val, $mins)
+                    # 가장 보수적으로 평가: 가장 큰 idle 값(가장 느슨한 설정)을 채택
+                    if ($null -eq $maxFound -or $val -gt $maxFound) {
+                        $maxFound = $val
+                    }
+                }
+            }
+            if ($null -ne $maxFound) {
+                $maxIdleTime = $maxFound
+                $minutes = $maxIdleTime / 60000
+                $out = "WinStations: " + ($details -join "; ")
+                $sourceFound = $true
+            }
         }
     }
 
     # Evaluate result
-    if ($minutes -gt 0 -and $minutes -le 30) {
+    if ($sourceFound -and $minutes -gt 0 -and $minutes -le 30) {
         $finalResult = "GOOD"
         $summary = "원격 터미널 접속 Timeout이 30분 이하로 설정됨"
         $status = "양호"
-    } elseif ($minutes -gt 30) {
+    } elseif ($sourceFound -and $minutes -gt 30) {
         $finalResult = "VULNERABLE"
         $summary = "원격 터미널 접속 Timeout이 30분 초과로 설정됨"
         $status = "취약"
-    } else {
+    } elseif ($sourceFound -and $minutes -eq 0) {
+        # 명시적으로 0으로 설정된 경우(=무제한) → 미설정과 동일하게 취약
         $finalResult = "VULNERABLE"
-        $summary = "원격 터미널 접속 Timeout이 설정되지 않음"
+        $summary = "원격 터미널 접속 Timeout이 0(무제한)으로 설정됨"
         $status = "취약"
+    } else {
+        # GPO/Terminal Server/WinStations 모두에서 MaxIdleTime을 확인할 수 없음
+        # 권위 있는 레지스트리 소스를 읽지 못한 상태이므로 자동 판정 불가
+        $finalResult = "MANUAL"
+        $summary = "원격 터미널 Timeout 설정을 레지스트리에서 자동 확인할 수 없음 (TSCC.MSC > RDP-Tcp 속성 > 세션 > 유휴 세션 제한 시간 등 수동 확인 필요)"
+        $status = "수동진단"
+        if (-not $out) {
+            $out = "MaxIdleTime not found in Policies\\Terminal Services, Terminal Server\\UserTimeout, or WinStations\\*\\MaxIdleTime"
+        }
     }
 } catch {
     $finalResult = "MANUAL"
@@ -96,7 +138,7 @@ Save-DualResult -ItemId $ITEM_ID `
     -FinalResult $finalResult `
     -InspectionSummary $summary `
     -CommandResult $out `
-    -CommandExecuted "Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'; Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'" `
+    -CommandExecuted "Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'; Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'; Get-ChildItem 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations' | ForEach-Object { Get-ItemProperty `$_.PSPath }" `
     -GuidelinePurpose $purpose `
     -GuidelineThreat $threat `
     -GuidelineCriteriaGood $criteria_good `

@@ -85,7 +85,13 @@ jeus_collect_state() {
         JEUS_UNIQUE_TMP=()
         for dir in "${JEUS_HOME_FOUND}/logs" "${JEUS_HOME_FOUND}/domains"; do
             [ -d "${dir}" ] || continue
-            jeus_add_unique "${dir}"
+            # Only include the iteration parent itself when it is the canonical
+            # ${JEUS_HOME}/logs directory. Adding ${JEUS_HOME}/domains here would
+            # later let WEB-26's file enumeration walk non-log files (e.g.
+            # domain.xml at 644) and mis-flag them as log ACL violations.
+            if [ "$(basename "${dir}")" = "logs" ]; then
+                jeus_add_unique "${dir}"
+            fi
             while IFS= read -r log_dir; do
                 jeus_add_unique "${log_dir}"
             done < <(find "${dir}" -type d -name 'logs' 2>/dev/null | head -100)
@@ -315,6 +321,12 @@ invoke_jeus_linux_check() {
                 jeus_set_result "GOOD" "$(jeus_status_for_result GOOD)" "JEUS upload/request size limit evidence (non-zero numeric value) was found." "${web08_effective}" "Inspect web.xml multipart upload limits"
             elif [ -n "${lines}" ]; then
                 jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS multipart/upload configuration was present but had no real non-zero size limit (commented out, empty, or zero value)." "${lines}" "Inspect web.xml multipart upload limits"
+            elif [ "${#JEUS_CONFIGS[@]}" -eq 0 ]; then
+                # No config files were collected (e.g. JEUS detected by process only,
+                # JEUS_HOME unresolved). "No size limit found" here means "nothing
+                # inspected", not "genuinely no limit"; do not emit VULNERABLE.
+                # (Mirrors the WEB-10/WEB-12/WEB-15 empty-configs guard.)
+                jeus_set_result "MANUAL" "$(jeus_status_for_result MANUAL)" "JEUS is installed but no web.xml/config files were available to inspect for upload size limits; review multipart limits manually." "$(jeus_evidence)" "Inspect web.xml multipart upload limits"
             else
                 jeus_set_result "VULNERABLE" "$(jeus_status_for_result VULNERABLE)" "JEUS upload/request size limit evidence was not found." "$(jeus_evidence)" "Inspect web.xml multipart upload limits"
             fi

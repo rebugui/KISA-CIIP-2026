@@ -228,8 +228,7 @@ invoke_altibase_linux_check() {
             fi
             ;;
         D-08)
-            lines="$(altibase_config_grep 'SSL|TLS|ENCRYPT|CERT|KEY' || true)"
-            [ -n "${lines}" ] && altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase encryption-related configuration evidence was found; confirm approved transport encryption policy." "${lines}" "grep Altibase encryption settings" || altibase_set_result "MANUAL" "$(altibase_status_for_result MANUAL)" "Altibase network encryption evidence was not found; confirm transport encryption policy manually." "$(altibase_evidence)" "grep Altibase encryption settings"
+            altibase_set_result "N/A" "N/A" "D-08 hash-algorithm policy targets Oracle DB, MSSQL, MySQL, Tibero, PostgreSQL; Altibase exposes no equivalent SHA-256 hash-algorithm switch and is outside the D-08 metadata.target list." "Altibase password hashing is not part of the D-08 product scope." "Map DBMS hash-algorithm guideline applicability"
             ;;
         D-10)
             lines="$(altibase_config_grep 'ACCESS_CONTROL|TCP.*PERMIT|TCP.*DENY|IP_ACCESS' || true)"

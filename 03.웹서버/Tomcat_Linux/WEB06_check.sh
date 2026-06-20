@@ -49,6 +49,7 @@ diagnose() {
     local command_executed=""
     local has_allow_linking_true=false
     local context_config=""
+    local inspected_any_xml=false
 
     # Tomcat 프로세스 확인
     if command -v pgrep >/dev/null; then
@@ -83,6 +84,8 @@ diagnose() {
     fi
 
     # server.xml 및 context.xml 위치 찾기
+    # WEB-02 와 동일한 후보 경로 + Apache Tomcat 바이너리 배포 기본 경로(/opt/tomcat*, /usr/local/tomcat*)
+    # 환경변수(CATALINA_BASE/CATALINA_HOME)가 설정되어 있으면 우선 점검
     local xml_locations=(
         "/etc/tomcat*/server.xml"
         "/etc/tomcat*/context.xml"
@@ -90,13 +93,24 @@ diagnose() {
         "/var/lib/tomcat*/conf/context.xml"
         "/usr/share/tomcat*/conf/server.xml"
         "/usr/share/tomcat*/conf/context.xml"
+        "/usr/local/tomcat*/conf/server.xml"
+        "/usr/local/tomcat*/conf/context.xml"
+        "/opt/tomcat*/conf/server.xml"
+        "/opt/tomcat*/conf/context.xml"
     )
+    if [ -n "${CATALINA_BASE:-}" ]; then
+        xml_locations=("${CATALINA_BASE}/conf/server.xml" "${CATALINA_BASE}/conf/context.xml" "${xml_locations[@]}")
+    fi
+    if [ -n "${CATALINA_HOME:-}" ]; then
+        xml_locations=("${CATALINA_HOME}/conf/server.xml" "${CATALINA_HOME}/conf/context.xml" "${xml_locations[@]}")
+    fi
 
     local found_file=""
 
     for xml_pattern in "${xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
+                inspected_any_xml=true
                 # XML 주석(<!-- ... -->) 영역을 다중 행 포함 제거하여 활성(주석 외) 설정만 추출한다.
                 # 라인 선두 <!-- 만 거르는 방식은 다중 행 주석의 내부 라인을 통과시켜
                 # 비활성 allowLinking 을 오탐함.
@@ -141,20 +155,28 @@ diagnose() {
     if [ -n "${found_file}" ]; then
         command_executed="strip_xml_comments ${found_file} | grep -i 'allowLinking' (다중 행 주석 제외 후 활성 설정만 점검)"
         command_result="${context_config}"
-    else
+    elif [ "${inspected_any_xml}" = true ]; then
         # 모든 파일에서 allowLinking이 없거나 true가 아닌 경우
         command_executed="strip_xml_comments /etc/tomcat*/server.xml /etc/tomcat*/context.xml | grep -i 'allowLinking' (다중 행 주석 제외 후 활성 설정만 점검)"
         command_result="No allowLinking=\"true\" configuration found"
+    else
+        # Tomcat 프로세스는 실행 중이나 후보 경로에서 server.xml/context.xml 을 찾지 못함
+        command_executed="ls ${xml_locations[*]} (none of the candidate Tomcat conf files exist)"
+        command_result="Tomcat conf files not located in standard paths (/etc, /var/lib, /usr/share, /usr/local, /opt) nor via CATALINA_HOME/CATALINA_BASE"
     fi
 
     if [ "${has_allow_linking_true}" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="Context에 allowLinking=\"true\"가 설정되어 있습니다. 상위 디렉터리 접근이 가능합니다. allowLinking 속성을 제거하거나 false로 설정하세요."
-    else
+    elif [ "${inspected_any_xml}" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="상위 디렉터리 접근 제한이 설정되어 있습니다(allowLinking이 true로 설정되지 않음). (보안 권고사항 준수)"
+    else
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Tomcat 프로세스는 실행 중이나 표준 후보 경로(/etc/tomcat*, /var/lib/tomcat*, /usr/share/tomcat*, /usr/local/tomcat*, /opt/tomcat*) 및 CATALINA_HOME/CATALINA_BASE 환경변수에서 server.xml/context.xml 을 찾지 못했습니다. 설치 경로의 conf/context.xml(또는 webapps의 META-INF/context.xml)에서 allowLinking 속성을 수동으로 확인하세요."
     fi
 
     # Run-all 모드 확인

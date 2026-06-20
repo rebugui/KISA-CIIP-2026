@@ -61,100 +61,92 @@ diagnose() {
 
     # 진단 로직 구현
     # pam_faillock.so 또는 faillock 설정 확인
+    # KISA Debian 가이드라인: /etc/pam.d/common-auth (Step 1) 및
+    # /etc/pam.d/common-account (Step 2) 두 파일 모두에 pam_faillock.so가
+    # 설정되어야 계정 잠금이 실제로 강제됨. 중앙 설정은 /etc/security/faillock.conf.
 
+    local newline=$'\n'
+
+    # 비주석 pam_faillock/pam_tally2 라인에서 deny 값 추출 (RedHat U-03 패턴 미러)
+    extract_pam_deny() {
+        local file="$1"
+        local val=""
+        if [ -r "$file" ]; then
+            val=$(grep -E 'pam_faillock\.so|pam_tally2\.so' "$file" 2>/dev/null \
+                | grep -vE '^[[:space:]]*#' \
+                | grep -oE 'deny=[0-9]+' | cut -d= -f2 | head -n 1 || true)
+        fi
+        echo "$val"
+    }
+
+    deny_in_range() {
+        [ -n "$1" ] && [ "$1" -ge 1 ] && [ "$1" -le 10 ]
+    }
+
+    # Debian 기준 두 단계 PAM 설정 + 중앙 faillock.conf
+    local auth_deny acct_deny conf_deny=""
+    auth_deny=$(extract_pam_deny /etc/pam.d/common-auth)
+    acct_deny=$(extract_pam_deny /etc/pam.d/common-account)
+    # 추가 보조 파일(존재 시) — 보고용 raw 출력에만 활용
+    local sys_deny pw_deny login_deny
+    sys_deny=$(extract_pam_deny /etc/pam.d/system-auth)
+    pw_deny=$(extract_pam_deny /etc/pam.d/password-auth)
+    login_deny=$(extract_pam_deny /etc/pam.d/login)
+
+    if [ -r /etc/security/faillock.conf ]; then
+        conf_deny=$(grep -E '^[[:space:]]*deny[[:space:]]*=' /etc/security/faillock.conf 2>/dev/null \
+            | grep -vE '^[[:space:]]*#' \
+            | grep -oE '[0-9]+' | head -n 1 || true)
+    fi
+
+    # 판정: 중앙 faillock.conf의 deny가 1~10이면 양호,
+    # 그렇지 않으면 common-auth와 common-account 두 파일 모두 1~10이어야 양호.
     local is_secure=false
     local config_details=""
+    if deny_in_range "$conf_deny"; then
+        is_secure=true
+        config_details="/etc/security/faillock.conf deny=${conf_deny}"
+    elif deny_in_range "$auth_deny" && deny_in_range "$acct_deny"; then
+        is_secure=true
+        config_details="common-auth deny=${auth_deny}, common-account deny=${acct_deny}"
+    elif deny_in_range "$auth_deny" || deny_in_range "$acct_deny"; then
+        config_details="한쪽 PAM 파일에만 설정되어 미보호 인증 경로 존재 (common-auth deny=${auth_deny:-미설정}, common-account deny=${acct_deny:-미설정})"
+    else
+        config_details="common-auth deny=${auth_deny:-미설정}, common-account deny=${acct_deny:-미설정}, faillock.conf deny=${conf_deny:-미설정}"
+    fi
 
-    # 1) /etc/pam.d/common-auth 또는 /etc/pam.d/system-auth 확인
-    local pam_auth_files=(
+    # --- 명령어 실행 및 원본 출력 캡처 ---
+    local raw_pam_output=""
+    local pam_files_for_report=(
         "/etc/pam.d/common-auth"
         "/etc/pam.d/common-account"
         "/etc/pam.d/system-auth"
         "/etc/pam.d/password-auth"
         "/etc/pam.d/login"
     )
-
-    local matched_pam_file=""
-    local pam_module_name=""
-    local raw_pam_output=""
-    local deny_val=""
-    local newline=$'\n'
-
-    for pam_file in "${pam_auth_files[@]}"; do
+    for pam_file in "${pam_files_for_report[@]}"; do
         if [ -f "$pam_file" ]; then
-            # pam_faillock.so check
-            if grep -E "pam_faillock.so|pam_tally2.so" "$pam_file" | grep -v "^#" > /dev/null 2>&1; then
-                matched_pam_file="$pam_file"
-                raw_pam_output=$(grep -E "pam_faillock.so|pam_tally2.so" "$pam_file" 2>/dev/null | grep -v "^#" || echo "")
-
-                # Determine which module
-                if echo "$raw_pam_output" | grep -q "pam_faillock.so"; then
-                    pam_module_name="pam_faillock.so"
-                elif echo "$raw_pam_output" | grep -q "pam_tally2.so"; then
-                    pam_module_name="pam_tally2.so"
-                fi
-
-                # Extract deny value
-                deny_val=$(echo "$raw_pam_output" | grep -oE 'deny=[0-9]+' | cut -d= -f2 | head -1 || echo "")
-
-                if [ -n "$deny_val" ]; then
-                    if [ "$deny_val" -ge 1 ] && [ "$deny_val" -le 10 ]; then
-                        is_secure=true
-                        config_details="${pam_module_name} deny=${deny_val}"
-                    elif [ "$deny_val" -eq 0 ]; then
-                        config_details="${pam_module_name} deny=${deny_val} (계정 잠금 비활성화)"
-                    else
-                        config_details="${pam_module_name} deny=${deny_val} (기준 10회 초과)"
-                    fi
-                else
-                    config_details="${pam_module_name} deny 설정 없음"
-                fi
-                break
+            local grep_result=""
+            grep_result=$(grep -E "pam_faillock.so|pam_tally2.so" "$pam_file" 2>/dev/null || echo "")
+            if [ -n "$grep_result" ]; then
+                raw_pam_output="${raw_pam_output}[${pam_file}]${newline}${grep_result}${newline}"
             fi
         fi
-    done || true
+    done
+    if [ -z "$raw_pam_output" ]; then
+        raw_pam_output="[No pam_faillock.so or pam_tally2.so found in PAM configuration files]${newline}"
+    fi
 
-    # 2) faillock.conf 확인 (Debian/Ubuntu)
     local conf_output=""
-    if [ "$pam_module_name" == "pam_faillock.so" ] && [ -f "/etc/security/faillock.conf" ]; then
-        if [ -z "$deny_val" ]; then
-            conf_output=$(grep -E "^deny" "/etc/security/faillock.conf" 2>/dev/null | grep -v "^#" || echo "")
-            local conf_deny=$(echo "$conf_output" | cut -d= -f2 | tr -d ' ')
-            if [ -n "$conf_deny" ]; then
-                if [ "$conf_deny" -ge 1 ] && [ "$conf_deny" -le 10 ]; then
-                    is_secure=true
-                    config_details="${config_details:-pam_faillock.so} (conf: deny=${conf_deny})"
-                elif [ "$conf_deny" -eq 0 ]; then
-                    config_details="${config_details:-pam_faillock.so} (conf: deny=${conf_deny} 계정 잠금 비활성화)"
-                else
-                    config_details="${config_details:-pam_faillock.so} (conf: deny=${conf_deny} 기준 초과)"
-                fi
-            fi
-        fi
+    if [ -r /etc/security/faillock.conf ]; then
+        conf_output=$(grep -E '^[[:space:]]*deny[[:space:]]*=' /etc/security/faillock.conf 2>/dev/null | grep -vE '^[[:space:]]*#' || echo "")
     fi
 
-    # --- 명령어 실행 및 원본 출력 캡처 ---
-    if [ -n "$matched_pam_file" ]; then
-        command_result="[FILE: ${matched_pam_file}]${newline}${raw_pam_output}${newline}"
-        command_executed="grep -E 'pam_faillock.so|pam_tally2.so' '${matched_pam_file}'"
-    else
-        local temp_output=""
-        for pam_file in "${pam_auth_files[@]}"; do
-            if [ -f "$pam_file" ]; then
-                local grep_result=$(grep -E "pam_faillock.so|pam_tally2.so" "$pam_file" 2>/dev/null || echo "")
-                if [ -n "$grep_result" ]; then
-                    temp_output="${temp_output}[${pam_file}]${newline}${grep_result}${newline}"
-                fi
-            fi
-        done
-        command_result="${temp_output:-[No pam_faillock.so or pam_tally2.so found in PAM configuration files]}${newline}"
-        command_executed="grep -E 'pam_faillock.so|pam_tally2.so' /etc/pam.d/{common-auth,common-account,system-auth,password-auth,login}"
-    fi
-
+    command_result="[common-auth] deny=${auth_deny:-미설정} | [common-account] deny=${acct_deny:-미설정} | [system-auth] deny=${sys_deny:-미설정} | [password-auth] deny=${pw_deny:-미설정} | [login] deny=${login_deny:-미설정} | [faillock.conf] deny=${conf_deny:-미설정}${newline}${raw_pam_output}"
     if [ -n "$conf_output" ]; then
         command_result="${command_result}[FILE: /etc/security/faillock.conf]${newline}${conf_output}${newline}"
-        command_executed="${command_executed}; grep -E '^deny' /etc/security/faillock.conf"
     fi
+    command_executed="grep -E 'pam_faillock.so|pam_tally2.so' /etc/pam.d/{common-auth,common-account,system-auth,password-auth,login}; grep -E '^deny' /etc/security/faillock.conf"
 
     # 최종 판정
     if [ "$is_secure" = true ]; then
@@ -164,7 +156,7 @@ diagnose() {
     else
         diagnosis_result="VULNERABLE"
         status="취약"
-        inspection_summary="계정 잠금 임계값 미설치 또는 부적절 (${config_details:-모듈 설정 없음})"
+        inspection_summary="계정 잠금 임계값 미설정 또는 부적절 (${config_details})"
     fi
 
     echo "" >&2

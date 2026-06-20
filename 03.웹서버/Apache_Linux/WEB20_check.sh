@@ -83,11 +83,14 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
     # Check if mod_ssl module is loaded
+    local module_probe_available=""
     if command -v apache2ctl >/dev/null 2>&1; then
+        module_probe_available=true
         if apache2ctl -M 2>/dev/null | grep -q "ssl_module"; then
             has_ssl=true
         fi
     elif command -v httpd >/dev/null 2>&1; then
+        module_probe_available=true
         if httpd -M 2>/dev/null | grep -q "ssl_module"; then
             has_ssl=true
         fi
@@ -122,10 +125,10 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="HTTPS(SSL/TLS)가 활성화되어 있습니다. (보안 권고사항 준수)"
-    elif [ "${has_ssl}" = true ] && [ "${has_https}" = false ]; then
-        diagnosis_result="VULNERABLE"
-        status="취약"
-        inspection_summary="SSL 모듈이 로드되었으나 HTTPS(443) 설정이 발견되지 않았습니다."
+    elif [ "${module_probe_available}" != true ] && [ "${has_https}" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="ssl_module 적재 여부를 확인할 수 없습니다 (apache2ctl/httpd 명령 부재). 443 포트는 설정되어 있으므로 SSL 모듈 적재 여부를 수동으로 확인하세요."
     else
         diagnosis_result="VULNERABLE"
         status="취약"

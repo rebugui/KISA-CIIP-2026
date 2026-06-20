@@ -89,10 +89,20 @@ diagnose() {
         inspection_summary="root 그룹 설정을 확인할 수 없음 (/etc/group)"
     fi
 
-    if [[ "$has_extra_wheel_member" == true ]] || [[ "$has_extra_root_member" == true ]] || [[ -n "$gid0_users" ]]; then
-        status="취약"  # 또는 "검토필요"
+    # 판정 분기:
+    #  - root 그룹에 root 외 계정이 있거나, /etc/passwd 의 기본 GID 0(=root 등가) 계정이
+    #    존재하면 unambiguous 하게 취약 (관리자 권한이 root와 동등하게 부여된 비인가 경로)
+    #  - wheel 그룹에만 추가 멤버가 있는 경우 KISA 가이드의 criteria_good("root 계정과
+    #    시스템 관리에 허용된 계정")에 해당할 수 있으므로 스크립트가 자동으로 취약 판정
+    #    할 수 없음 → 수동진단(MANUAL)으로 라우팅하여 운영자 검토 대상으로 표시
+    if [[ "$has_extra_root_member" == true ]] || [[ -n "$gid0_users" ]]; then
+        status="취약"
         diagnosis_result="VULNERABLE"
-        inspection_summary="관리자 그룹에 등록된 계정이 식별되었습니다. 인가된 사용자인지 수동 점검이 필요합니다. (발견: ${root_members:-root}, ${wheel_members:-wheel없음}, 기본 GID 0 계정: ${gid0_users:-없음})"
+        inspection_summary="관리자 권한이 부여된 비인가 계정이 식별되었습니다. (root 그룹 추가 계정: ${root_members:-root}, 기본 GID 0 계정: ${gid0_users:-없음}, wheel: ${wheel_members:-wheel없음})"
+    elif [[ "$has_extra_wheel_member" == true ]]; then
+        status="수동진단"
+        diagnosis_result="MANUAL"
+        inspection_summary="wheel 그룹에 root 외 계정이 등록되어 있습니다. 인가된 시스템 관리 계정인지 운영자 확인이 필요합니다. (wheel 멤버: ${wheel_members:-none})"
     fi
 
     local command_result="[root: ${root_members:-root}] [wheel: ${wheel_members:-none}] [passwd GID0: ${gid0_users:-none}]"

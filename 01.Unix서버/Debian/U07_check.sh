@@ -134,6 +134,12 @@ diagnose() {
                 # lastlog 실행 실패 (예: /var/log/lastlog 없음): 90일 기준 자동 판정 불가 → 수동진단
                 inactive_leg="MANUAL"
                 undetermined_accounts=$(echo "$checkable_accounts" | tr '\n' ' ')
+            elif [ -z "$recent_login_accounts" ]; then
+                # lastlog rc=0 이지만 출력이 비어있음: /var/log/lastlog 가 비어/희소 파일이거나
+                # PAM 스택이 pam_lastlog 를 호출하지 않는 환경(예: 기본 Debian 12 + SSH-key/cron)
+                # → 모든 UID>=1000 계정이 거짓-미사용으로 보일 수 있으므로 자동 판정 불가 → 수동진단
+                inactive_leg="MANUAL"
+                undetermined_accounts=$(echo "$checkable_accounts" | tr '\n' ' ')
             else
                 while IFS= read -r account; do
                     # 빈 계정명 건너뜀

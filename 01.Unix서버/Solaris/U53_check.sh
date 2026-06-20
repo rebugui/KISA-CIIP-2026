@@ -187,6 +187,39 @@ diagnose() {
         fi
     fi
 
+    # Solaris 기본(native) FTP 동작 여부를 무조건 점검 (설정 파일 유무와 독립)
+    # native in.ftpd는 자체 설정 파일 없이 호스트명/OS 버전 배너를 노출하므로,
+    # vsftpd/proftpd 설정이 안전해 보이더라도 native FTP가 살아있으면 수동진단으로 격상.
+    local native_ftp_running=false
+    local native_ftp_evidence=""
+
+    # 1) SMF 서비스 상태 (svcs)
+    if command -v svcs >/dev/null 2>&1; then
+        local ftp_svc_state=$(svcs -Ho state svc:/network/ftp 2>/dev/null | head -1 || true)
+        if [ "$ftp_svc_state" = "online" ]; then
+            native_ftp_running=true
+            native_ftp_evidence="${native_ftp_evidence}svc:/network/ftp: ${ftp_svc_state}${newline}"
+        fi
+    fi
+
+    # 2) inetadm ftp enabled 여부
+    if [ "$native_ftp_running" = false ] && command -v inetadm >/dev/null 2>&1; then
+        local ftp_inetadm=$(inetadm -l ftp 2>/dev/null | grep -E "enabled[=[:space:]]" | grep -v "^[[:space:]]*#" | head -1 | sed -E 's/.*enabled[[:space:]]*=?[[:space:]]*//' | awk '{print $1}' | tr 'A-Z' 'a-z' || true)
+        if [ "$ftp_inetadm" = "true" ]; then
+            native_ftp_running=true
+            native_ftp_evidence="${native_ftp_evidence}inetadm ftp enabled=true${newline}"
+        fi
+    fi
+
+    # 3) ftpd 프로세스 확인
+    if [ "$native_ftp_running" = false ]; then
+        local ftpd_ps=$(ps -ef 2>/dev/null | grep -E "[f]tpd" || true)
+        if [ -n "$ftpd_ps" ]; then
+            native_ftp_running=true
+            native_ftp_evidence="${native_ftp_evidence}ftpd 프로세스 실행 중:${newline}${ftpd_ps}${newline}"
+        fi
+    fi
+
     if [ "$ftp_banner_issue" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
@@ -208,45 +241,22 @@ diagnose() {
         done || true
 
         if [ "$ftp_installed" = true ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="FTP 배너 정보가 제거되거나 적절하게 설정됨"
-            local ftp_banner=$(grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null || echo "No banner config found")
-            command_result="[Command: grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf]\${newline}${ftp_banner}"
-            command_executed="grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null"
+            if [ "$native_ftp_running" = true ]; then
+                # 설정 파일은 안전해 보여도 native FTP가 동작 중이면 배너 노출 가능 → 수동진단으로 격상
+                diagnosis_result="MANUAL"
+                status="수동진단"
+                inspection_summary="vsftpd/proftpd 설정은 양호하나 Solaris 기본(native) FTP가 동작 중이어서 배너 노출 여부 수동 확인 필요"
+                command_result="[Native FTP 탐지]${newline}${native_ftp_evidence}"
+                command_executed="svcs -Ho state svc:/network/ftp; inetadm -l ftp; ps -ef | grep [f]tpd"
+            else
+                diagnosis_result="GOOD"
+                status="양호"
+                inspection_summary="FTP 배너 정보가 제거되거나 적절하게 설정됨"
+                local ftp_banner=$(grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null || echo "No banner config found")
+                command_result="[Command: grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf]\${newline}${ftp_banner}"
+                command_executed="grep -E 'ftpd_banner|ServerIdent' /etc/{vsftpd,vsftpd/vsftpd,proftpd/proftpd}.conf 2>/dev/null"
+            fi
         else
-            # 알려진 FTP 설정 파일이 없어도 Solaris 기본(native) FTP가 동작 중일 수 있음
-            # (svc:/network/ftp, /usr/lib/inet/ftpd 는 별도 설정 파일을 쓰지 않음)
-            local native_ftp_running=false
-            local native_ftp_evidence=""
-
-            # 1) SMF 서비스 상태 (svcs)
-            if command -v svcs >/dev/null 2>&1; then
-                local ftp_svc_state=$(svcs -Ho state svc:/network/ftp 2>/dev/null | head -1 || true)
-                if [ "$ftp_svc_state" = "online" ]; then
-                    native_ftp_running=true
-                    native_ftp_evidence="${native_ftp_evidence}svc:/network/ftp: ${ftp_svc_state}${newline}"
-                fi
-            fi
-
-            # 2) inetadm ftp enabled 여부
-            if [ "$native_ftp_running" = false ] && command -v inetadm >/dev/null 2>&1; then
-                local ftp_inetadm=$(inetadm -l ftp 2>/dev/null | grep -E "enabled[=[:space:]]" | grep -v "^[[:space:]]*#" | head -1 | sed -E 's/.*enabled[[:space:]]*=?[[:space:]]*//' | awk '{print $1}' | tr 'A-Z' 'a-z' || true)
-                if [ "$ftp_inetadm" = "true" ]; then
-                    native_ftp_running=true
-                    native_ftp_evidence="${native_ftp_evidence}inetadm ftp enabled=true${newline}"
-                fi
-            fi
-
-            # 3) ftpd 프로세스 확인
-            if [ "$native_ftp_running" = false ]; then
-                local ftpd_ps=$(ps -ef 2>/dev/null | grep -E "[f]tpd" || true)
-                if [ -n "$ftpd_ps" ]; then
-                    native_ftp_running=true
-                    native_ftp_evidence="${native_ftp_evidence}ftpd 프로세스 실행 중:${newline}${ftpd_ps}${newline}"
-                fi
-            fi
-
             if [ "$native_ftp_running" = true ]; then
                 # FTP는 동작 중이나 알려진 배너 설정 파일이 없어 배너 노출 여부 자동 판별 불가 → 수동진단
                 diagnosis_result="MANUAL"

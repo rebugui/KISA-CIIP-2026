@@ -45,6 +45,8 @@ diagnose() {
     local conf_found=false
     local evidence=""
     local conf_file=""
+    local include_unresolved=false
+    local unresolved_list=""
 
     # 점검 대상 파일: 표준 경로 + named.conf의 include 지시자 1단계 추적
     # (zone 별 allow-update가 custom include 파일에 있을 수 있음)
@@ -59,6 +61,10 @@ diagnose() {
                         scan_files="$scan_files $inc"
                     elif [ -f "/etc/${inc}" ]; then
                         scan_files="$scan_files /etc/${inc}"
+                    else
+                        # include 경로를 base/chroot 어디에서도 확인할 수 없음 (Ansible/chroot 배포 등)
+                        include_unresolved=true
+                        unresolved_list="${unresolved_list}${inc} "
                     fi
                     ;;
             esac
@@ -88,6 +94,14 @@ diagnose() {
 
     if [ "$conf_found" = true ]; then
         command_result="allow-update 설정 현황: ${evidence}"
+        # 미해결 include가 존재하고 명시적 'any' 취약 판정이 아니라면, 해당 include 내부에
+        # allow-update { any; } 가 존재할 가능성을 배제할 수 없으므로 수동진단으로 격상
+        if [ "$include_unresolved" = true ] && [ "$diagnosis_result" != "VULNERABLE" ]; then
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            inspection_summary="named.conf의 include 참조 경로를 확인하지 못함 (${unresolved_list}). 미해결 include 내부의 allow-update 설정 가능성으로 수동 점검 필요."
+            command_result="${command_result} [미해결 include] ${unresolved_list}"
+        fi
     else
         if pgrep -x named &>/dev/null; then
             status="수동진단"

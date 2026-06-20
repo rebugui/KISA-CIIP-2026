@@ -139,12 +139,32 @@ diagnose() {
         fi
     fi
 
-    # FTP: vsftpd/proftpd 배너 지시자 또는 native ftpd
+    # FTP: vsftpd/proftpd 배너 지시자 또는 native ftpd (지시자 VALUE까지 검증)
     if lssrc -s ftpd 2>/dev/null | grep -q "active" || grep -qE '^[[:space:]]*ftp[[:space:]]' /etc/inetd.conf 2>/dev/null || grep -qE '[v]sftpd|[p]roftpd' <<< "$ps_out"; then
-        if grep -qE '^[[:space:]]*(ftpd_banner|banner_file|DisplayConnect)' /etc/vsftpd.conf /etc/vsftpd/vsftpd.conf /etc/proftpd/proftpd.conf 2>/dev/null; then
-            service_banner_details="${service_banner_details}FTP: 배너 지시자 설정됨, "
+        local ftp_banner_ok=false
+        local ftp_conf_files="/etc/vsftpd.conf /etc/vsftpd/vsftpd.conf /etc/proftpd/proftpd.conf"
+        local ftp_lines=$(grep -hE '^[[:space:]]*(ftpd_banner|banner_file|DisplayConnect)[[:space:]]*=?' $ftp_conf_files 2>/dev/null || true)
+        if [ -n "$ftp_lines" ]; then
+            # inline banner 값 (ftpd_banner=...) 검사
+            if echo "$ftp_lines" | grep -E '^[[:space:]]*ftpd_banner' | sed -E 's/^[[:space:]]*ftpd_banner[[:space:]]*=[[:space:]]*//' | grep -qiE "$warn_re"; then
+                ftp_banner_ok=true
+            fi
+            # banner_file / DisplayConnect 가 가리키는 파일 내용 검사
+            if [ "$ftp_banner_ok" != true ]; then
+                local ftp_banner_paths=$(echo "$ftp_lines" | grep -E '^[[:space:]]*(banner_file|DisplayConnect)' | sed -E 's/^[[:space:]]*(banner_file|DisplayConnect)[[:space:]]*[= ][[:space:]]*//' | tr -d '"'"'" || true)
+                local p
+                for p in $ftp_banner_paths; do
+                    if [ -f "$p" ] && grep -qiE "$warn_re" "$p" 2>/dev/null; then
+                        ftp_banner_ok=true
+                        break
+                    fi
+                done
+            fi
+        fi
+        if [ "$ftp_banner_ok" = true ]; then
+            service_banner_details="${service_banner_details}FTP: 배너 경고문 설정됨, "
         else
-            unverified_services="${unverified_services}FTP(배너), "
+            unverified_services="${unverified_services}FTP(배너 값 미확인), "
         fi
     fi
 
@@ -158,12 +178,22 @@ diagnose() {
         fi
     fi
 
-    # DNS: named version 문자열 숨김 여부
+    # DNS: named version 문자열 숨김 여부 (version 지시자 VALUE 까지 검증, 기본/노출 문자열은 미확인 처리)
     if lssrc -s named 2>/dev/null | grep -q "active" || grep -q '[n]amed' <<< "$ps_out"; then
-        if grep -qE '^[[:space:]]*version' /etc/named.conf /etc/bind/named.conf /etc/bind/named.conf.options 2>/dev/null; then
-            service_banner_details="${service_banner_details}DNS: version 문자열 설정됨, "
+        local dns_version_ok=false
+        local dns_version_line=$(grep -hE '^[[:space:]]*version[[:space:]]+' /etc/named.conf /etc/bind/named.conf /etc/bind/named.conf.options 2>/dev/null || true)
+        if [ -n "$dns_version_line" ]; then
+            # version 값 추출 (예: version "none"; / version "Restricted";)
+            local dns_version_val=$(echo "$dns_version_line" | sed -E 's/^[[:space:]]*version[[:space:]]+//; s/[";]//g' | tr -d "'" | awk '{$1=$1; print}')
+            # 비어있지 않고, 기본 BIND 버전 노출 문자열이 아니면 숨김으로 간주
+            if [ -n "$dns_version_val" ] && ! echo "$dns_version_val" | grep -qiE '^bind([[:space:]]|$)|^[0-9]+\.[0-9]+'; then
+                dns_version_ok=true
+            fi
+        fi
+        if [ "$dns_version_ok" = true ]; then
+            service_banner_details="${service_banner_details}DNS: version 문자열 숨김 설정됨, "
         else
-            unverified_services="${unverified_services}DNS(version), "
+            unverified_services="${unverified_services}DNS(version 값 미확인), "
         fi
     fi
 

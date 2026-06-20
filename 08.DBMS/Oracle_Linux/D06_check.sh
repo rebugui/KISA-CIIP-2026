@@ -191,10 +191,16 @@ EOF
             status="수동진단"
             inspection_summary="Oracle 기본 계정만 존재. 응용 프로그램별 계정 생성 여부 수동 확인 필요 (총 ${total_users}개 계정)"
         else
-            diagnosis_result="GOOD"
-            status="양호"
+            # 비시스템 계정이 존재하나 사용자별/공용 여부는 dba_users 메타데이터만으로
+            # 입증 불가 (정책·운영 절차 확인 필요) → MANUAL 라우팅 (Windows 헬퍼와 동일한 보수적 처리)
+            diagnosis_result="MANUAL"
+            status="수동진단"
             local app_users=$((total_users - oracle_system_users))
-            inspection_summary="사용자별 개별 계정 사용 중 (총 ${total_users}개 중 Oracle 기본 ${oracle_system_users}개, 응용 ${app_users}개)"
+            local non_system_accounts
+            non_system_accounts=$(echo "$command_result" | grep -v "^$" | grep -v "USERNAME" \
+                | grep -vE "^(SYS|SYSTEM|DBSNMP|SYSMAN|OUTLN|DIP|ORACLE_OCM|APPQOSSYS|WMSYS|EXFSYS|CTXSYS|XDB|ANONYMOUS|SI_INFORMTN_SCHEMA|ORDDATA|ORDPLUGINS|ORDSYS|MDSYS|OLAPSYS|OWBSYS|FLOWS_FILES|APEX_PUBLIC_USER|APEX_040000|MDDATA|ORDDATA_DOC|XS\$NULL|OJVMSYS|LBACSYS|AUDSYS|DVF|DVSYS|DBSFWUSER|REMOTE_SCHEDULER_AGENT|DIP|SYSBACKUP|GSMADMIN_INTERNAL|SYSKM|SYSDG|GSMCATUSER|SYSRAC)$" \
+                | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+            inspection_summary="비시스템 계정 ${app_users}개 존재 (총 ${total_users}개 중 Oracle 기본 ${oracle_system_users}개). 응용 계정이 사용자별로 개별 부여되었는지 또는 공용 계정인지 수동 확인 필요: ${non_system_accounts}"
         fi
     else
         diagnosis_result="MANUAL"

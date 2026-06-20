@@ -75,7 +75,7 @@ diagnose() {
         fi
     fi
 
-    # 3. FTP(vsftpd) 사용 시: ftpd_banner 또는 banner_file 설정 필요
+    # 3. FTP(vsftpd) 사용 시: ftpd_banner 또는 banner_file 설정 필요 (값에 경고 문구 포함 확인)
     if pgrep -x vsftpd >/dev/null 2>&1; then
         local vsftpd_conf=""
         local vc
@@ -85,12 +85,37 @@ diagnose() {
                 break
             fi
         done
-        if [ -z "$vsftpd_conf" ] || ! grep -qE '^[[:space:]]*(ftpd_banner|banner_file)=' "$vsftpd_conf" 2>/dev/null; then
+        if [ -z "$vsftpd_conf" ]; then
             missing="${missing}[FTP: vsftpd ftpd_banner/banner_file 미설정] "
+        else
+            local vsftpd_banner_val=""
+            local vsftpd_banner_file=""
+            if grep -qE '^[[:space:]]*ftpd_banner[[:space:]]*=' "$vsftpd_conf" 2>/dev/null; then
+                vsftpd_banner_val=$(grep -E '^[[:space:]]*ftpd_banner[[:space:]]*=' "$vsftpd_conf" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*ftpd_banner[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            fi
+            if grep -qE '^[[:space:]]*banner_file[[:space:]]*=' "$vsftpd_conf" 2>/dev/null; then
+                vsftpd_banner_file=$(grep -E '^[[:space:]]*banner_file[[:space:]]*=' "$vsftpd_conf" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*banner_file[[:space:]]*=[[:space:]]*//; s/[[:space:]]*#.*$//' || true)
+            fi
+            if [ -z "$vsftpd_banner_val" ] && [ -z "$vsftpd_banner_file" ]; then
+                missing="${missing}[FTP: vsftpd ftpd_banner/banner_file 미설정] "
+            else
+                local vsftpd_ok=false
+                if [ -n "$vsftpd_banner_val" ] && echo "$vsftpd_banner_val" | grep -qiE "$warn_regex"; then
+                    vsftpd_ok=true
+                fi
+                if [ "$vsftpd_ok" = false ] && [ -n "$vsftpd_banner_file" ] && [ -f "$vsftpd_banner_file" ]; then
+                    if cat "$vsftpd_banner_file" 2>/dev/null | grep -qiE "$warn_regex"; then
+                        vsftpd_ok=true
+                    fi
+                fi
+                if [ "$vsftpd_ok" = false ]; then
+                    missing="${missing}[FTP: vsftpd ftpd_banner/banner_file 경고 문구 없음] "
+                fi
+            fi
         fi
     fi
 
-    # 3b. FTP(proftpd) 사용 시: DisplayLogin 설정 필요
+    # 3b. FTP(proftpd) 사용 시: DisplayLogin 설정 필요 (지정된 파일 내용에 경고 문구 포함 확인)
     if pgrep -x proftpd >/dev/null 2>&1; then
         local proftpd_conf=""
         local pc
@@ -100,8 +125,24 @@ diagnose() {
                 break
             fi
         done
-        if [ -z "$proftpd_conf" ] || ! grep -qiE '^[[:space:]]*DisplayLogin' "$proftpd_conf" 2>/dev/null; then
+        if [ -z "$proftpd_conf" ]; then
             missing="${missing}[FTP: proftpd DisplayLogin 미설정] "
+        else
+            if ! grep -qiE '^[[:space:]]*DisplayLogin[[:space:]]+' "$proftpd_conf" 2>/dev/null; then
+                missing="${missing}[FTP: proftpd DisplayLogin 미설정] "
+            else
+                local proftpd_display_path
+                proftpd_display_path=$(grep -iE '^[[:space:]]*DisplayLogin[[:space:]]+' "$proftpd_conf" 2>/dev/null | tail -1 | sed -E 's/^[[:space:]]*[Dd][Ii][Ss][Pp][Ll][Aa][Yy][Ll][Oo][Gg][Ii][Nn][[:space:]]+//; s/[[:space:]]*#.*$//; s/^"//; s/"$//' || true)
+                local proftpd_ok=false
+                if [ -n "$proftpd_display_path" ] && [ -f "$proftpd_display_path" ]; then
+                    if cat "$proftpd_display_path" 2>/dev/null | grep -qiE "$warn_regex"; then
+                        proftpd_ok=true
+                    fi
+                fi
+                if [ "$proftpd_ok" = false ]; then
+                    missing="${missing}[FTP: proftpd DisplayLogin 파일(${proftpd_display_path:-미지정}) 경고 문구 없음] "
+                fi
+            fi
         fi
     fi
 
@@ -129,10 +170,23 @@ diagnose() {
         fi
     fi
 
-    # 5. DNS(named) 사용 시: version 문자열 숨김 설정 필요
+    # 5. DNS(named) 사용 시: options { version "..."; } 가 실제 버전을 숨겨야 함
+    #    실제 버전(BIND/숫자 패턴) 노출 또는 미설정은 취약으로 판정
     if pgrep -x named >/dev/null 2>&1; then
-        if ! grep -v '^[[:space:]]*//' /etc/named.conf 2>/dev/null | grep -qE '^[^#]*version[[:space:]]+"' ; then
-            missing="${missing}[DNS: named.conf version 숨김 미설정] "
+        if [ ! -f /etc/named.conf ]; then
+            missing="${missing}[DNS: named.conf 없음 또는 version 숨김 미설정] "
+        else
+            local named_version_line
+            named_version_line=$(grep -v '^[[:space:]]*//' /etc/named.conf 2>/dev/null | grep -E '^[^#]*version[[:space:]]+"' | tail -1 || true)
+            if [ -z "$named_version_line" ]; then
+                missing="${missing}[DNS: named.conf version 숨김 미설정] "
+            else
+                local named_version_val
+                named_version_val=$(echo "$named_version_line" | sed -E 's/^[^"]*"([^"]*)".*$/\1/' || true)
+                if [ -z "$named_version_val" ] || echo "$named_version_val" | grep -qiE '(bind|^[0-9]+(\.[0-9]+)+|version)'; then
+                    missing="${missing}[DNS: named.conf version 실제 버전 노출(${named_version_val})] "
+                fi
+            fi
         fi
     fi
 

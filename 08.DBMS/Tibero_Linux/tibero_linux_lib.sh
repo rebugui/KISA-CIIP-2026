@@ -217,7 +217,7 @@ invoke_tibero_linux_check() {
             tibero_sql_check "SELECT resource_name||'='||limit FROM dba_profiles WHERE resource_name IN ('PASSWORD_REUSE_TIME','PASSWORD_REUSE_MAX') ORDER BY profile,resource_name;" "password reuse policy" || return 0
             if ! printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[^[:space:]]'; then
                 tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero returned no PASSWORD_REUSE_TIME/PASSWORD_REUSE_MAX policy rows; the password-reuse control is not configured." "No rows returned (no password-reuse policy configured)." "${TIBERO_LAST_COMMAND}"
-            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq '=UNLIMITED|=DEFAULT'; then
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eiq '=UNLIMITED|=DEFAULT|=NULL|=[[:space:]]*$'; then
                 tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Tibero password reuse controls require profile-by-profile review." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
                 tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "Tibero password reuse profile limits were collected without obvious unlimited evidence." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"

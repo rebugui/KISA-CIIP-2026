@@ -317,6 +317,9 @@ function Invoke-TomcatWindowsCheck {
             $linkText = [regex]::Replace($linkText, '(?s)<!--.*?-->', '')
             $allowLinking = @([regex]::Matches($linkText, '(?i)allowLinking\s*=\s*["'']true["'']') | ForEach-Object { $_.Value })
             if ($allowLinking.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat allowLinking is enabled and may allow traversal through linked paths.' ($allowLinking -join "`n") 'Parse context.xml allowLinking' }
+            # conf/server.xml과 conf/context.xml이 모두 부재/판독불가이면 allowLinking 정책 자체를 정적으로 확인할 수 없으므로
+            # 증거 부재를 GOOD으로 단정하지 말고 MANUAL 처리(WEB-05/15/19 패턴과 동일).
+            if ($state.ServerXml.Count -eq 0 -and $state.ContextXml.Count -eq 0) { return New-TomcatResult 'MANUAL' 'No readable Tomcat server.xml/context.xml was found; allowLinking policy cannot be confirmed. Verify manually.' "server.xml files: $($state.ServerXml -join ', '); context.xml files: $($state.ContextXml -join ', ')" 'Parse server.xml/context.xml allowLinking' }
             return New-TomcatResult 'GOOD' 'No Tomcat allowLinking=true evidence was found in server/context configuration.' "server.xml files: $($state.ServerXml -join ', '); context.xml files: $($state.ContextXml -join ', ')" 'Parse server.xml/context.xml allowLinking'
         }
         'WEB-07' {
@@ -335,10 +338,14 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'MANUAL' 'Tomcat was found, but webapps paths were not located.' $evidencePrefix 'Inspect Tomcat webapps for unnecessary files'
         }
         'WEB-08' {
-            $limits = @([regex]::Matches($serverText, '(?i)(maxPostSize|maxSavePostSize)\s*=\s*"([^"]+)"') | ForEach-Object { "$($_.Groups[1].Value)=$($_.Groups[2].Value)" })
+            # XML 주석(<!-- -->)으로 비활성화된 maxPostSize/multipart-config 예시를 활성 설정으로 오탐하지 않도록
+            # 주석 제거 후 매칭 수행(WEB-05/06/10/15/19와 동일한 idiom).
+            $serverTextActive = [regex]::Replace($serverText, '(?s)<!--.*?-->', '')
+            $webTextActive = [regex]::Replace($webText, '(?s)<!--.*?-->', '')
+            $limits = @([regex]::Matches($serverTextActive, '(?i)(maxPostSize|maxSavePostSize)\s*=\s*"([^"]+)"') | ForEach-Object { "$($_.Groups[1].Value)=$($_.Groups[2].Value)" })
             $bad = @($limits | Where-Object { $_ -match '=(-1|0)$' })
             # Also check web.xml multipart-config for upload size limits (criteria_good: Step 2)
-            $webLimits = @([regex]::Matches($webText, '(?is)<max-(?:file|request)-size>\s*(\d+)\s*</max-(?:file|request)-size>') | Where-Object { [int]$_.Groups[1].Value -gt 0 } | ForEach-Object { $_.Value.Trim() })
+            $webLimits = @([regex]::Matches($webTextActive, '(?is)<max-(?:file|request)-size>\s*(\d+)\s*</max-(?:file|request)-size>') | Where-Object { [int]$_.Groups[1].Value -gt 0 } | ForEach-Object { $_.Value.Trim() })
             if ($bad.Count -gt 0 -or ($limits.Count -eq 0 -and $webLimits.Count -eq 0)) { return New-TomcatResult 'VULNERABLE' 'Tomcat upload/request size limits are missing or unlimited.' (($limits + $webLimits + "server.xml files: $($state.ServerXml -join ', ')") -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config' }
             return New-TomcatResult 'GOOD' 'Tomcat upload/request size limits are configured.' (($limits + $webLimits) -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config'
         }
@@ -422,7 +429,11 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'GOOD' 'No CGI, SSI, or invoker servlet mapping evidence was found.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml script servlet mappings'
         }
         'WEB-16' {
-            $serverAttrs = @([regex]::Matches($serverText, '(?i)server\s*=\s*"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
+            # server.xml이 부재/판독 불가이면 masking 상태를 증거 부재로 단정할 수 없으므로 MANUAL 처리(WEB-15/19/22 패턴과 동일).
+            if ($state.ServerXml.Count -eq 0 -or [string]::IsNullOrWhiteSpace($serverText)) { return New-TomcatResult 'MANUAL' 'No readable Tomcat server.xml was found; Connector server attribute masking cannot be confirmed. Verify server.xml manually.' "server.xml files: $($state.ServerXml -join ', ')" 'Parse server.xml Connector server attribute' }
+            # XML 주석(<!-- -->) 안의 server="..." 예시를 활성 설정으로 오탐하지 않도록 주석 제거 후 매칭(WEB-01/10/15/19 패턴과 동일).
+            $serverTextActive = [regex]::Replace($serverText, '(?s)<!--.*?-->', '')
+            $serverAttrs = @([regex]::Matches($serverTextActive, '(?i)server\s*=\s*"([^"]+)"') | ForEach-Object { $_.Groups[1].Value })
             $default = @($serverAttrs | Where-Object { $_ -match '(?i)Apache-Coyote|Tomcat|Catalina' })
             if ($default.Count -gt 0 -or $serverAttrs.Count -eq 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat server header is default or not explicitly masked.' ($serverAttrs -join ', ') 'Parse server.xml Connector server attribute' }
             return New-TomcatResult 'GOOD' 'Tomcat Connector server header appears to be masked.' ($serverAttrs -join ', ') 'Parse server.xml Connector server attribute'

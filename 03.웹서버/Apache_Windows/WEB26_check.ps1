@@ -99,31 +99,15 @@ try {
             }
         }
 
-        $aclEvidence = [System.Collections.Generic.List[string]]::new()
-        foreach ($path in $logPaths) {
-            $targets = @($path)
-            if (Test-Path -LiteralPath $path -PathType Container) {
-                $targets += @(Get-ChildItem -LiteralPath $path -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
-            }
-            foreach ($target in $targets) {
-                try {
-                    $acl = Get-Acl -LiteralPath $target -ErrorAction Stop
-                    foreach ($rule in $acl.Access) {
-                        if ($rule.AccessControlType -eq 'Allow' -and (Test-BroadLogPrincipal -Identity $rule.IdentityReference)) {
-                            $aclEvidence.Add("$target => $($rule.IdentityReference) $($rule.FileSystemRights)") | Out-Null
-                        }
-                    }
-                }
-                catch {
-                    $aclEvidence.Add("$target => ACL read failed: $($_.Exception.Message)") | Out-Null
-                }
-            }
-        }
+        $aclInspection = Get-ApacheWindowsAclInspection -Paths @($logPaths) -BroadPrincipalTest { param($id) Test-BroadLogPrincipal -Identity $id } -IncludeContainerChildren
+        $aclBroad = @($aclInspection.Broad)
+        $aclErrors = @($aclInspection.Errors)
 
         $commandExecuted = "Parse Apache ErrorLog/CustomLog/TransferLog paths and inspect NTFS ACLs"
         $commandOutput = (@(
             if ($logPaths.Count -gt 0) { "Log paths:`n" + ($logPaths -join "`n") }
-            if ($aclEvidence.Count -gt 0) { "Broad ACL evidence:`n" + ($aclEvidence -join "`n") }
+            if ($aclBroad.Count -gt 0) { "Broad ACL evidence:`n" + ($aclBroad -join "`n") }
+            if ($aclErrors.Count -gt 0) { "ACL read failures (manual verification required):`n" + ($aclErrors -join "`n") }
             if ($logPaths.Count -eq 0) { "No existing Apache log path was resolved from configuration." }
         ) -join "`n`n")
 
@@ -132,10 +116,15 @@ try {
             $status = "수동진단"
             $summary = "Apache log paths could not be resolved; inspect active ErrorLog and CustomLog paths manually."
         }
-        elseif ($aclEvidence.Count -gt 0) {
+        elseif ($aclBroad.Count -gt 0) {
             $finalResult = "VULNERABLE"
             $status = "취약"
             $summary = "Apache log paths have broad local user ACL entries."
+        }
+        elseif ($aclErrors.Count -gt 0) {
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Apache log path ACLs could not be read for one or more targets; manual ACL review required."
         }
         else {
             $finalResult = "GOOD"

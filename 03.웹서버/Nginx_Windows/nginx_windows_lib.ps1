@@ -380,3 +380,83 @@ function Get-NginxBroadAclEvidence {
         }
     }
 }
+
+function Get-NginxAccountPrivilegeClass {
+    # WEB-09 fix: classify a Windows account name by ACTUAL privilege
+    # (Administrators-group membership), not by literal substring matching.
+    # Returns one of: 'HighPrivilege' (admin-equivalent), 'LowPrivilege'
+    # (well-known least-privilege service principal), or 'Unknown'
+    # (cannot be statically resolved -> caller MUST route to MANUAL,
+    # never GOOD). The guideline criteria_bad is "관리자 권한이 부여된
+    # 계정으로 구동" — group membership, not naming convention.
+    param([string]$Account)
+
+    if ([string]::IsNullOrWhiteSpace($Account)) {
+        return 'Unknown'
+    }
+
+    $trimmed = $Account.Trim()
+
+    # 1. Well-known SYSTEM-equivalent principals (always high privilege).
+    if ($trimmed -match '^(?i)(LocalSystem|NT AUTHORITY\\SYSTEM|SYSTEM)$') {
+        return 'HighPrivilege'
+    }
+
+    # 2. Literal Administrator / Administrators built-in (high privilege).
+    if ($trimmed -match '(?i)(^|\\)Administrator$' -or
+        $trimmed -match '(?i)(^|\\)Administrators$' -or
+        $trimmed -match '^(?i)BUILTIN\\Administrators$') {
+        return 'HighPrivilege'
+    }
+
+    # 3. Well-known least-privilege service principals (explicit whitelist).
+    if ($trimmed -match '^(?i)(NT AUTHORITY\\LocalService|NT AUTHORITY\\NetworkService|NT AUTHORITY\\IUSR|LocalService|NetworkService|IUSR|ApplicationPoolIdentity)$' -or
+        $trimmed -match '^(?i)IIS APPPOOL\\') {
+        return 'LowPrivilege'
+    }
+
+    # 4. Resolve live group membership for custom/named accounts.
+    #    Any membership in the local Administrators group, or in well-known
+    #    privileged domain/builtin groups, makes the account high-privilege.
+    try {
+        $members = @(Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop)
+        foreach ($member in $members) {
+            $memberName = [string]$member.Name
+            if ([string]::IsNullOrWhiteSpace($memberName)) {
+                continue
+            }
+            if ($memberName -eq $trimmed) {
+                return 'HighPrivilege'
+            }
+            $shortIn = ($trimmed -split '\\')[-1]
+            $shortMember = ($memberName -split '\\')[-1]
+            if ($shortIn -and $shortMember -and ($shortIn -eq $shortMember)) {
+                return 'HighPrivilege'
+            }
+        }
+    }
+    catch {
+        # Get-LocalGroupMember may fail (not elevated, non-English locale,
+        # domain controller, etc.). Do NOT silently fall through to GOOD.
+        return 'Unknown'
+    }
+
+    # 5. SID-based privileged-group check via translation when possible.
+    try {
+        $ntAccount = New-Object System.Security.Principal.NTAccount($trimmed)
+        $sid = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
+        # Well-known high-privilege SIDs: SYSTEM (S-1-5-18),
+        # Administrators (S-1-5-32-544), Domain Admins (-512),
+        # Enterprise Admins (-519), Schema Admins (-518).
+        if ($sid -eq 'S-1-5-18' -or $sid -eq 'S-1-5-32-544' -or
+            $sid -match '-512$' -or $sid -match '-519$' -or $sid -match '-518$') {
+            return 'HighPrivilege'
+        }
+    }
+    catch {
+        # SID translation failure does not by itself indicate privilege;
+        # leave as Unknown so the caller routes to MANUAL.
+    }
+
+    return 'Unknown'
+}

@@ -40,10 +40,10 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="NFS 관련 서비스가 비활성화되어 있습니다."
     local command_result=""
-    local command_executed="ps -ef | grep -E 'nfsd|mountd'"
+    local command_executed="ps -ef | grep -E 'nfsd|rpc\\.mountd' | grep -vE 'automount(d)?|grep'"
 
-    # 1. 실제 데이터 추출
-    local nfs_procs=$(ps -ef | grep -Ei "nfsd|mountd" | grep -v grep || echo "")
+    # 1. 실제 데이터 추출 (NFS 서버 데몬만: nfsd, rpc.mountd; automountd 등 클라이언트 데몬 제외)
+    local nfs_procs=$(ps -ef | grep -E 'nfsd|rpc\.mountd' | grep -vE 'automount(d)?|grep' || echo "")
 
     # 2. 판정 로직
     if [ -n "$nfs_procs" ]; then

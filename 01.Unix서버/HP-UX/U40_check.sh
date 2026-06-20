@@ -163,10 +163,12 @@ diagnose() {
 
     # 4) NFS 설정 파일 접근 권한 확인 (가이드 기준: 644 이하, group/other 쓰기 금지)
     #    NFS 사용 중일 때만 검사 (HP-UX: /etc/dfs/dfstab, 호환: /etc/exports)
+    local conf_checked=false
     if [ "$nfs_installed" = true ]; then
         local nfs_conf
         for nfs_conf in /etc/dfs/dfstab /etc/exports; do
             [ -f "$nfs_conf" ] || continue
+            conf_checked=true
             local conf_perms=$(perl -e '@s=stat(shift); printf "%04o\n", $s[2] & 07777' "$nfs_conf" 2>/dev/null || true)
             if [[ ! "$conf_perms" =~ ^[0-7]{3,4}$ ]]; then
                 # 권한 확인 불가 → 증거 미확보, 보수적으로 issue 기록(수동 확인 유도)
@@ -181,10 +183,39 @@ diagnose() {
                 issues+=("${nfs_conf} 권한 644 초과 (${conf_perms})")
             fi
         done
+
+        # 4-1) NFS 서비스는 활성이지만 설정 파일이 존재하지 않는 경우:
+        #      런타임 share/exportfs 로만 공유되었거나 대체 설정 경로 사용 가능성.
+        #      접근 통제/644 권한을 정적으로 입증할 수 없으므로 활성 공유를 수집하여 수동 판정으로 회부.
+        if [ "$conf_checked" = false ]; then
+            local active_shares=""
+            if command -v share &>/dev/null; then
+                active_shares=$(share 2>/dev/null || true)
+            fi
+            if [ -z "$active_shares" ] && command -v exportfs &>/dev/null; then
+                active_shares=$(exportfs -v 2>/dev/null || true)
+            fi
+            if [ -z "$active_shares" ] && command -v showmount &>/dev/null; then
+                active_shares=$(showmount -e 2>/dev/null || true)
+            fi
+            if [ -n "$active_shares" ]; then
+                exports_info="${exports_info}활성 공유 목록(설정파일 부재, 런타임 공유 추정):\\n${active_shares}\\n"
+            else
+                exports_info="${exports_info}NFS 서비스 활성 상태이나 /etc/dfs/dfstab 및 /etc/exports 부재, 활성 공유 수집 실패\\n"
+            fi
+            issues+=("NFS 서비스 활성 상태이나 설정 파일(/etc/dfs/dfstab, /etc/exports) 미존재 - 접근 통제 및 권한 정적 입증 불가 (수동 확인 필요)")
+            is_secure=false
+            diagnosis_result="MANUAL"
+        fi
     fi
 
     # 최종 판정
-    if [ "$nfs_installed" = false ]; then
+    if [ "$diagnosis_result" = "MANUAL" ]; then
+        status="수동진단"
+        inspection_summary="NFS 활성이나 설정 파일 부재로 접근 통제/권한 입증 불가: ${issues[*]}"
+        command_result="${exports_info}"
+        command_executed="cat /etc/dfs/dfstab /etc/exports 2>/dev/null; share 2>/dev/null; exportfs -v 2>/dev/null; showmount -e 2>/dev/null"
+    elif [ "$nfs_installed" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="NFS 서비스 미사용"

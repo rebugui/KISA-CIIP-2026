@@ -36,9 +36,13 @@ if (-not (Test-RunallMode)) {
 # 1. Check LAN Manager authentication level
 try {
     $lsa = Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -ErrorAction SilentlyContinue
-    $lmCompatibilityLevel = if ($lsa) { $lsa.LmCompatibilityLevel } else { 0 }
+    $lmCompatibilityLevel = if ($lsa -and ($null -ne $lsa.LmCompatibilityLevel)) { $lsa.LmCompatibilityLevel } else { $null }
 
-    if ($lmCompatibilityLevel -ge 3) {
+    if ($null -eq $lmCompatibilityLevel) {
+        $finalResult = "MANUAL"
+        $summary = "LmCompatibilityLevel 레지스트리 값이 없어 OS 기본값 적용 여부를 단정할 수 없음 - secpol.msc(로컬 보안 정책)에서 'LAN Manager 인증 수준'이 'NTLMv2 응답만 보냄' 이상으로 설정되어 있는지 수동 확인 필요"
+        $status = "수동진단"
+    } elseif ($lmCompatibilityLevel -ge 3) {
         $finalResult = "GOOD"
         $summary = "LAN Manager 인증 수준이 NTLMv2 응답만 보내기로 설정됨"
         $status = "양호"
@@ -49,7 +53,7 @@ try {
     }
 
     $commandExecuted = "Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa' -Name 'LmCompatibilityLevel'"
-    $commandOutput = "LmCompatibilityLevel: $lmCompatibilityLevel"
+    $commandOutput = if ($null -eq $lmCompatibilityLevel) { "LmCompatibilityLevel: (레지스트리 값 없음)" } else { "LmCompatibilityLevel: $lmCompatibilityLevel" }
 
 } catch {
     $finalResult = "MANUAL"

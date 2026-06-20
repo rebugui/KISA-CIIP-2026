@@ -72,6 +72,7 @@ diagnose() {
     local raw_tcb_output=""
     local trusted_mode=false
     local tcb_readable=false
+    local security_file_unreadable=false
 
     command_executed="grep '^AUTH_MAXTRIES' ${security_file}"
 
@@ -82,6 +83,7 @@ diagnose() {
         auth_maxtries=$(echo "$raw_security_output" | sed -n 's/.*=[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1 || true)
         command_result="[FILE: ${security_file}]${newline}${raw_security_output:-AUTH_MAXTRIES 설정 없음}${newline}"
     else
+        security_file_unreadable=true
         command_result="[FILE: ${security_file}] 파일 없음 또는 읽기 불가${newline}"
     fi
 
@@ -121,6 +123,10 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="계정 잠금 임계값 적절히 설정됨 (AUTH_MAXTRIES=${auth_maxtries})"
+    elif [ "$trusted_mode" = false ] && [ "$security_file_unreadable" = true ] && [ -z "$auth_maxtries" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="AUTH_MAXTRIES 점검 파일(${security_file})을 읽을 수 없어 확인 불가 - 수동 점검 필요"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

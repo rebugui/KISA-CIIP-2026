@@ -33,9 +33,12 @@ try {
     $defaultPaths = @()
 
     foreach ($site in $sites) {
-        $path = $site.PhysicalPath
-        # 기본 경로 확인 (C:\inetpub\wwwroot, C:\inetpub\wwwroot\mysite 등)
-        if ($path -like "C:\inetpub\wwwroot*" -or $path -eq "C:\inetpub\wwwroot") {
+        $rawPath = $site.PhysicalPath
+        # IIS applicationHost.config 는 PhysicalPath 를 %SystemDrive%\inetpub\wwwroot 와 같은
+        # 미확장 토큰 형태로 저장하므로, 환경 변수를 먼저 확장한 뒤 비교한다.
+        $path = [System.Environment]::ExpandEnvironmentVariables($rawPath)
+        # 기본 경로 확인 (확장된 경로 + 미확장 %SystemDrive% 토큰 모두 탐지)
+        if ($path -like "*\inetpub\wwwroot*" -or $rawPath -like "*%SystemDrive%\inetpub\wwwroot*") {
             $defaultPaths += "Site: $($site.Name), Path: $path (기본 경로 사용)"
         }
     }

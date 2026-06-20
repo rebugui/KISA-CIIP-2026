@@ -66,6 +66,8 @@ diagnose() {
     local bind_conf_files=("/etc/bind/named.conf" "/etc/bind/named.conf.local" "/etc/bind/named.conf.options" "/etc/bind/named.conf.default-zones")
 
     # include 지시자 추적 (포함 파일 내 zone 단위 allow-update 'any' 미탐 방지, 2단계)
+    # (include 파일 미확인 상태로 GOOD을 부여하지 않도록 미해결 include는 수동진단 처리)
+    local include_unresolved=false
     local include_pass included_file existing already
     for include_pass in 1 2; do
         local new_includes=()
@@ -73,7 +75,10 @@ diagnose() {
             [ -f "$conf_file" ] || continue
             while IFS= read -r included_file; do
                 [ -n "$included_file" ] || continue
-                [ -f "$included_file" ] || continue
+                if [ ! -f "$included_file" ]; then
+                    include_unresolved=true
+                    continue
+                fi
                 already=false
                 for existing in "${bind_conf_files[@]}" ${new_includes[@]+"${new_includes[@]}"}; do
                     if [ "$existing" = "$included_file" ]; then already=true; break; fi
@@ -144,6 +149,12 @@ diagnose() {
         status="취약"
         inspection_summary="DNS 동적 업데이트 제한 미흡: ${issues[*]}"
         command_result="${dns_info}${newline}[Issues: ${issues[*]}]"
+        command_executed="sed -n '/allow-update/,/;/p' /etc/bind/named.conf /etc/bind/named.conf.local /etc/bind/named.conf.options /etc/bind/named.conf.default-zones; grep -i 'update-policy' /etc/bind/named.conf*"
+    elif [ "$is_secure" = true ] && [ "$include_unresolved" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="기본 설정의 동적 업데이트 제한은 확인되었으나 include된 설정 파일을 확인할 수 없어 수동 점검 필요"
+        command_result="${dns_info}${newline}[미확인 include 설정 파일 존재]"
         command_executed="sed -n '/allow-update/,/;/p' /etc/bind/named.conf /etc/bind/named.conf.local /etc/bind/named.conf.options /etc/bind/named.conf.default-zones; grep -i 'update-policy' /etc/bind/named.conf*"
     elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"

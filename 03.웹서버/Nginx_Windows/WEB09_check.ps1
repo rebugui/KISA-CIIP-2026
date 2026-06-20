@@ -65,15 +65,22 @@ try {
         $accountEvidence += @($ownerEvidence | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         $accountEvidence = @($accountEvidence | Select-Object -Unique)
 
-        $highPrivilegeAccounts = @($accountEvidence | Where-Object {
-            $_ -match '^(?i)(LocalSystem|NT AUTHORITY\\SYSTEM)$' -or
-            $_ -match '(?i)(^|\\)Administrator$' -or
-            $_ -match '(?i)(^|\\)Administrators$'
-        })
-        $lowPrivilegeAccounts = @($accountEvidence | Where-Object {
-            $_ -match '^(?i)(NT AUTHORITY\\LocalService|NT AUTHORITY\\NetworkService|LocalService|NetworkService)$' -or
-            ($_ -notmatch '^(?i)(LocalSystem|NT AUTHORITY\\SYSTEM)$' -and $_ -notmatch '(?i)(^|\\)Administrator(s)?$')
-        })
+        # WEB-09: classify accounts by ACTUAL privilege (Administrators-group
+        # membership / well-known SID), not by literal substring of the name.
+        # Custom-named privileged service accounts (e.g. DOMAIN\NginxSvcAdmin
+        # that is a real Administrators member) were silently passed as GOOD
+        # by the previous name-only regex; the helper now whitelists known
+        # low-privilege principals and routes unresolvable accounts to MANUAL.
+        $highPrivilegeAccounts = [System.Collections.Generic.List[string]]::new()
+        $lowPrivilegeAccounts = [System.Collections.Generic.List[string]]::new()
+        $unknownAccounts = [System.Collections.Generic.List[string]]::new()
+        foreach ($acct in $accountEvidence) {
+            switch (Get-NginxAccountPrivilegeClass -Account $acct) {
+                'HighPrivilege' { $highPrivilegeAccounts.Add($acct) | Out-Null }
+                'LowPrivilege'  { $lowPrivilegeAccounts.Add($acct) | Out-Null }
+                default         { $unknownAccounts.Add($acct) | Out-Null }
+            }
+        }
 
         $evidence = @(
             "Service/process evidence:",
@@ -90,10 +97,25 @@ try {
             $evidence += "High privilege account evidence:"
             $evidence += $highPrivilegeAccounts
         }
+        elseif ($unknownAccounts.Count -gt 0) {
+            # Custom-named accounts whose privilege cannot be resolved
+            # statically (e.g. domain accounts on a non-DC host, or
+            # accounts not present in the local Administrators group
+            # enumeration). Conservative floor: MANUAL — never GOOD.
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Nginx service/process account privilege could not be confirmed by group membership. Verify each account is not a member of Administrators / Domain Admins / Enterprise Admins."
+            $evidence += "Account(s) requiring manual privilege verification:"
+            $evidence += $unknownAccounts
+            if ($lowPrivilegeAccounts.Count -gt 0) {
+                $evidence += "Whitelisted least-privilege account evidence:"
+                $evidence += $lowPrivilegeAccounts
+            }
+        }
         elseif ($lowPrivilegeAccounts.Count -gt 0) {
             $finalResult = "GOOD"
             $status = "양호"
-            $summary = "Nginx service/process account evidence is not administrator-equivalent."
+            $summary = "Nginx service/process account evidence is a whitelisted least-privilege Windows service principal."
             $evidence += "Least-privilege account evidence:"
             $evidence += $lowPrivilegeAccounts
         }

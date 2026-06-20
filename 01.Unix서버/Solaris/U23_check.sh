@@ -144,7 +144,7 @@ diagnose() {
 
             suid_files="${suid_files}${file} (SUID, ${perms}:${owner}), "
         fi
-    done < <(eval "find $find_paths -perm -4000 -type f 2>/dev/null | head -200") || true
+    done < <(eval "find $find_paths -perm -4000 -type f 2>/dev/null") || true
 
     # SGID 파일 검색
     while IFS= read -r file; do
@@ -182,7 +182,7 @@ diagnose() {
 
             sgid_files="${sgid_files}${file} (SGID, ${perms}:${owner}), "
         fi
-    done < <(eval "find $find_paths -perm -2000 -type f 2>/dev/null | head -200") || true
+    done < <(eval "find $find_paths -perm -2000 -type f 2>/dev/null") || true
 
     # 결과 판정
     local suid_find_output=$(eval "find $find_paths -perm -4000 -type f 2>/dev/null" | head -20 || echo "No SUID files found")

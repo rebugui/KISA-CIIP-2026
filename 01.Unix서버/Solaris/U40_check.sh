@@ -81,6 +81,7 @@ diagnose() {
     # NFS 접근 통제 확인
     local nfs_installed=false
     local is_secure=true
+    local share_evidence_found=false
     local issues=()
     local exports_info=""
 
@@ -90,6 +91,7 @@ diagnose() {
         dfstab_entries=$(grep -v '^[[:space:]]*#' /etc/dfs/dfstab 2>/dev/null | grep -v '^[[:space:]]*$' || true)
         if [ -n "$dfstab_entries" ]; then
             nfs_installed=true
+            share_evidence_found=true
             exports_info="${exports_info}/etc/dfs/dfstab 공유(share) 설정 존재\\n${dfstab_entries}\\n\\n"
             judge_share_entries "$dfstab_entries" "dfstab"
         else
@@ -103,8 +105,34 @@ diagnose() {
         share_output=$(share 2>/dev/null || true)
         if [ -n "$share_output" ]; then
             nfs_installed=true
+            share_evidence_found=true
             exports_info="${exports_info}share 명령 공유 자원:\\n${share_output}\\n\\n"
             judge_share_entries "$share_output" "share"
+        fi
+    fi
+
+    # 2-1) Solaris 11 ZFS sharemgr/zfs 공유 설정 확인 (legacy enumeration이 비어 있을 때 보강)
+    if command -v sharemgr >/dev/null 2>&1; then
+        local sharemgr_output
+        sharemgr_output=$(sharemgr show -vp 2>/dev/null || true)
+        if [ -n "$sharemgr_output" ]; then
+            # 기본 그룹(default/zfs)만 있고 실제 공유 경로(\t* 또는 share 라인)가 없으면 evidence 미보강
+            if echo "$sharemgr_output" | grep -Eq '(^|[[:space:]])share[[:space:]]'; then
+                nfs_installed=true
+                share_evidence_found=true
+                exports_info="${exports_info}sharemgr show -vp 공유 자원:\\n${sharemgr_output}\\n\\n"
+            else
+                exports_info="${exports_info}sharemgr show -vp 출력(공유 경로 미검출):\\n${sharemgr_output}\\n\\n"
+            fi
+        fi
+    fi
+    if command -v zfs >/dev/null 2>&1; then
+        local zfs_share_output
+        zfs_share_output=$(zfs get -H -o name,value sharenfs 2>/dev/null | awk '$2 != "off" && $2 != "-" && $2 != ""' || true)
+        if [ -n "$zfs_share_output" ]; then
+            nfs_installed=true
+            share_evidence_found=true
+            exports_info="${exports_info}zfs sharenfs 활성 데이터셋:\\n${zfs_share_output}\\n\\n"
         fi
     fi
 
@@ -158,18 +186,26 @@ diagnose() {
         inspection_summary="NFS 서비스 미사용"
         command_result="NFS service disabled${newline}${exports_info}"
         command_executed="svcs -H -o state svc:/network/nfs/server; share; cat /etc/dfs/dfstab"
-    elif [ "$is_secure" = true ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="NFS 접근 통제 적절히 설정됨"
-        command_result="${exports_info}"
-        command_executed="cat /etc/dfs/dfstab; share; svcs -H -o state svc:/network/nfs/server"
-    else
+    elif [ "$is_secure" = false ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="NFS 접근 통제 미흡: ${issues[*]}"
         command_result="${exports_info}"
-        command_executed="cat /etc/dfs/dfstab; share; svcs -H -o state svc:/network/nfs/server"
+        command_executed="cat /etc/dfs/dfstab; share; svcs -H -o state svc:/network/nfs/server; sharemgr show -vp; zfs get sharenfs"
+    elif [ "$share_evidence_found" = false ]; then
+        # NFS 서비스(SMF)는 online이지만 dfstab/share/sharemgr/zfs 어디서도 공유 enumeration이 없음
+        # → 접근 통제 설정 여부를 정적으로 증명할 수 없으므로 수동 확인 필요
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="NFS 서비스가 활성 상태이나 공유 enumeration이 비어 있어 접근 통제 설정 여부를 자동 판정 불가 — sharemgr show -vp / zfs get sharenfs / dfshares 확인 필요"
+        command_result="${exports_info}"
+        command_executed="cat /etc/dfs/dfstab; share; svcs -H -o state svc:/network/nfs/server; sharemgr show -vp; zfs get sharenfs"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="NFS 접근 통제 적절히 설정됨"
+        command_result="${exports_info}"
+        command_executed="cat /etc/dfs/dfstab; share; svcs -H -o state svc:/network/nfs/server; sharemgr show -vp; zfs get sharenfs"
     fi
 
     # echo ""

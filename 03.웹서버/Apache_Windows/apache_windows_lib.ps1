@@ -134,3 +134,40 @@ function Get-ApacheWindowsConfigText {
         Files = @($visited)
     }
 }
+
+function Get-ApacheWindowsAclInspection {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Paths,
+        [Parameter(Mandatory = $true)][scriptblock]$BroadPrincipalTest,
+        [switch]$IncludeContainerChildren
+    )
+
+    $broad = [System.Collections.Generic.List[string]]::new()
+    $errors = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($path in $Paths) {
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+        $targets = @($path)
+        if ($IncludeContainerChildren -and (Test-Path -LiteralPath $path -PathType Container)) {
+            $targets += @(Get-ChildItem -LiteralPath $path -File -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+        }
+        foreach ($target in $targets) {
+            try {
+                $acl = Get-Acl -LiteralPath $target -ErrorAction Stop
+                foreach ($rule in $acl.Access) {
+                    if ($rule.AccessControlType -eq 'Allow' -and (& $BroadPrincipalTest $rule.IdentityReference)) {
+                        $broad.Add("$target => $($rule.IdentityReference) $($rule.FileSystemRights)") | Out-Null
+                    }
+                }
+            }
+            catch {
+                $errors.Add("$target => ACL read failed: $($_.Exception.Message)") | Out-Null
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Broad  = @($broad)
+        Errors = @($errors)
+    }
+}

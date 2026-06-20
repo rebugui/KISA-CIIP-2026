@@ -84,7 +84,7 @@ diagnose() {
         service_status="${service_status}${newline}/etc/xinetd.d 확인:${newline}"
         for svc in "${vulnerable_services[@]}"; do
             if [ -f "/etc/xinetd.d/${svc}" ]; then
-                local disabled=$(grep -i "disable" /etc/xinetd.d/${svc} | grep -v "^#" | awk '{print $2}' | head -1)
+                local disabled=$(grep -i "disable" /etc/xinetd.d/${svc} | grep -v "^#" | awk -F= '{gsub(/[[:space:]]/,"",$2); print $2}' | head -1)
                 if [ "$disabled" != "yes" ]; then
                     is_secure=false
                     enabled_services+=("xinetd: ${svc}")
