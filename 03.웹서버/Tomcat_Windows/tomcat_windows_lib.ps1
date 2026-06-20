@@ -364,7 +364,12 @@ function Invoke-TomcatWindowsCheck {
             $bad = @($limits | Where-Object { $_ -match '=(-1|0)$' })
             # Also check web.xml multipart-config for upload size limits (criteria_good: Step 2)
             $webLimits = @([regex]::Matches($webTextActive, '(?is)<max-(?:file|request)-size>\s*(\d+)\s*</max-(?:file|request)-size>') | Where-Object { [int]$_.Groups[1].Value -gt 0 } | ForEach-Object { $_.Value.Trim() })
-            if ($bad.Count -gt 0 -or ($limits.Count -eq 0 -and $webLimits.Count -eq 0)) { return New-TomcatResult 'VULNERABLE' 'Tomcat upload/request size limits are missing or unlimited.' (($limits + $webLimits + "server.xml files: $($state.ServerXml -join ', ')") -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config' }
+            if ($bad.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat upload/request size limits are missing or unlimited.' (($limits + $webLimits + "server.xml files: $($state.ServerXml -join ', ')") -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config' }
+            # conf/server.xml과 conf/web.xml이 모두 부재/판독불가이면(서비스/프로세스로만 Tomcat이 탐지된 경우)
+            # 업로드 크기 제한 정책 자체를 정적으로 확인할 수 없으므로 GOOD/VULNERABLE을 단정하지 말고 MANUAL 처리
+            # (WEB-05/15/19/22 패턴과 동일한 evidence-unobtainable 가드).
+            if (($state.ServerXml.Count -eq 0 -and $state.WebXml.Count -eq 0) -or ([string]::IsNullOrWhiteSpace($serverText) -and [string]::IsNullOrWhiteSpace($webText))) { return New-TomcatResult 'MANUAL' 'No readable Tomcat server.xml/web.xml was found; upload size-limit policy cannot be confirmed. Verify manually.' "server.xml files: $($state.ServerXml -join ', '); web.xml files: $($state.WebXml -join ', ')" 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config' }
+            if ($limits.Count -eq 0 -and $webLimits.Count -eq 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat upload/request size limits are missing or unlimited.' (($limits + $webLimits + "server.xml files: $($state.ServerXml -join ', ')") -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config' }
             return New-TomcatResult 'GOOD' 'Tomcat upload/request size limits are configured.' (($limits + $webLimits) -join "`n") 'Parse server.xml maxPostSize/maxSavePostSize and web.xml multipart-config'
         }
         'WEB-09' {
@@ -463,6 +468,10 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'GOOD' 'Tomcat Connector server header appears to be masked.' ($serverAttrs -join ', ') 'Parse server.xml Connector server attribute'
         }
         'WEB-17' {
+            # Tomcat is detected but no webapps directory could be resolved (broken/partial install, stale service PathName,
+            # non-default appBase). Zero inspectable directories cannot statically prove absence of unnecessary virtual
+            # directories — route to MANUAL (mirrors WEB-14 line 433 / WEB-15/16/19/22 evidence-unobtainable pattern).
+            if ($state.Webapps.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Tomcat installation detected but no inspectable webapps directory was resolved; virtual directory state cannot be confirmed. Verify manually.' $evidencePrefix 'Inspect Tomcat webapps virtual directories' }
             $virtuals = @($state.Webapps | ForEach-Object { Get-ChildItem -LiteralPath $_ -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName })
             # Tomcat-shipped stock virtual directories only (mirroring WEB-07 lines 346-349 and Linux WEB17 peer).
             # 'sample/samples/test/backup/tmp/old' are arbitrary user-chosen webapp context names (e.g. backup.war

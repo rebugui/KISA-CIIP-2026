@@ -32,6 +32,10 @@ try {
     $sitesWithoutSSL = @()
     $sitesWithSSL = @()
 
+    if ((-not $sites) -or (@($sites).Count -eq 0)) {
+        throw "EMPTY_SITES: 점검할 웹사이트가 없어 SSL/TLS 활성화 여부를 단정할 수 없음 - 수동 확인 필요"
+    }
+
     foreach ($site in $sites) {
         $siteName = $site.Name
         $bindings = Get-WebBinding -Name $siteName
@@ -66,10 +70,15 @@ try {
 
 } catch {
     $finalResult = "MANUAL"
-    $summary = "진단 실패: 수동 확인 필요"
     $status = "수동진단"
     $commandExecuted = "Get-Website; Get-WebBinding -Name [SiteName]"
-    $commandOutput = "진단 실패: $_"
+    if ("$_" -like "*EMPTY_SITES*") {
+        $summary = "점검할 웹사이트가 없어 SSL/TLS 활성화 여부를 단정할 수 없음 - 수동 확인 필요"
+        $commandOutput = "Get-Website returned no sites"
+    } else {
+        $summary = "진단 실패: 수동 확인 필요"
+        $commandOutput = "진단 실패: $_"
+    }
 }
 
 # 2. lib를 통한 결과 저장

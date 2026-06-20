@@ -105,23 +105,16 @@ diagnose() {
         local equiv_perms=$(perl -e '@s=stat(shift); printf "%04o", $s[2] & 07777' "$equiv_file" 2>/dev/null || echo "0000")
         local equiv_owner=$(echo "$equiv_info" | awk '{print $3}')
 
-        # hosts.equiv는 root 소유자이어야 하며 group/other 쓰기 권한 없어야 함
-        # (perl 출력은 "0644" 형태 → 10진수로 강제 변환 후 쓰기 비트(2) 검사)
-        local equiv_perm_num=$(( 10#${equiv_perms:-0} ))
-        local equiv_group_write=$(( (equiv_perm_num / 10) % 10 & 2 ))
-        local equiv_other_write=$(( equiv_perm_num % 10 & 2 ))
-        if [ "$equiv_owner" != "root" ] || [ "$equiv_group_write" -ne 0 ] || [ "$equiv_other_write" -ne 0 ]; then
-            equiv_secure=false
-            equiv_details=", /etc/hosts.equiv - 권한: $equiv_perms, 소유자: $equiv_owner"
-        else
-            equiv_details=", /etc/hosts.equiv - 양호 (권한: $equiv_perms, 소유자: $equiv_owner)"
-        fi
+        # hosts.equiv는 U-19 오라클 범위 밖(rhosts/hosts.equiv 항목 별도)이므로
+        # 판정에 영향을 주지 않고 정보용으로만 노출한다.
+        equiv_details=", /etc/hosts.equiv - 권한: $equiv_perms, 소유자: $equiv_owner (참고)"
     fi
 
     # 최종 판정 (MANUAL이 설정된 경우 덮어쓰지 않음)
+    # 오라클: /etc/hosts 단독 — 소유자 root + 권한 <= 644
     if [ "$diagnosis_result" = "MANUAL" ]; then
         :
-    elif [ "$hosts_secure" = true ] && [ "$equiv_secure" = true ]; then
+    elif [ "$hosts_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="/etc/hosts 보안 설정 적절${equiv_details}"

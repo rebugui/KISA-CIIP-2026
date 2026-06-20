@@ -68,7 +68,7 @@ diagnose() {
         fi
 
         # 권한이 600 초과인 경우 (600을 넘는 비트가 있으면 취약)
-        if ! [[ "$equiv_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$equiv_perm ))" -gt "$(( 8#600 ))" ] 2>/dev/null; then
+        if ! [[ "$equiv_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$equiv_perm & ~8#600 & 07777 ))" -ne 0 ] 2>/dev/null; then
             status="취약"
             diagnosis_result="VULNERABLE"
             evidence="${evidence} [권한 초과]"
@@ -121,7 +121,7 @@ diagnose() {
             fi
 
             # 권한이 600 초과인 경우 (600을 넘는 비트가 있으면 취약)
-            if ! [[ "$rhosts_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$rhosts_perm ))" -gt "$(( 8#600 ))" ] 2>/dev/null; then
+            if ! [[ "$rhosts_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$rhosts_perm & ~8#600 & 07777 ))" -ne 0 ] 2>/dev/null; then
                 status="취약"
                 diagnosis_result="VULNERABLE"
                 evidence="${evidence} [권한 초과]"

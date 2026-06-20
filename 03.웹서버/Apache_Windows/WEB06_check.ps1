@@ -85,17 +85,14 @@ try {
             $evidence += $authDirectives
             $evidence += $explicitDeny
         }
-        elseif ($explicitDeny.Count -gt 0) {
-            $finalResult = "GOOD"
-            $status = "양호"
-            $summary = "Apache configuration contains explicit deny directives for directory access control."
-            $evidence += "Matched explicit deny directives:"
-            $evidence += $explicitDeny
-        }
         else {
             $finalResult = "MANUAL"
             $status = "수동진단"
-            $summary = "Apache configuration was found, but parent-directory traversal protection cannot be proven from static config alone. Verify Directory blocks, authentication, and runtime '..' path handling manually."
+            $summary = "Apache configuration was found, but parent-directory traversal protection cannot be proven from static config alone. Verify Directory blocks, authentication, AllowOverride scope, and runtime '..' path handling manually."
+            if ($explicitDeny.Count -gt 0) {
+                $evidence += "Explicit deny directives (root-only deny does not prove parent-traversal protection on served vhosts):"
+                $evidence += $explicitDeny
+            }
             if ($directoryBlocks.Count -gt 0) {
                 $evidence += "Directory block markers:"
                 $evidence += $directoryBlocks

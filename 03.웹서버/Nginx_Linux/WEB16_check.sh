@@ -81,10 +81,14 @@ diagnose() {
         echo "[INFO] pgrep command missing, skipping process check."
     fi
 
+    # 확장자 없는 vhost(예: 데비안/우분투의 sites-enabled/default 심볼릭 링크)도
+    # 포함되도록 .conf 글롭과 확장자 없는 디렉터리 글롭을 함께 사용한다.
     local nginx_conf_locations=(
         "/etc/nginx/nginx.conf"
         "/etc/nginx/conf.d/*.conf"
+        "/etc/nginx/conf.d/*"
         "/etc/nginx/sites-enabled/*.conf"
+        "/etc/nginx/sites-enabled/*"
     )
 
     local header_settings=""

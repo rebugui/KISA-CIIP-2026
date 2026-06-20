@@ -110,7 +110,13 @@ try {
 
     $commandExecuted = "Get-Website; Get-WebConfiguration -Filter '/system.webServer/httpProtocol/customHeaders'; Get-WebConfiguration -Filter '/system.webServer/security/requestFiltering' @removeServerHeader; Get-WebConfiguration -Filter '/system.webServer/rewrite/outboundRules'; Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\HTTP\Parameters' -Name DisableServerHeader"
 
-    if ($headerUnknownCount -gt 0) {
+    if ((-not $sites) -or (@($sites).Count -eq 0)) {
+        # 점검할 웹사이트가 없음 -> 정적 설정만으로 응답 헤더 노출 여부를 단정할 수 없음 (unknowable -> MANUAL)
+        $finalResult = "MANUAL"
+        $summary = "점검할 웹사이트가 없어 응답 헤더 노출 여부를 정적으로 단정할 수 없음 - 수동 확인 필요"
+        $status = "수동진단"
+        $commandOutput = "Get-Website returned no sites; static configuration cannot prove header restriction. Manual verification required."
+    } elseif ($headerUnknownCount -gt 0) {
         # 일부 사이트에서 정적 설정만으로 제거 여부를 단정할 수 없음 -> 수동 확인 필요
         $finalResult = "MANUAL"
         $summary = "정적 설정(customHeaders/requestFiltering/outboundRules/레지스트리)에서 Server 헤더 제거 근거를 확인하지 못한 사이트가 있습니다. HTTP 응답 헤더를 직접 확인하여 노출 여부를 판단하십시오: " + ($siteInfo -join ", ")

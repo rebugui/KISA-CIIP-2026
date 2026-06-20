@@ -49,15 +49,21 @@ try {
         $commandExecuted = "Discover Nginx Windows process/service configuration paths"
     }
     else {
-        $roots = @((Get-NginxRootPaths -State $state) + (Get-NginxDefaultRootCandidates) | Select-Object -Unique)
+        # WEB-14 미러: 설정된 root는 존재하지만 실제 경로 확인(resolve)이 불가한 경우를 추적한다.
+        # (환경변수 미확장, UNC 오프라인, 사용자 지정 경로 부재 등) 이때 어떤 웹 루트도
+        # 스캔되지 못하므로 양호로 단정하지 않고 수동진단으로 유도한다.
+        $configuredRoots = @(Get-NginxRootPaths -State $state)
+        $roots = @(($configuredRoots + (Get-NginxDefaultRootCandidates)) | Select-Object -Unique)
         $aliases = @(Get-NginxAliasPaths -State $state)
         $linkFindings = [System.Collections.Generic.List[string]]::new()
         $scanIncomplete = $false
+        $scannedRootCount = 0
 
         foreach ($root in $roots) {
             if (-not (Test-Path -LiteralPath $root -PathType Container)) {
                 continue
             }
+            $scannedRootCount++
             # 심볼릭 링크/바로가기 누락을 막기 위해 스캔 결과를 절단(Select-Object -First N)하지 않는다.
             # 열거 중 오류가 발생하면 불완전 스캔으로 표시하여 양호 단정을 방지한다.
             $scanErrors = $null
@@ -70,6 +76,7 @@ try {
                 $scanIncomplete = $true
             }
         }
+        $webRootUnresolved = ($roots.Count -gt 0 -and $scannedRootCount -eq 0)
 
         $commandExecuted = "Inspect Nginx alias directives and all reparse/link files under configured roots (no result cap)"
         $commandOutput = (@(
@@ -98,7 +105,13 @@ try {
             $status = "수동진단"
             $summary = "Web root link scan was incomplete due to enumeration errors (access denied/long paths). Manually verify that no symbolic links or shortcuts expose unauthorized paths."
         }
-        elseif ($roots.Count -gt 0) {
+        elseif ($webRootUnresolved) {
+            # 설정에 root는 존재하나 실제 경로를 확인하지 못해 어떤 웹 루트도 스캔하지 못함 → 양호 단정 불가
+            $finalResult = "MANUAL"
+            $status = "수동진단"
+            $summary = "Nginx root directive(s) exist but the web root path could not be resolved; verify symlinks/aliases manually."
+        }
+        elseif ($scannedRootCount -gt 0) {
             $finalResult = "GOOD"
             $status = "양호"
             $summary = "No Nginx alias directives or reparse/link files were found under resolved web roots."

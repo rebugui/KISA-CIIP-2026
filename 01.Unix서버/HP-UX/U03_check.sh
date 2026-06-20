@@ -119,6 +119,13 @@ diagnose() {
             status="취약"
             inspection_summary="계정 잠금 임계값 부적절 (Trusted Mode u_maxtries#${u_maxtries}, 0은 잠금 미적용)"
         fi
+    elif [ "$trusted_mode" = true ]; then
+        # Trusted Mode이며 /tcb 기본 DB는 읽었으나 u_maxtries# 항목이 없는 경우
+        # KISA 가이드라인: Trusted Mode에서 잠금 정책은 /tcb가 관할하며 AUTH_MAXTRIES는 적용되지 않음(※ Standard/Shadow 모드 전용)
+        # u_maxtries# 미설정 → 실질적으로 잠금 임계값 미적용이나 상위 정책/SAM 설정 영향이 있을 수 있어 수동진단으로 라우팅
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Trusted Mode에서 ${tcb_default}에 u_maxtries# 항목이 없어 잠금 임계값을 확인할 수 없음. AUTH_MAXTRIES는 Trusted Mode에서 적용되지 않으므로 수동 점검 필요 (AUTH_MAXTRIES=${auth_maxtries:-미설정})"
     elif [ -n "$auth_maxtries" ] && [ "$auth_maxtries" -ge 1 ] && [ "$auth_maxtries" -le 10 ]; then
         diagnosis_result="GOOD"
         status="양호"

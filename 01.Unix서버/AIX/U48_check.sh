@@ -64,7 +64,7 @@ diagnose() {
     local exim_present=false
     local exim_conf=""
     local exim_conf_candidate=""
-    for exim_conf_candidate in /etc/exim/exim.conf /etc/exim.conf /etc/exim4/exim4.conf /usr/local/etc/exim/configure; do
+    for exim_conf_candidate in /etc/exim/exim.conf /etc/exim.conf /etc/exim4/exim4.conf /usr/local/etc/exim/configure /opt/freeware/etc/exim/configure; do
         if [ -f "$exim_conf_candidate" ]; then
             exim_conf="$exim_conf_candidate"
             exim_present=true
@@ -125,6 +125,7 @@ diagnose() {
     # 3. 사용 중인 MTA별 expn/vrfy 제한 설정 확인
     # ==========================================================================
     local leg_vulnerable=false
+    local leg_manual=false
     local details=""
 
     # 3-1. Sendmail: PrivacyOptions에 (noexpn AND novrfy) 또는 goaway 필요
@@ -187,22 +188,31 @@ diagnose() {
         if echo "${exim_vrfy_acl} ${exim_expn_acl}" | grep -qi "accept"; then
             leg_vulnerable=true
             details="${details}[Exim] acl_smtp_vrfy/acl_smtp_expn=accept - vrfy/expn 명령 허용 상태; "
-        else
+        elif [ -z "$exim_vrfy_acl" ] && [ -z "$exim_expn_acl" ] && [ -z "$exim_conf" ]; then
+            leg_manual=true
+            details="${details}[Exim] 사용 중이나 설정 파일을 확인할 수 없음 (exim -bP 응답 없음, 표준 경로에 설정 파일 없음) - 수동 점검 필요; "
+        elif [ -n "$exim_vrfy_acl" ] || [ -n "$exim_expn_acl" ]; then
             details="${details}[Exim] acl_smtp_vrfy=${exim_vrfy_acl:-미설정(기본거부)}, acl_smtp_expn=${exim_expn_acl:-미설정(기본거부)}; "
+        else
+            details="${details}[Exim] acl_smtp_vrfy/acl_smtp_expn 미설정 (기본 거부); "
         fi
     fi
 
     # ==========================================================================
     # 4. 판정
     # ==========================================================================
-    if [ "$leg_vulnerable" = false ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="사용 중인 SMTP 서비스의 expn, vrfy 명령어가 제한되어 있습니다. (${details})"
-    else
+    if [ "$leg_vulnerable" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="사용 중인 SMTP 서비스에서 expn/vrfy 명령어 제한 설정이 미흡합니다. (${details})"
+    elif [ "$leg_manual" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="SMTP 서비스의 expn/vrfy 제한 설정을 자동 판정할 수 없습니다 - 수동 점검 필요. (${details})"
+    else
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="사용 중인 SMTP 서비스의 expn, vrfy 명령어가 제한되어 있습니다. (${details})"
     fi
 
     command_result="${details}"

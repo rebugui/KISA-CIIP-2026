@@ -49,6 +49,11 @@ diagnose() {
         local file_perm=$(stat -c "%a" "$file_path")
         local ls_out=$(ls -l "$file_path")
 
+        # GNU stat outputs unpadded octal (e.g. mode 0000 -> "0"); pre-pad to 4 digits so regex/mask logic stays correct on default RHEL 8/9 shadow (mode 000).
+        if [[ "$file_perm" =~ ^[0-7]+$ ]]; then
+            file_perm=$(printf '%04o' "$((8#$file_perm))")
+        fi
+
         if [ "$owner_name" != "root" ] || ! [[ "$file_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$file_perm & ~8#400 & 07777 ))" -ne 0 ]; then
             status="취약"
             diagnosis_result="VULNERABLE"

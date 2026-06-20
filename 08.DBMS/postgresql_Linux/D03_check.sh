@@ -56,6 +56,7 @@ diagnose() {
     local command_result=""
     local command_executed=""
     local vulnerabilities_found=0
+    local encryption_indeterminate=0
     local expiry_indeterminate=0
     local complexity_indeterminate=0
 
@@ -79,6 +80,9 @@ diagnose() {
     fi
 
     # 비밀번호 암호화 방식 확인
+    # SHOW password_encryption 실패/빈 결과 시 양호로도 취약으로도 단정할 수 없으므로
+    # 만료/복잡도 검사와 동일하게 indeterminate 플래그를 세워 수동진단으로 강등한다
+    # (거짓 양호 방지와 동시에 일시 오류로 인한 거짓 취약 방지).
     local password_enc_query="SHOW password_encryption;"
     command_result=$(PGPASSWORD="${DB_ADMIN_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_ADMIN_USER}" -d postgres -t -c "${password_enc_query}" 2>/dev/null | xargs || echo "")
 
@@ -90,8 +94,10 @@ diagnose() {
             inspection_summary+="취약: 비밀번호 암호화가 ${command_result}로 설정됨; "
         fi
     else
-        ((vulnerabilities_found++)) || true
-        inspection_summary+="취약: 비밀번호 암호화 설정 확인 불가; "
+        # 암호화 설정 조회 결과가 비어 있음(권한 오류/일시 장애 등):
+        # 양호/취약 어느 쪽으로도 단정할 수 없으므로 수동진단으로 강등
+        encryption_indeterminate=1
+        inspection_summary+="수동확인 필요: 비밀번호 암호화 설정 조회 불가(결과 불명확); "
     fi
 
     # 비밀번호 만료 정책 확인
@@ -137,11 +143,11 @@ diagnose() {
     if [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
-    elif [ $expiry_indeterminate -gt 0 ] || [ $complexity_indeterminate -gt 0 ]; then
-        # 만료 정책 또는 복잡도 강제 여부를 검증할 수 없으면 양호로 단정 불가 -> 수동진단 (거짓 양호 방지)
+    elif [ $encryption_indeterminate -gt 0 ] || [ $expiry_indeterminate -gt 0 ] || [ $complexity_indeterminate -gt 0 ]; then
+        # 암호화/만료 정책/복잡도 강제 여부를 검증할 수 없으면 양호로 단정 불가 -> 수동진단 (거짓 양호 방지)
         diagnosis_result="MANUAL"
         status="수동진단"
-        inspection_summary+="비밀번호 만료 정책 또는 복잡도 강제 여부 검증 불가로 자동 양호 판단 불가 (수동진단 필요); "
+        inspection_summary+="비밀번호 암호화/만료 정책 또는 복잡도 강제 여부 검증 불가로 자동 양호 판단 불가 (수동진단 필요); "
     else
         diagnosis_result="GOOD"
         status="양호"

@@ -98,12 +98,26 @@ diagnose() {
     fi
 
     # 불필요한 계정 확인 (test 계정, 데모 계정 등)
+    # 가이드 항목명: "제거하거나, 잠금 설정 후 사용" → account_locked='Y' 행은 적격(양호).
+    # MySQL 5.7+/8.x는 mysql.user.account_locked 컬럼 보유. MariaDB / MySQL 5.6은 미보유 → 폴백.
     # 연결 가드를 통과한 후이므로, 빈 결과는 "0행"이 아니라 쿼리 오류(권한 부족 등)를 의미함.
-    # 정상 0행과 오류/공백을 구분하기 위해 종료 코드와 표식 행을 사용.
-    local unused_accounts_query="SELECT user, host FROM mysql.user WHERE user IN ('test', 'guest', 'demo', 'anonymous', '');"
+    local unused_accounts_query="SELECT user, host, account_locked FROM mysql.user WHERE user IN ('test', 'guest', 'demo', 'anonymous', '');"
     command_executed="mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p*** -e \"${unused_accounts_query}\""
     local query_ok=1
+    local has_locked_col=1
     command_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${unused_accounts_query}" 2>/dev/null) || query_ok=0
+
+    # account_locked 컬럼이 없는 경우(MariaDB / MySQL 5.6) 폴백 쿼리 재시도
+    if [ "$query_ok" -eq 0 ]; then
+        local fallback_query="SELECT user, host FROM mysql.user WHERE user IN ('test', 'guest', 'demo', 'anonymous', '');"
+        local fb_result
+        fb_result=$(mysql -h "${DB_HOST}" -P "${DB_PORT}" -u "${DB_USER}" -p"${DB_PASSWORD}" -e "${fallback_query}" 2>/dev/null) && {
+            query_ok=1
+            has_locked_col=0
+            command_result="$fb_result"
+            command_executed="mysql -h ${DB_HOST} -P ${DB_PORT} -u ${DB_USER} -p*** -e \"${fallback_query}\""
+        } || true
+    fi
 
     # 결과 분석
     if [ "$query_ok" -eq 0 ]; then
@@ -112,18 +126,39 @@ diagnose() {
         status="수동진단"
         inspection_summary="쿼리 결과 확인 불가 - 권한 부족 가능. mysql.user 조회 권한으로 불필요 계정 존재 여부 수동 확인 필요"
     elif [ -n "$command_result" ]; then
-        local user_count=$(echo "$command_result" | tail -n +2 | grep -v "^$" | wc -l)
+        local total_rows
+        total_rows=$(echo "$command_result" | tail -n +2 | grep -v "^$" | wc -l)
 
-        if [ "$user_count" -gt 0 ]; then
-            ((vulnerabilities_found++)) || true
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="불필요한 계정 ${user_count}개 발견: $(echo "$command_result" | tail -n +2 | head -5 | tr '\n' ', ')"
-        else
+        if [ "$total_rows" -le 0 ]; then
             # 쿼리는 성공했고 0행 → 불필요 계정 없음(양호). absence=good.
             diagnosis_result="GOOD"
             status="양호"
             inspection_summary="불필요한 계정 없음"
+        elif [ "$has_locked_col" -eq 1 ]; then
+            # MySQL 5.7+/8.x: account_locked 컬럼 기반 판정
+            # 3번째 필드(탭 구분)가 'Y'가 아닌 행만 취약으로 집계 (잠금된 계정은 양호)
+            local unlocked_rows
+            unlocked_rows=$(echo "$command_result" | tail -n +2 | grep -v "^$" \
+                | awk -F'\t' 'NF<3 || $3 != "Y"' || true)
+            local unlocked_count
+            unlocked_count=$(echo "$unlocked_rows" | grep -v "^$" | wc -l)
+
+            if [ "$unlocked_count" -gt 0 ]; then
+                ((vulnerabilities_found++)) || true
+                diagnosis_result="VULNERABLE"
+                status="취약"
+                inspection_summary="잠금되지 않은 불필요 계정 ${unlocked_count}개 발견 (account_locked!='Y'): $(echo "$unlocked_rows" | head -5 | tr '\n' ', ')"
+            else
+                # 모든 해당 행이 account_locked='Y' → 가이드의 "잠금 설정 후 사용" 적격 → 양호
+                diagnosis_result="GOOD"
+                status="양호"
+                inspection_summary="불필요 계정명이 ${total_rows}개 존재하나 모두 잠금 상태(account_locked='Y') - 가이드의 '잠금 설정 후 사용' 적격"
+            fi
+        else
+            # MariaDB / MySQL 5.6: account_locked 컬럼이 없어 자동 잠금 여부 확인 불가 → 수동
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="불필요 계정명 ${total_rows}개 존재. 본 DB 엔진은 account_locked 컬럼이 없어 잠금 여부 자동 확인 불가. 계정별 잠금/삭제 여부 수동 확인 필요: $(echo "$command_result" | tail -n +2 | head -5 | tr '\n' ', ')"
         fi
     else
         # 헤더조차 없는 공백 출력 → 쿼리 결과 확인 불가

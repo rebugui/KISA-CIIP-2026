@@ -106,17 +106,17 @@ diagnose() {
         status="취약"
         inspection_summary="proftpd 설정에서 RootLogin on으로 root FTP 접속이 허용되어 있습니다(${proftpd_conf})."
         command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login}, UseFtpUsers: ${proftpd_use_ftpusers:-on(기본값)}"
+    elif [ -n "$proftpd_conf" ] && [ "$proftpd_root_login" = "off" ]; then
+        # proftpd RootLogin off는 ftpusers/UseFtpUsers와 무관하게 root FTP 접속을 차단함
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="proftpd RootLogin off 설정으로 root FTP 접속이 차단되어 있습니다(${proftpd_conf})."
+        command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login}, UseFtpUsers: ${proftpd_use_ftpusers:-미설정}"
     elif [ -n "$proftpd_conf" ] && [ "$proftpd_use_ftpusers" = "off" ]; then
-        # UseFtpUsers off이면 ftpusers 파일이 적용되지 않음 → 다른 차단 수단(RootLogin off) 필요
-        if [ "$proftpd_root_login" = "off" ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="proftpd UseFtpUsers off 설정이나 RootLogin off로 root FTP 접속이 차단되어 있습니다(${proftpd_conf})."
-        else
-            diagnosis_result="VULNERABLE"
-            status="취약"
-            inspection_summary="proftpd UseFtpUsers off 설정으로 ftpusers 파일이 적용되지 않으며, RootLogin 차단 설정이 없습니다(${proftpd_conf})."
-        fi
+        # UseFtpUsers off이면 ftpusers 파일이 적용되지 않음 → RootLogin 차단 설정이 없으면 취약
+        diagnosis_result="VULNERABLE"
+        status="취약"
+        inspection_summary="proftpd UseFtpUsers off 설정으로 ftpusers 파일이 적용되지 않으며, RootLogin 차단 설정이 없습니다(${proftpd_conf})."
         command_result="[Command: grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}]${newline}RootLogin: ${proftpd_root_login:-미설정}, UseFtpUsers: ${proftpd_use_ftpusers}"
     elif [ -n "$vsftpd_conf_found" ] && grep -qiE '^[[:space:]]*userlist_deny[[:space:]]*=[[:space:]]*NO' "$vsftpd_conf_found" 2>/dev/null; then
         # vsftpd allow-list 모드(userlist_deny=NO): user_list가 허용 목록으로 동작하여

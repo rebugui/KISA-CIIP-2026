@@ -80,6 +80,13 @@ diagnose() {
         local file_user=$(stat -c "%U" "$target_file" 2>/dev/null)
         local file_owner=$(stat -c "%U:%G" "$target_file" 2>/dev/null)
 
+        # 4자리 8진수로 zero-pad 정규화 (예: stat -c "%a" → "0"/"4"/"40" → "0000"/"0004"/"0040")
+        # 정규화하지 않으면 후속 정규식 ^[0-7]{3,4}$ 가 1-2자리 출력을 거부하여
+        # 더 엄격한(예: chmod 000) 설정도 취약으로 오판한다.
+        if [ -n "$file_perms" ]; then
+            file_perms=$(printf '%04o' "$((8#${file_perms}))" 2>/dev/null || echo "$file_perms")
+        fi
+
         # 소유자(사용자) 및 권한 확인 (400 이하)
         # KISA 기준은 "소유자가 root" — 그룹은 판정 대상이 아님. Debian 표준 root:shadow(640)도
         # 소유자 자체로 취약 처리하지 않는다(단, 640 권한은 ≤400 기준에 따라 별도로 취약).

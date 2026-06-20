@@ -105,6 +105,7 @@ diagnose() {
         command_result="sendmail.cf: 없음 / postfix: 없음 / exim: 없음 / SMTP 데몬: 미실행"
     else
         local leg_vulnerable=false
+        local leg_manual=false
         local details=""
 
         # 2-1. Sendmail: PrivacyOptions에 (noexpn AND novrfy) 또는 goaway 필요
@@ -162,23 +163,29 @@ diagnose() {
             if echo "${vrfy_acl}${expn_acl}" | grep -qi "accept"; then
                 leg_vulnerable=true
                 details="${details}[Exim] vrfy/expn 허용(accept) 설정 발견 (${vrfy_acl} ${expn_acl}); "
-            elif [ -z "$exim_conf" ] && [ "$exim_running" = true ]; then
-                # 실행 중이나 설정 파일을 찾지 못한 경우 수동 점검 권고
+            elif [ -z "$exim_conf" ] && { [ "$exim_running" = true ] || [ "$exim_present" = true ]; }; then
+                # 실행 중이거나 Exim 바이너리는 존재하나 설정 파일을 표준 경로에서 찾지 못한 경우
+                # (EPEL/소스 빌드의 비표준 경로 등) 자동 판정 불가 -> 수동 점검 권고
+                leg_manual=true
                 details="${details}[Exim] 데몬 실행 중이나 설정 파일 미발견 - acl_smtp_vrfy/acl_smtp_expn 수동 확인 필요; "
             else
                 details="${details}[Exim] acl_smtp_vrfy/acl_smtp_expn 허용(accept) 설정 없음 (Exim 기본값: vrfy/expn 거부); "
             fi
         fi
 
-        # 3. 판정
-        if [ "$leg_vulnerable" = false ]; then
-            diagnosis_result="GOOD"
-            status="양호"
-            inspection_summary="사용 중인 SMTP 서비스의 expn, vrfy 명령어가 제한되어 있습니다. (${details})"
-        else
+        # 3. 판정 (우선순위: VULNERABLE > MANUAL > GOOD)
+        if [ "$leg_vulnerable" = true ]; then
             diagnosis_result="VULNERABLE"
             status="취약"
             inspection_summary="사용 중인 SMTP 서비스에서 expn/vrfy 명령어 제한 설정이 미흡합니다. (${details})"
+        elif [ "$leg_manual" = true ]; then
+            diagnosis_result="MANUAL"
+            status="수동진단"
+            inspection_summary="SMTP 서비스 설정을 자동으로 확인할 수 없어 수동 점검이 필요합니다. (${details})"
+        else
+            diagnosis_result="GOOD"
+            status="양호"
+            inspection_summary="사용 중인 SMTP 서비스의 expn, vrfy 명령어가 제한되어 있습니다. (${details})"
         fi
         command_result="${details}"
     fi

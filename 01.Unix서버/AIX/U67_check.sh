@@ -102,8 +102,8 @@ diagnose() {
         return 0
     fi
 
-    # Capture raw output for /var/log directory and files (AIX uses perl for stat)
-    raw_output=$(echo "=== /var/log Directory Info ===" && ls -ld /var/log 2>/dev/null && echo -e "\n=== Critical Log Files ===" && ls -la /var/log/syslog 2>/dev/null; echo -e "\n=== Group/World-Writable Files ===" && find /var/log -type f \( -perm -o+w -o -perm -g+w \) 2>/dev/null | head -5; echo -e "\n=== Non-root Owned Files ===" && find /var/log -type f ! -user root ! -user syslog 2>/dev/null | head -5 || echo "None found")
+    # Capture raw output for /var/log and /var/adm (AIX system logs live under /var/adm)
+    raw_output=$(echo "=== /var/log + /var/adm Directory Info ===" && ls -ld /var/log /var/adm 2>/dev/null && echo -e "\n=== Critical Log Files (AIX) ===" && ls -la /var/adm/syslog/syslog.log /var/adm/sulog /var/adm/wtmp /var/adm/messages /var/adm/loginlog /var/adm/authlog 2>/dev/null; echo -e "\n=== Group/World-Writable Files ===" && find /var/log /var/adm -type f \( -perm -o+w -o -perm -g+w \) 2>/dev/null | head -5; echo -e "\n=== Non-root Owned Files ===" && find /var/log /var/adm -type f ! -user root ! -user syslog ! -user adm ! -user sys 2>/dev/null | head -5 || echo "None found")
 
     # 권한 및 소유자 확인 (AIX: stat -c 미지원, perl 사용)
     local perms=$(perl -le 'printf "%04o\n", (stat shift)[2] & 07777' "$log_dir" 2>/dev/null || echo "0000")
@@ -137,9 +137,9 @@ diagnose() {
                if [[ "$f_perms" =~ ^[0-7]{3,4}$ ]] && [ $(( (8#${f_perms}) & (8#7133) )) -ne 0 ]; then
                    insecure_files="${insecure_files}${f_path}(perm:${f_perms}) "
                fi
-           done <<< "$(find "$log_dir" -type f 2>/dev/null)"
-           # Check for files not owned by root (syslog 데몬 소유는 허용)
-           local nonroot_files=$(find "$log_dir" -type f ! -user root ! -user syslog 2>/dev/null | head -5)
+           done <<< "$(find "$log_dir" /var/adm -type f 2>/dev/null)"
+           # Check for files not owned by root (AIX 시스템 로그 데몬 소유 adm/sys/syslog 허용)
+           local nonroot_files=$(find "$log_dir" /var/adm -type f ! -user root ! -user syslog ! -user adm ! -user sys 2>/dev/null | head -5)
 
            if [ -n "$insecure_files" ]; then
                 is_secure=false
@@ -148,21 +148,21 @@ diagnose() {
                 is_secure=false
                 details="${details}, Non-root owned files found: ${nonroot_files}..."
            else
-                # Check specific critical logs
-                local critical_logs=("syslog" "auth.log" "kern.log" "daemon.log" "mail.log")
+                # Check specific critical logs (AIX-native /var/adm 경로)
+                local critical_logs=("/var/adm/syslog/syslog.log" "/var/adm/sulog" "/var/adm/wtmp" "/var/adm/messages" "/var/adm/loginlog" "/var/adm/authlog")
                 local crit_issue=false
-                
+
                 for log in "${critical_logs[@]}"; do
-                    if [ -f "$log_dir/$log" ]; then
+                    if [ -f "$log" ]; then
                         evidence_found=true
-                        local l_perm=$(perl -le 'printf "%04o\n", (stat shift)[2] & 07777' "$log_dir/$log" 2>/dev/null || echo "0000")
-                        local l_owner=$(perl -le 'print +(getpwuid((stat shift)[4]))[0]' "$log_dir/$log" 2>/dev/null || echo "unknown")
-                        
+                        local l_perm=$(perl -le 'printf "%04o\n", (stat shift)[2] & 07777' "$log" 2>/dev/null || echo "0000")
+                        local l_owner=$(perl -le 'print +(getpwuid((stat shift)[4]))[0]' "$log" 2>/dev/null || echo "unknown")
+
                         # Expected: 600 or 640. 644 is arguably OK if info leakage is not critical, but guideline says <= 644.
                         # If > 644 (e.g. 666), bad.
-                        
-                        if [ "$l_owner" != "root" ] && [ "$l_owner" != "syslog" ]; then
-                            # Allow syslog user owner
+
+                        if [ "$l_owner" != "root" ] && [ "$l_owner" != "syslog" ] && [ "$l_owner" != "adm" ] && [ "$l_owner" != "sys" ]; then
+                            # AIX 시스템 로그 데몬 소유자(root/syslog/adm/sys) 허용
                             crit_issue=true
                             details="${details}, ${log} owner invalid ($l_owner)"
                         fi
@@ -195,7 +195,7 @@ diagnose() {
         details="${details} (디렉토리 소유자 취약)"
     fi
 
-    command_executed="perl -le 'printf \"%04o %s %s\n\", (stat \"/var/log\")[2]&0777, (getpwuid((stat \"/var/log\")[4]))[0], (getgrgid((stat \"/var/log\")[5]))[0]' && find /var/log -type f \\( -perm -o+w -o -perm -g+w \\) && find /var/log -type f ! -user root ! -user syslog"
+    command_executed="perl -le 'printf \"%04o %s %s\n\", (stat \"/var/log\")[2]&0777, (getpwuid((stat \"/var/log\")[4]))[0], (getgrgid((stat \"/var/log\")[5]))[0]' && find /var/log /var/adm -type f \\( -perm -o+w -o -perm -g+w \\) && find /var/log /var/adm -type f ! -user root ! -user syslog ! -user adm ! -user sys"
 
     # 최종 판정
     if [ "$diagnosis_result" = "MANUAL" ]; then

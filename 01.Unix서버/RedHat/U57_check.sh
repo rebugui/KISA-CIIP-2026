@@ -99,6 +99,27 @@ diagnose() {
     fi
 
     # ==========================================================================
+    # 2-b. ProFTPD RootLogin off 단독 차단 처리 (UseFtpUsers 미설정/on 포함)
+    #      RootLogin off는 ftpusers 적용 여부와 무관하게 root FTP 접속을 차단함
+    # ==========================================================================
+    if [ -n "$proftpd_conf" ] && [ "$proftpd_root_login" = "off" ]; then
+        status="양호"
+        diagnosis_result="GOOD"
+        inspection_summary="proftpd RootLogin off 설정으로 root FTP 접속이 차단되어 있습니다(${proftpd_conf})."
+        command_result="proftpd_conf: ${proftpd_conf}, RootLogin: off, UseFtpUsers: ${proftpd_use_ftpusers:-on(default)}"
+        command_executed="grep -iE 'RootLogin|UseFtpUsers' ${proftpd_conf}"
+
+        save_dual_result \
+            "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" \
+            "${inspection_summary}" "${command_result}" "${command_executed}" \
+            "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" \
+            "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
+
+    # ==========================================================================
     # 3. ftpusers 파일 위치 확인 (vsftpd 사용 시 PAM 적용 파일을 우선 선택)
     # ==========================================================================
     local ftpusers_files=("/etc/ftpusers" "/etc/vsftpd/ftpusers" "/etc/proftpd/ftpusers")
