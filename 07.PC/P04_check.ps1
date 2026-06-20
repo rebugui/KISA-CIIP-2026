@@ -83,7 +83,14 @@ try {
             try {
                 $accessCheck = Get-SmbShareAccess -Name $shareName -ErrorAction SilentlyContinue
                 foreach ($access in $accessCheck) {
-                    if ($access.AccountName -eq 'Everyone' -or $access.AccountName -like '*S-1-1-0') {
+                    # 한국어 OS에서는 Get-SmbShareAccess가 SID S-1-1-0(Everyone)을
+                    # 로컬라이즈된 이름 '모든 사람'(또는 '도메인\모든 사람')으로 반환함.
+                    # 영문/한글/SID 형태를 모두 매칭한다.
+                    if ($access.AccountName -eq 'Everyone' -or
+                        $access.AccountName -eq '모든 사람' -or
+                        $access.AccountName -like '*\Everyone' -or
+                        $access.AccountName -like '*\모든 사람' -or
+                        $access.AccountName -like '*S-1-1-0') {
                         if ($access.AccessControlType -eq 'Allow') {
                             $everyoneAccessShares += "$shareName ($($access.AccessRight))"
                         }

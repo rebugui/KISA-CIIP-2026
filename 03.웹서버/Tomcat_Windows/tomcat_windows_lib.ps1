@@ -267,17 +267,29 @@ function Invoke-TomcatWindowsCheck {
             if ($state.TomcatUsersXml.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Tomcat was found, but tomcat-users.xml was not located.' $evidencePrefix 'Locate tomcat-users.xml and inspect password policy' }
             # Strip XML comments before matching to avoid false VULNERABLE on commented-out example users
             $usersTextActive = [regex]::Replace($usersText, '(?s)<!--.*?-->', '')
+            # Guideline scope = 관리자 계정의 비밀번호. Mirror Linux peer WEB02_check.sh:142-147 by
+            # filtering <user> entries to ONLY those whose roles attribute matches (?i)manager|admin
+            # before deciding GOOD/VULNERABLE. Non-administrative entries (e.g. monitor-only) must
+            # not drive the WEB-02 verdict — otherwise a compliant hashed admin password is wrongly
+            # flagged VULNERABLE because a non-admin role uses a plaintext password.
             # Hash/encryption detection: MD5(32) / SHA-1(40) / SHA-256(64) hex digests = encrypted
-            $all = @([regex]::Matches($usersTextActive, '(?is)<user\b[^>]*username\s*=\s*"([^"]+)"[^>]*password\s*=\s*"([^"]*)"[^>]*') | ForEach-Object { $_ })
+            $all = @([regex]::Matches($usersTextActive, '(?is)<user\b[^>]*') | ForEach-Object { $_ })
             $plaintext = @(); $encrypted = @()
             foreach ($e in $all) {
-                $p = $e.Groups[2].Value; $plen = $p.Length
+                $userTag = $e.Value
+                # Require a roles attribute containing manager or admin (case-insensitive)
+                $rolesMatch = [regex]::Match($userTag, '(?i)roles\s*=\s*"([^"]*)"')
+                if (-not $rolesMatch.Success) { continue }
+                if ($rolesMatch.Groups[1].Value -notmatch '(?i)manager|admin') { continue }
+                $pwMatch = [regex]::Match($userTag, '(?i)password\s*=\s*"([^"]*)"')
+                if (-not $pwMatch.Success) { continue }
+                $p = $pwMatch.Groups[1].Value; $plen = $p.Length
                 $isHash = ($plen -eq 32 -or $plen -eq 40 -or $plen -eq 64) -and ($p -match '^[0-9a-fA-F]+$')
-                if ($isHash) { $encrypted += $e.Value.Trim() } else { $plaintext += $e.Value.Trim() }
+                if ($isHash) { $encrypted += $userTag.Trim() } else { $plaintext += $userTag.Trim() }
             }
-            if ($plaintext.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Plaintext (unencrypted) Tomcat user passwords were found in tomcat-users.xml.' ($plaintext -join "`n") 'Parse tomcat-users.xml password attributes' }
-            if ($encrypted.Count -gt 0) { return New-TomcatResult 'GOOD' 'Tomcat user passwords are hashed/encrypted in tomcat-users.xml.' ($encrypted -join "`n") 'Parse tomcat-users.xml password attributes' }
-            return New-TomcatResult 'GOOD' 'No local Tomcat password attributes were found in tomcat-users.xml.' "Files: $($state.TomcatUsersXml -join ', ')" 'Parse tomcat-users.xml password attributes'
+            if ($plaintext.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Plaintext (unencrypted) Tomcat administrator (manager/admin role) passwords were found in tomcat-users.xml.' ($plaintext -join "`n") 'Parse tomcat-users.xml password attributes (manager/admin roles only)' }
+            if ($encrypted.Count -gt 0) { return New-TomcatResult 'GOOD' 'Tomcat administrator (manager/admin role) passwords are hashed/encrypted in tomcat-users.xml.' ($encrypted -join "`n") 'Parse tomcat-users.xml password attributes (manager/admin roles only)' }
+            return New-TomcatResult 'GOOD' 'No administrator (manager/admin role) password attributes were found in tomcat-users.xml.' "Files: $($state.TomcatUsersXml -join ', ')" 'Parse tomcat-users.xml password attributes (manager/admin roles only)'
         }
         'WEB-03' {
             if ($state.TomcatUsersXml.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Tomcat was found, but tomcat-users.xml was not located.' $evidencePrefix 'Inspect tomcat-users.xml ACLs' }
@@ -323,13 +335,19 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'GOOD' 'No Tomcat allowLinking=true evidence was found in server/context configuration.' "server.xml files: $($state.ServerXml -join ', '); context.xml files: $($state.ContextXml -join ', ')" 'Parse server.xml/context.xml allowLinking'
         }
         'WEB-07' {
+            # Restrict to the four Tomcat-shipped stock directories (docs/examples/manager/host-manager)
+            # mirroring Linux peer WEB07_check.sh:96. 'sample'/'samples'/'test'/'backup'/'tmp' are NOT
+            # Tomcat default-generated names — a legitimately deployed test.war/sample-app.war/backup.war
+            # creates webapps/<name> as a user context root and must not be flagged.
+            # Also drop '*readme*' and '*install*' from the recursive glob: any third-party webapp
+            # bundling WEB-INF/README.md or INSTALL.txt would be over-flagged (Linux peer omits them).
             $findings = [System.Collections.Generic.List[string]]::new()
             foreach ($root in $state.Webapps) {
-                foreach ($name in 'docs','examples','manager','host-manager','sample','samples','test','backup','tmp') {
+                foreach ($name in 'docs','examples','manager','host-manager') {
                     $candidate = Join-Path $root $name
                     if (Test-Path -LiteralPath $candidate) { $findings.Add($candidate) | Out-Null }
                 }
-                foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue -Include '*.bak','*.old','*.orig','*readme*','*install*','BUILDING.*','RELEASE-NOTES*','RUNNING.*','*sample*','*example*','jndi-resources-howto*' | Select-Object -First 50)) {
+                foreach ($file in @(Get-ChildItem -LiteralPath $root -Recurse -File -ErrorAction SilentlyContinue -Include '*.bak','*.old','*.orig','BUILDING.*','RELEASE-NOTES*','RUNNING.*','*sample*','*example*','jndi-resources-howto*' | Select-Object -First 50)) {
                     $findings.Add($file.FullName) | Out-Null
                 }
             }
