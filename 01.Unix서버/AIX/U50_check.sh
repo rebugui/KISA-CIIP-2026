@@ -87,6 +87,7 @@ diagnose() {
     fi
 
     # include 구문으로 참조되는 설정 파일도 점검 대상에 추가 (zone별 allow-transfer 누락 방지)
+    local include_unresolved=false
     local include_files=()
     local inc_path=""
     for conf_file in "${bind_conf_files[@]}"; do
@@ -94,6 +95,8 @@ diagnose() {
         while IFS= read -r inc_path; do
             if [ -n "$inc_path" ] && [ -f "$inc_path" ]; then
                 include_files+=("$inc_path")
+            elif [ -n "$inc_path" ]; then
+                include_unresolved=true
             fi
         done < <(grep -v '^[[:space:]]*//' "$conf_file" 2>/dev/null | grep -v '^[[:space:]]*#' | grep -oE 'include[[:space:]]+"[^"]+"' | sed 's/include[[:space:]]*"//; s/"$//' | head -20 || true)
     done
@@ -178,6 +181,12 @@ diagnose() {
         inspection_summary="DNS 서비스가 동작 중이나 설정 파일(named.conf/named.boot)을 읽을 수 없어 Zone Transfer 제한 여부 수동 확인 필요"
         command_result="${dns_info}"
         command_executed="lssrc -s named; lssrc -s bind9; ls -la /etc/named.conf /etc/bind/named.conf /etc/named.boot"
+    elif [ "$is_secure" = true ] && [ ${#issues[@]} -eq 0 ] && [ "$include_unresolved" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="기본 설정의 Zone Transfer 제한은 확인되었으나 include된 설정 파일을 확인할 수 없어 수동 점검 필요"
+        command_result="${dns_info}${newline}[미확인 include 설정 파일 존재]"
+        command_executed="grep -v '^//' /etc/bind/named.conf* /etc/named.conf 2>/dev/null | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || true"
     elif [ "$is_secure" = true ] && [ ${#issues[@]} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"

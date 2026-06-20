@@ -57,7 +57,7 @@ try {
             $isUnlimited = $true
         }
     }
-    if ($isUnlimited) {
+    if ($isUnlimited -or $maxAge -eq 0) {
         $finalResult = "VULNERABLE"
         $summary = "최대 암호 사용 기간이 제한 없음으로 설정됨"
         $status = "취약"

@@ -63,10 +63,12 @@ diagnose() {
     local found_pam_module=false
     local complexity_ok=false
     local age_ok=false
+    local history_ok=false
 
     # Raw command outputs
     local pam_output=""
     local login_defs_output=""
+    local pwhistory_output=""
     local newline=$'\n'
 
     # ============================================================================
@@ -219,10 +221,36 @@ diagnose() {
     fi
 
     # ============================================================================
+    # 3) 비밀번호 이력 확인 (pam_pwhistory.so remember)
+    # ============================================================================
+    local remember=""
+    local pwhistory_conf="/etc/security/pwhistory.conf"
+    if [ -f "$pwhistory_conf" ]; then
+        remember=$(grep -E '^[[:space:]]*remember[[:space:]]*=' "$pwhistory_conf" 2>/dev/null \
+            | tail -n 1 | awk -F'=' '{print $2}' | awk '{print $1}' || true)
+        pwhistory_output="[pwhistory.conf] remember=${remember:-미설정}"
+    fi
+    if [ -z "$remember" ] && [ -n "$active_pam_file" ]; then
+        local pwhistory_line
+        pwhistory_line=$(grep -E '^[^#]*pam_pwhistory\.so' "$active_pam_file" 2>/dev/null || true)
+        if [ -n "$pwhistory_line" ]; then
+            remember=$(echo "$pwhistory_line" | grep -oE 'remember=[^[:space:]]+' | tail -n 1 | cut -d'=' -f2 || true)
+            pwhistory_output="${pwhistory_output} | [common-password pam_pwhistory.so] remember=${remember:-미설정}"
+        fi
+    fi
+
+    config_details="${config_details} | [이력] remember=${remember:-미설정}"
+
+    if [ -n "$remember" ] && [[ "$remember" =~ ^[0-9]+$ ]] && [ "$remember" -ge 4 ]; then
+        history_ok=true
+    fi
+    pwhistory_output="${pwhistory_output:-pam_pwhistory.so 설정 없음}"
+
+    # ============================================================================
     # 최종 판정
     # ============================================================================
-    # 복잡성 설정과 사용 기간 설정 모두 확인되어야 양호
-    if [ "$complexity_ok" = true ] && [ "$age_ok" = true ]; then
+    # 복잡성, 사용 기간, 이력 설정 모두 확인되어야 양호
+    if [ "$complexity_ok" = true ] && [ "$age_ok" = true ] && [ "$history_ok" = true ]; then
         is_secure=true
     fi
 
@@ -242,9 +270,10 @@ diagnose() {
 
     # 명령어 실행 결과 결합 (raw output)
     command_result="[PAM Password File: ${active_pam_file:-[none]}]${newline}${pam_output}${newline}${newline}"
-    command_result="${command_result}[/etc/login.defs]${newline}${login_defs_output}"
+    command_result="${command_result}[/etc/login.defs]${newline}${login_defs_output}${newline}${newline}"
+    command_result="${command_result}[비밀번호 이력]${newline}${pwhistory_output}"
 
-    command_executed="grep -E 'pam_pwquality.so|pam_cracklib.so' /etc/pam.d/common-password /etc/pam.d/common-auth; grep -E '^PASS_(MAX|MIN)_DAYS' /etc/login.defs"
+    command_executed="grep -E 'pam_pwquality.so|pam_cracklib.so' /etc/pam.d/common-password /etc/pam.d/common-auth; grep -E '^PASS_(MAX|MIN)_DAYS' /etc/login.defs; grep remember /etc/security/pwhistory.conf /etc/pam.d/common-password"
 
     #echo ""
     #echo "진단 결과: ${status}"

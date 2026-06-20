@@ -76,7 +76,7 @@ diagnose() {
 
         # 보안 설정 확인: 소유자 root (그룹은 기준에 없음, Solaris 기본 root:sys도 양호) 및 권한 600 이하
         if [ "${owner%%:*}" = "root" ]; then
-            if [ "$perms" = "0600" ] || [ "$perms" = "0400" ]; then
+            if [ "$perms" -le "0600" ] 2>/dev/null; then
                 ((hosts_lpd_secure++)) || true
                 hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (보안 양호)"
             else

@@ -78,7 +78,7 @@ diagnose() {
         if [ "$owner" != "root" ] && { [ -z "$acct" ] || [ "$owner" != "$acct" ]; }; then
             reasons="${reasons}소유자(${owner:-확인불가}) 부적절; "
         fi
-        if [[ "$perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms & ~8#600 & 07777 ))" -eq 0 ]; then
+        if [[ "$perms" =~ ^[0-7]{3,4}$ ]] && (( 8#$perms <= 8#600 )); then
             :
         else
             reasons="${reasons}권한(${perms:-확인불가}) 600 초과; "

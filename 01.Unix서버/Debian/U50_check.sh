@@ -90,19 +90,22 @@ diagnose() {
     fi
 
     # include 지시자 추적 (포함 파일 내 zone 단위 allow-transfer 'any' 미탐 방지, 2단계)
-    local include_pass included_file existing already
+    local include_pass included_file existing already include_unresolved=false
     for include_pass in 1 2; do
         local new_includes=()
         for conf_file in "${bind_conf_files[@]}"; do
             [ -f "$conf_file" ] || continue
             while IFS= read -r included_file; do
                 [ -n "$included_file" ] || continue
-                [ -f "$included_file" ] || continue
-                already=false
-                for existing in "${bind_conf_files[@]}" ${new_includes[@]+"${new_includes[@]}"}; do
-                    if [ "$existing" = "$included_file" ]; then already=true; break; fi
-                done
-                if [ "$already" = false ]; then new_includes+=("$included_file"); fi
+                if [ -f "$included_file" ]; then
+                    already=false
+                    for existing in "${bind_conf_files[@]}" ${new_includes[@]+"${new_includes[@]}"}; do
+                        if [ "$existing" = "$included_file" ]; then already=true; break; fi
+                    done
+                    if [ "$already" = false ]; then new_includes+=("$included_file"); fi
+                else
+                    include_unresolved=true
+                fi
             done < <(grep -hoE '^[[:space:]]*include[[:space:]]+"[^"]+"' "$conf_file" 2>/dev/null | sed -E 's/.*"([^"]+)".*/\1/' || true)
         done
         [ ${#new_includes[@]} -eq 0 ] && break
@@ -165,6 +168,12 @@ diagnose() {
         inspection_summary="DNS 서비스 미설치됨"
         command_result="[DNS Service Status]${newline}$(systemctl is-active named 2>&1 || echo 'inactive')${newline}$(systemctl is-active bind9 2>&1 || echo 'inactive')"
         command_executed="systemctl is-active named bind9"
+    elif [ "$is_secure" = true ] && [ ${#issues[@]} -eq 0 ] && [ "$include_unresolved" = true ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="기본 설정의 Zone Transfer 제한은 확인되었으나 include된 설정 파일을 확인할 수 없어 수동 점검 필요"
+        command_result="${dns_info}${newline}[미확인 include 설정 파일 존재]"
+        command_executed="grep -v '^//' /etc/bind/named.conf* /etc/named.conf 2>/dev/null | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || true"
     elif [ "$is_secure" = true ] && [ ${#issues[@]} -eq 0 ]; then
         diagnosis_result="GOOD"
         status="양호"

@@ -116,7 +116,31 @@ diagnose() {
         fi
     fi
 
-    # 3) 메일 큐 디렉토리 권한 확인
+    # 3) Exim: /usr/sbin/exiqgrep 의 일반 사용자 실행 권한 확인 (others 실행 비트)
+    #    (KISA 판단 기준: exiqgrep 의 o-x 가 설정되면 양호, 조치: chmod o-x /usr/sbin/exiqgrep)
+    local exim_bin=""
+    for cand in /usr/sbin/exiqgrep /opt/exim/sbin/exiqgrep; do
+        [ -f "$cand" ] && exim_bin="$cand" && break
+    done
+    if [ -n "$exim_bin" ]; then
+        mail_service_present=true
+        local exim_perms
+        exim_perms=$(perl -e 'printf "%04o\n", (stat(shift))[2] & 07777' "$exim_bin" 2>/dev/null || echo "000")
+        restriction_info="${restriction_info}[Exim] ${exim_bin} 권한: ${exim_perms}\\n"
+        command_executed="${command_executed}ls -l ${exim_bin}; "
+        local other_digit="${exim_perms: -1}"
+        case "$other_digit" in
+            1|3|5|7)
+                mail_vulnerable=true
+                restriction_info="${restriction_info}[Exim] 일반 사용자 실행 권한 존재 -> 취약\\n"
+                ;;
+            *)
+                restriction_info="${restriction_info}[Exim] 일반 사용자 실행 권한 제거됨 -> 제한\\n"
+                ;;
+        esac
+    fi
+
+    # 4) 메일 큐 디렉토리 권한 확인
     local mailq_dirs=("/var/spool/mqueue" "/var/spool/postfix" "/var/mail")
     for dir in "${mailq_dirs[@]}"; do
         if [ -d "$dir" ]; then

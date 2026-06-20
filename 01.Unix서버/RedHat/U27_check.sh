@@ -50,7 +50,13 @@ diagnose() {
     if [ -f "$equiv" ]; then
         local equiv_owner=$(stat -c "%U" "$equiv" 2>/dev/null || echo "unknown")
         local equiv_perm=$(stat -c "%a" "$equiv" 2>/dev/null || echo "000")
-        local equiv_has_plus=$(grep -vE '^[[:space:]]*#' "$equiv" 2>/dev/null | grep -F '+' || true)
+        local equiv_has_plus=""
+        local equiv_unreadable=false
+        if [ -r "$equiv" ]; then
+            equiv_has_plus=$(grep -vE '^[[:space:]]*#' "$equiv" 2>/dev/null | grep -F '+' || true)
+        else
+            equiv_unreadable=true
+        fi
 
         evidence="${evidence}/etc/hosts.equiv (Owner:${equiv_owner}, Perm:${equiv_perm})"
 
@@ -62,7 +68,7 @@ diagnose() {
         fi
 
         # 권한이 600 초과인 경우 (600을 넘는 비트가 있으면 취약)
-        if ! [[ "$equiv_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$equiv_perm & ~8#600 & 07777 ))" -ne 0 ] 2>/dev/null; then
+        if ! [[ "$equiv_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$equiv_perm ))" -gt "$(( 8#600 ))" ] 2>/dev/null; then
             status="취약"
             diagnosis_result="VULNERABLE"
             evidence="${evidence} [권한 초과]"
@@ -73,6 +79,13 @@ diagnose() {
             status="취약"
             diagnosis_result="VULNERABLE"
             evidence="${evidence} [+] 설정 존재"
+        fi
+
+        # 파일은 존재하나 읽을 수 없는 경우 수동진단
+        if [ "$equiv_unreadable" = true ] && [ "$diagnosis_result" = "GOOD" ]; then
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            evidence="${evidence}[파일 읽기 불가]"
         fi
 
         evidence="${evidence}. "
@@ -90,7 +103,13 @@ diagnose() {
         if [ -f "$rhosts_file" ]; then
             local rhosts_owner=$(stat -c "%U" "$rhosts_file" 2>/dev/null || echo "unknown")
             local rhosts_perm=$(stat -c "%a" "$rhosts_file" 2>/dev/null || echo "000")
-            local rhosts_has_plus=$(grep -vE '^[[:space:]]*#' "$rhosts_file" 2>/dev/null | grep -F '+' || true)
+            local rhosts_has_plus=""
+            local rhosts_unreadable=false
+            if [ -r "$rhosts_file" ]; then
+                rhosts_has_plus=$(grep -vE '^[[:space:]]*#' "$rhosts_file" 2>/dev/null | grep -F '+' || true)
+            else
+                rhosts_unreadable=true
+            fi
 
             evidence="${evidence}${rhosts_file} (Owner:${rhosts_owner}, Perm:${rhosts_perm})"
 
@@ -102,7 +121,7 @@ diagnose() {
             fi
 
             # 권한이 600 초과인 경우 (600을 넘는 비트가 있으면 취약)
-            if ! [[ "$rhosts_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$rhosts_perm & ~8#600 & 07777 ))" -ne 0 ] 2>/dev/null; then
+            if ! [[ "$rhosts_perm" =~ ^[0-7]{3,4}$ ]] || [ "$(( 8#$rhosts_perm ))" -gt "$(( 8#600 ))" ] 2>/dev/null; then
                 status="취약"
                 diagnosis_result="VULNERABLE"
                 evidence="${evidence} [권한 초과]"
@@ -113,6 +132,13 @@ diagnose() {
                 status="취약"
                 diagnosis_result="VULNERABLE"
                 evidence="${evidence} [+] 설정 존재"
+            fi
+
+            # 파일은 존재하나 읽을 수 없는 경우 수동진단
+            if [ "$rhosts_unreadable" = true ] && [ "$diagnosis_result" = "GOOD" ]; then
+                status="수동진단"
+                diagnosis_result="MANUAL"
+                evidence="${evidence}[파일 읽기 불가]"
             fi
 
             evidence="${evidence}. "

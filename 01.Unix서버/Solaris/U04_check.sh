@@ -68,7 +68,7 @@ diagnose() {
 
     # 2) Check /etc/passwd fields (Solaris: field 2 should be 'x')
     while IFS=: read -r username password uid uid_number gid gecos home shell; do
-        if [ -n "$password" ] && [ "$password" != "x" ]; then
+        if [ -n "$password" ] && [ "$password" != "x" ] && [ "$password" != "*" ]; then
              all_users_shadow=false
              non_shadow_users="${non_shadow_users}${username}, "
         fi

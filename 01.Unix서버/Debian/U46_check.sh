@@ -109,6 +109,25 @@ diagnose() {
         esac
     fi
 
+    # 3) Exim: /usr/sbin/exiqgrep 의 일반 사용자 실행 권한 확인
+    if [ -f /usr/sbin/exiqgrep ]; then
+        mail_service_present=true
+        local exim_perms
+        exim_perms=$(stat -c "%a" /usr/sbin/exiqgrep 2>/dev/null || echo "000")
+        restriction_info="${restriction_info}[Exim] /usr/sbin/exiqgrep 권한: ${exim_perms}${newline}"
+        command_executed="${command_executed}ls -l /usr/sbin/exiqgrep; "
+        local other_digit="${exim_perms: -1}"
+        case "$other_digit" in
+            1|3|5|7)
+                mail_vulnerable=true
+                restriction_info="${restriction_info}[Exim] 일반 사용자 실행 권한 존재 -> 취약${newline}"
+                ;;
+            *)
+                restriction_info="${restriction_info}[Exim] 일반 사용자 실행 권한 제거됨 -> 제한${newline}"
+                ;;
+        esac
+    fi
+
     # 최종 판정
     if [ "$mail_service_present" != true ]; then
         # SMTP(메일) 서비스가 설치되어 있지 않으면 점검 대상 아님

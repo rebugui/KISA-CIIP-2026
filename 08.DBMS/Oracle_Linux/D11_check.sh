@@ -110,15 +110,17 @@ diagnose() {
 
     # Check for non-DBA users with system table privileges
     # Query DBA_TAB_PRIVS for SELECT privileges on system tables
-    local sys_privs_query="SELECT GRANTEE, OWNER, TABLE_NAME, PRIVILEGE FROM DBA_TAB_PRIVS WHERE (TABLE_NAME LIKE 'DBA_%' OR TABLE_NAME LIKE 'V\$%' OR TABLE_NAME LIKE 'USER_%' OR OWNER='SYS') AND PRIVILEGE='SELECT' AND GRANTEE NOT IN (SELECT GRANTEE FROM DBA_ROLE_PRIVS WHERE GRANTED_ROLE='DBA') AND GRANTEE NOT IN ('PUBLIC', 'SYS', 'SYSTEM', 'DBSNMP', 'SYSMAN', 'OUTLN') ORDER BY GRANTEE, TABLE_NAME;"
+    local sys_privs_query="SET HEADING OFF FEEDBACK OFF PAGESIZE 0
+SELECT GRANTEE, OWNER, TABLE_NAME, PRIVILEGE FROM DBA_TAB_PRIVS WHERE (TABLE_NAME LIKE 'DBA_%' OR TABLE_NAME LIKE 'V\$%' OR TABLE_NAME LIKE 'USER_%' OR OWNER='SYS') AND PRIVILEGE='SELECT' AND GRANTEE NOT IN (SELECT GRANTEE FROM DBA_ROLE_PRIVS WHERE GRANTED_ROLE='DBA') AND GRANTEE NOT IN ('PUBLIC', 'SYS', 'SYSTEM', 'DBSNMP', 'SYSMAN', 'OUTLN') ORDER BY GRANTEE, TABLE_NAME;"
     command_executed="${dba_query}; ${sys_privs_query}"
-    command_result=$(echo "${sys_privs_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" | tail -n +2 || echo "")
+    command_result=$(echo "${sys_privs_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" | grep -vE '^[[:space:]]*-+[[:space:]]*$' | grep -viE 'no rows selected' || echo "")
 
     echo "[DEBUG] System table privileges:\n${command_result}"
 
     # Check for non-DBA users with system privileges
-    local sys_grant_query="SELECT GRANTEE, PRIVILEGE FROM DBA_SYS_PRIVS WHERE GRANTEE NOT IN (SELECT GRANTEE FROM DBA_ROLE_PRIVS WHERE GRANTED_ROLE='DBA') AND GRANTEE NOT IN ('PUBLIC', 'SYS', 'SYSTEM', 'DBSNMP', 'SYSMAN') AND PRIVILEGE LIKE '%ANY%' ORDER BY GRANTEE, PRIVILEGE;"
-    local sys_grants=$(echo "${sys_grant_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" | tail -n +2 || echo "")
+    local sys_grant_query="SET HEADING OFF FEEDBACK OFF PAGESIZE 0
+SELECT GRANTEE, PRIVILEGE FROM DBA_SYS_PRIVS WHERE GRANTEE NOT IN (SELECT GRANTEE FROM DBA_ROLE_PRIVS WHERE GRANTED_ROLE='DBA') AND GRANTEE NOT IN ('PUBLIC', 'SYS', 'SYSTEM', 'DBSNMP', 'SYSMAN') AND PRIVILEGE LIKE '%ANY%' ORDER BY GRANTEE, PRIVILEGE;"
+    local sys_grants=$(echo "${sys_grant_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" | grep -vE '^[[:space:]]*-+[[:space:]]*$' | grep -viE 'no rows selected' || echo "")
 
     # Count problematic privileges
     local violation_count=0

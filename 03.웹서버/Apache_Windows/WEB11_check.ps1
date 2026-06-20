@@ -55,7 +55,7 @@ try {
         $documentRoots = @(
             $activeLines |
                 ForEach-Object {
-                    if ($_ -match '^\s*DocumentRoot\s+"?([^"]+)"?') {
+                    if ($_ -match '^\s*DocumentRoot\s+"?([^"#]+)"?') {
                         [Environment]::ExpandEnvironmentVariables($Matches[1].Trim())
                     }
                 } |

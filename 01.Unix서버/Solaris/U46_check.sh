@@ -111,7 +111,29 @@ diagnose() {
         esac
     fi
 
-    # 3) 메일 큐 디렉토리 권한 확인
+    # 3) Exim: /usr/sbin/exiqgrep 일반 사용자 실행 권한 확인
+    local exim_bin=""
+    for cand in /usr/sbin/exiqgrep /opt/csw/exim/sbin/exiqgrep; do
+        [ -f "$cand" ] && exim_bin="$cand" && break
+    done
+    if [ -n "$exim_bin" ]; then
+        mail_restricted=true
+        local exim_perms
+        exim_perms=$(perl -e 'printf "%04o", (stat shift)[2] & 07777' "$exim_bin" 2>/dev/null || echo "0000")
+        restriction_info="${restriction_info}[Exim] ${exim_bin} 권한: ${exim_perms}\\n"
+        local exim_other_digit="${exim_perms: -1}"
+        case "$exim_other_digit" in
+            1|3|5|7)
+                mail_vulnerable=true
+                restriction_info="${restriction_info}[Exim] 일반 사용자 실행 권한 존재 -> 취약\\n"
+                ;;
+            *)
+                restriction_info="${restriction_info}[Exim] 일반 사용자 실행 권한 제거됨 -> 제한\\n"
+                ;;
+        esac
+    fi
+
+    # 4) 메일 큐 디렉토리 권한 확인
     local mailq_dirs=("/var/spool/mqueue" "/var/spool/postfix" "/var/mail")
     for dir in "${mailq_dirs[@]}"; do
         if [ -d "$dir" ]; then
@@ -135,19 +157,19 @@ diagnose() {
         status="N/A"
         inspection_summary="메일(SMTP) 서비스가 설치되어 있지 않아 점검 대상이 아님"
         command_result="Sendmail/Postfix 메일 서비스 미설치"
-        command_executed="ls -l /usr/sbin/postsuper 2>/dev/null; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf 2>/dev/null"
+        command_executed="ls -l /usr/sbin/postsuper 2>/dev/null; ls -l /usr/sbin/exiqgrep 2>/dev/null; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf 2>/dev/null"
     elif [ "$mail_vulnerable" = true ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="일반 사용자의 메일 서비스 실행 방지가 설정되어 있지 않음"
         command_result="${restriction_info}"
-        command_executed="ls -l /usr/sbin/postsuper 2>/dev/null; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf 2>/dev/null"
+        command_executed="ls -l /usr/sbin/postsuper 2>/dev/null; ls -l /usr/sbin/exiqgrep 2>/dev/null; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf 2>/dev/null"
     else
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="일반 사용자의 메일 서비스 실행 제한됨"
         command_result="${restriction_info}"
-        command_executed="ls -l /usr/sbin/postsuper 2>/dev/null; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf 2>/dev/null"
+        command_executed="ls -l /usr/sbin/postsuper 2>/dev/null; ls -l /usr/sbin/exiqgrep 2>/dev/null; grep -i 'PrivacyOptions' /etc/mail/sendmail.cf 2>/dev/null"
     fi
 
     # echo ""

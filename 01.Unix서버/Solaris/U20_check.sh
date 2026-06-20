@@ -59,23 +59,46 @@ diagnose() {
     # 진단 로직 구현
     # /etc/(x)inetd.conf 파일 소유자 및 권한 설정 확인 (600, root:root)
 
-    local target_file=""
-    local is_secure=false
+    local is_secure=true
     local details=""
+    local found_any=false
+    local checked_files=""
+    local needs_manual=false
 
-    # 대체 파일 확인 (xinetd.conf 우선, 없으면 inetd.conf)
-    if [ -f "/etc/xinetd.conf" ]; then
-        target_file="/etc/xinetd.conf"
-    elif [ -f "/etc/inetd.conf" ]; then
-        target_file="/etc/inetd.conf"
-    fi
-
-    # Capture command outputs
+    # 존재하는 모든 설정 파일 점검 (inetd.conf와 xinetd.conf 공존 시 둘 다 평가)
     local ls_output=$(ls -l /etc/inetd.conf /etc/xinetd.conf 2>&1)
     local stat_output=""
 
+    local conf_file
+    for conf_file in /etc/inetd.conf /etc/xinetd.conf; do
+        [ -f "$conf_file" ] || continue
+        found_any=true
+        checked_files="${checked_files:+${checked_files} }${conf_file}"
+        local file_stat=$(perl -e '@s=stat(shift); printf "%04o %s:%s\n", $s[2] & 07777, getpwuid($s[4]), getgrgid($s[5])' "$conf_file" 2>/dev/null)
+        stat_output="${stat_output:+${stat_output}${newline}}${conf_file}: ${file_stat}"
+        # 파일 권한/소유자 확인 (Solaris: perl stat 사용, GNU stat -c 미지원)
+        local file_perms=$(perl -e 'if (-e $ARGV[0]) { printf "%04o\n", (stat($ARGV[0]))[2] & 07777; }' "$conf_file" 2>/dev/null)
+        local file_owner=$(perl -e 'if (-e $ARGV[0]) { $uid = (stat($ARGV[0]))[4]; $gid = (stat($ARGV[0]))[5]; $user = getpwuid($uid); $group = getgrgid($gid); print "$user:$group\n"; }' "$conf_file" 2>/dev/null)
+        local file_owner_user="${file_owner%%:*}"
+
+        # 권한/소유자 정보 취득 실패 시 수동진단 플래그 설정
+        if [ -z "$file_perms" ] || [ -z "$file_owner_user" ]; then
+            needs_manual=true
+            is_secure=false
+            details="${details:+${details}, }파일: $conf_file, 권한: ${file_perms:-확인불가}, 소유자: ${file_owner:-확인불가} (정보취득실패)"
+        # 소유자 및 권한 확인 (판단기준: 소유자가 root, 권한이 600 이하)
+        # 600 이하 = 600 초과 권한 비트(group/other 접근, 소유자 실행 등)가 없어야 양호
+        elif [[ "$file_perms" =~ ^[0-7]{3,4}$ ]] && [ "$file_owner_user" = "root" ] \
+            && [ "$(( 8#$file_perms & ~8#600 & 07777 ))" -eq 0 ]; then
+            details="${details:+${details}, }파일: $conf_file, 권한: $file_perms, 소유자: $file_owner"
+        else
+            is_secure=false
+            details="${details:+${details}, }파일: $conf_file, 권한: ${file_perms:-확인불가}, 소유자: ${file_owner:-확인불가} (부적절)"
+        fi
+    done
+
     # 파일 존재 확인
-    if [ -z "$target_file" ] || [ ! -f "$target_file" ]; then
+    if [ "$found_any" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="inetd/xinetd 설정 파일 없음 (서비스 미사용)"

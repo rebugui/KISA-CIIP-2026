@@ -92,7 +92,7 @@ diagnose() {
         esac
 
         # 소유자 및 권한 확인 (AIX: root:system, 600 또는 400)
-        if [ "$perms_unresolved" = false ] && [ "$file_owner" = "root" ] && { [ "$file_perms" = "0600" ] || [ "$file_perms" = "0400" ]; }; then
+        if [ "$perms_unresolved" = false ] && [ "$file_owner" = "root" ] && [ "$(( 8#$file_perms & ~8#400 & 07777 ))" -eq 0 ]; then
             is_secure=true
             details="권한: $file_perms, 소유자: ${file_owner}:${file_group}"
         else

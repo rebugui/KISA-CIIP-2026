@@ -95,12 +95,34 @@ diagnose() {
     local contexts=""
     local config_found=false
 
+    # awk 기반 XML 주석 제거 함수 (멀티라인 주석 처리)
+    strip_xml_comments() {
+        awk '
+            {
+                line = $0; out = ""
+                while (length(line) > 0) {
+                    if (incomment) {
+                        p = index(line, "-->")
+                        if (p == 0) { line = ""; break }
+                        line = substr(line, p + 3); incomment = 0
+                    } else {
+                        p = index(line, "<!--")
+                        if (p == 0) { out = out line; line = ""; break }
+                        out = out substr(line, 1, p - 1)
+                        line = substr(line, p + 4); incomment = 1
+                    }
+                }
+                print out
+            }
+        ' "$1" 2>/dev/null
+    }
+
     for xml_pattern in "${server_xml_locations[@]}"; do
         for xml_file in $xml_pattern; do
             if [ -f "${xml_file}" ]; then
                 config_found=true
                 # path 속성을 가진 가상 디렉터리 Context 정의 확인 (주석 제외)
-                local found_context=$(grep -iE "<Context[^>]*path\s*=" "${xml_file}" 2>/dev/null | grep -v "^\s*<!--" || true)
+                local found_context=$(strip_xml_comments "${xml_file}" | tr -d '\n' | sed 's/>/>\n/g' | grep -iE "<Context[^>]*path\s*=" || true)
                 if [ -n "${found_context}" ]; then
                     contexts="${contexts}"$'\n'"${found_context}"
                     context_count=$(echo "${found_context}" | grep -c "<Context" || true)
@@ -118,7 +140,7 @@ diagnose() {
         done
     done
 
-    command_executed="grep -iE '<Context[^>]*path\\s*=' /etc/tomcat*/server.xml 2>/dev/null | grep -v '^\\s*<!--' | head -5"
+    command_executed="strip_xml_comments + tr + sed (multi-line normalize) | grep -iE '<Context[^>]*path\\s*=' /etc/tomcat*/server.xml | head -5"
     command_result="${contexts:-No virtual directory (Context path=) definitions found}"
 
     if [ "${config_found}" = false ]; then

@@ -75,9 +75,15 @@ diagnose() {
     while IFS=: read -r username password uid uid_number gid gecos home shell; do
         # In Trusted Mode, password is '*'
         # In Shadow Mode, password is 'x' (usually)
+        # HP-UX legacy mode: encrypted DES/MD5/SHA hashes in field 2
         if [ -n "$password" ] && [ "$password" != "*" ] && [ "$password" != "x" ]; then
-             passwd_protected=false
-             non_protected_users="${non_protected_users}${username}, "
+            # Encrypted hashes (DES: 13+ chars; modern: $ prefix) are protected
+            if [ ${#password} -ge 13 ] || [ "${password:0:1}" = '$' ]; then
+                : # encrypted hash - protected
+            else
+                passwd_protected=false
+                non_protected_users="${non_protected_users}${username}, "
+            fi
         fi
     done < "$passwd_file"
 
@@ -110,6 +116,11 @@ diagnose() {
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="쉐도우 비밀번호(또는 Trusted Mode)를 사용하고 있으며, /etc/passwd 보호됨"
+    elif [ "$passwd_protected" = true ]; then
+        # Trusted Mode/Shadow 미존재 but /etc/passwd에 암호화된 해시 저장됨
+        diagnosis_result="GOOD"
+        status="양호"
+        inspection_summary="/etc/passwd에 암호화된 비밀번호가 저장되어 있음"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

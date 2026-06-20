@@ -104,14 +104,23 @@ diagnose() {
     echo "[INFO] Oracle 연결 성공"
 
     # Query FAILED_LOGIN_ATTEMPTS from DBA_PROFILES
-    local lockout_query="SELECT PROFILE, LIMIT FROM DBA_PROFILES WHERE RESOURCE_NAME='FAILED_LOGIN_ATTEMPTS' AND PROFILE='DEFAULT';"
+    # SET HEADING OFF FEEDBACK OFF PAGESIZE 0 suppresses column headers, the
+    # dashed separator row, and the "n rows selected" trailer so awk parses
+    # only the data row.
+    local lockout_query="SET HEADING OFF
+SET FEEDBACK OFF
+SET PAGESIZE 0
+SELECT PROFILE, LIMIT FROM DBA_PROFILES WHERE RESOURCE_NAME='FAILED_LOGIN_ATTEMPTS' AND PROFILE='DEFAULT';"
     command_executed="${lockout_query}"
-    command_result=$(echo "${lockout_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" | tail -n +2 || echo "")
+    command_result=$(echo "${lockout_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" | grep -v '^-\{2,\}' || echo "")
 
     echo "[DEBUG] Query result:\n${command_result}"
 
-    # Extract FAILED_LOGIN_ATTEMPTS value
-    local failed_attempts=$(echo "${command_result}" | awk '{print $2}' | tr -d ' ')
+    # Extract FAILED_LOGIN_ATTEMPTS value — take only the last non-empty data
+    # line so any residual banner / separator line is ignored.
+    local failed_attempts_line
+    failed_attempts_line=$(echo "${command_result}" | grep -v '^[[:space:]]*$' | tail -n 1)
+    local failed_attempts=$(echo "${failed_attempts_line}" | awk '{print $2}' | tr -d ' ')
 
     echo "[INFO] FAILED_LOGIN_ATTEMPTS: ${failed_attempts:-UNLIMITED}"
 
@@ -129,15 +138,21 @@ diagnose() {
         if [ "${failed_attempts}" -gt 10 ]; then
             inspection_summary+=" (권장: 3-10회, 현재: ${failed_attempts}회)"
         fi
-    elif [ "${failed_attempts}" -eq 0 ]; then
+    elif [[ "${failed_attempts}" =~ ^[0-9]+$ ]] && [ "${failed_attempts}" -eq 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="FAILED_LOGIN_ATTEMPTS가 0으로 설정되어 있습니다. 로그인 실패 잠금 정책이 비활성화되어 있습니다."
-    else
-        # Value > 20 (a finite limit IS set, so GOOD per the guideline)
+    elif [[ "${failed_attempts}" =~ ^[0-9]+$ ]]; then
+        # Numeric value > 20 (a finite limit IS set, so GOOD per the guideline)
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="로그인 실패 잠금 정책이 설정되어 있습니다(FAILED_LOGIN_ATTEMPTS: ${failed_attempts}회). (권장: 3-10회, 현재: ${failed_attempts}회)"
+    else
+        # Non-numeric, non-UNLIMITED, non-DEFAULT value (parse anomaly or
+        # unexpected sqlplus output). Route to MANUAL — never silently GOOD.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="FAILED_LOGIN_ATTEMPTS 값을 해석할 수 없습니다(현재값: ${failed_attempts}). sqlplus 출력 형식을 수동으로 확인하세요."
     fi
 
     save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"

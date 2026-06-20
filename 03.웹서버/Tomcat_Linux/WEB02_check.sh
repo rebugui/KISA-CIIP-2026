@@ -147,7 +147,7 @@ diagnose() {
             fi
             uname="$(printf '%s' "${line}" | grep -ioE 'username="[^"]*"' | head -n1 | sed -E 's/username="([^"]*)"/\1/I')"
             pass="$(printf '%s' "${line}" | grep -ioE 'password="[^"]*"' | head -n1 | sed -E 's/password="([^"]*)"/\1/I')"
-            [ -z "${pass}" ] && continue
+            # 빈 비밀번호(password="")는 continue로 건너뛰지 않고 평문(취약)으로 처리함
             found_priv_user=true
 
             # 해시 여부 판정: MD5(32)/SHA-1(40)/SHA-256(64) 16진수 다이제스트

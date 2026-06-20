@@ -295,17 +295,19 @@ invoke_tibero_linux_check() {
             ;;
         D-18)
             tibero_sql_check "SELECT granted_role FROM dba_role_privs WHERE grantee='PUBLIC';" "DBA role granted to PUBLIC" || return 0
-            if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[[:alnum:]]'; then
-                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero roles granted to PUBLIC were found (DBA-level role assigned to PUBLIC)." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+            if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '^[[:space:]]*DBA[[:space:]]*$'; then
+                tibero_set_result "VULNERABLE" "$(tibero_status_for_result VULNERABLE)" "Tibero DBA role granted to PUBLIC was found." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
+            elif printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[[:alnum:]]'; then
+                tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Non-DBA Tibero roles granted to PUBLIC were found; confirm whether any role conveys DBA-level access." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else
-                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "No Tibero DBA-level roles granted to PUBLIC were returned." "No rows returned." "${TIBERO_LAST_COMMAND}"
+                tibero_set_result "GOOD" "$(tibero_status_for_result GOOD)" "No Tibero roles granted to PUBLIC were returned." "No rows returned." "${TIBERO_LAST_COMMAND}"
             fi
             ;;
         D-19)
             tibero_set_result "N/A" "N/A" "Oracle OS_ROLES/REMOTE_OS_AUTHENTICATION/REMOTE_OS_ROLES controls are not directly applicable to Tibero." "Tibero does not expose Oracle OS role parameters with the same semantics." "Map Oracle OS role guideline applicability"
             ;;
         D-20)
-            tibero_sql_check "SELECT owner||'.'||object_name FROM dba_objects WHERE owner NOT IN ('SYS','SYSCAT','OUTLN') AND object_type IN ('TABLE','PROCEDURE','PACKAGE') AND ROWNUM <= 100;" "unauthorized object owner restriction" || return 0
+            tibero_sql_check "SELECT owner||'.'||object_name FROM dba_objects WHERE owner NOT IN ('SYS','SYSCAT','OUTLN') AND ROWNUM <= 100;" "unauthorized object owner restriction" || return 0
             if printf '%s' "${TIBERO_SQL_OUTPUT}" | grep -Eq '[[:alnum:]]'; then
                 tibero_set_result "MANUAL" "$(tibero_status_for_result MANUAL)" "Application-owned Tibero objects were found or queried; confirm owners are authorized." "${TIBERO_SQL_OUTPUT}" "${TIBERO_LAST_COMMAND}"
             else

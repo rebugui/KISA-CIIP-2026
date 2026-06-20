@@ -137,7 +137,7 @@ diagnose() {
                if [[ "$f_perms" =~ ^[0-7]{3,4}$ ]] && [ $(( (8#${f_perms}) & (8#7133) )) -ne 0 ]; then
                    insecure_files="${insecure_files}${f_path}(perm:${f_perms}) "
                fi
-           done <<< "$(find "$log_dir" -type f 2>/dev/null | head -50)"
+           done <<< "$(find "$log_dir" -type f 2>/dev/null)"
            # Check for files not owned by root (syslog 데몬 소유는 허용)
            local nonroot_files=$(find "$log_dir" -type f ! -user root ! -user syslog 2>/dev/null | head -5)
 

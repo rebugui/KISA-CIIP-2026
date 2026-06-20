@@ -52,7 +52,7 @@ try {
 
             # Check retention policy - should not be "OverwriteAsNeeded" without size check
             # "90일 이후 이벤트 덮어씀" = retain events for at least 90 days
-            if ($log.MaximumSizeInBytes -lt 10485760 -or $log.LogMode -eq 'Circular') {
+            if ($log.MaximumSizeInBytes -lt 10485760) {
                 $allConfigured = $false
             }
         } else {

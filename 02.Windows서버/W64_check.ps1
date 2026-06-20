@@ -59,22 +59,29 @@ try {
                 # 'NotConfigured -eq $false' is $false, so an -eq $false test silently
                 # passes NotConfigured profiles. Treat anything that is not explicitly
                 # True (사용) as non-compliant.
-                $allEnabled = $true
+                $anyDisabled = $false
+                $anyNotConfigured = $false
                 foreach ($profile in $firewallProfiles) {
-                    if ($profile.Enabled -ne $true) {
-                        $allEnabled = $false
+                    if ($profile.Enabled -eq $false) {
+                        $anyDisabled = $true
                         break
+                    } elseif ($profile.Enabled -ne $true) {
+                        $anyNotConfigured = $true
                     }
                 }
 
-                if ($allEnabled) {
-                    $finalResult = "GOOD"
-                    $summary = "Windows 방화벽이 모든 프로필에서 활성화됨"
-                    $status = "양호"
-                } else {
+                if ($anyDisabled) {
                     $finalResult = "VULNERABLE"
                     $summary = "Windows 방화벽이 하나 이상의 프로필에서 비활성화됨"
                     $status = "취약"
+                } elseif ($anyNotConfigured) {
+                    $finalResult = "MANUAL"
+                    $summary = "Windows 방화벽 프로필 중 명시적으로 설정되지 않은(NotConfigured) 프로필이 있어 수동 확인 필요"
+                    $status = "수동진단"
+                } else {
+                    $finalResult = "GOOD"
+                    $summary = "Windows 방화벽이 모든 프로필에서 활성화됨"
+                    $status = "양호"
                 }
 
                 $commandExecuted = "Get-NetFirewallProfile (Domain, Private, Public 프로필 확인)"

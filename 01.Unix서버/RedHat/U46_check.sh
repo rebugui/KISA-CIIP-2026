@@ -44,7 +44,7 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="일반 사용자의 메일 서비스 실행 방지 설정이 적절합니다."
     local command_result=""
-    local command_executed="grep '^O PrivacyOptions' /etc/mail/sendmail.cf; ls -l /usr/sbin/postsuper; systemctl is-active postfix"
+    local command_executed="grep '^O PrivacyOptions' /etc/mail/sendmail.cf; ls -l /usr/sbin/postsuper; systemctl is-active postfix; ls -l /usr/sbin/exiqgrep"
 
     local mta_checked=false
     local is_vulnerable=false
@@ -104,7 +104,27 @@ diagnose() {
         fi
     fi
 
-    # 3. 최종 판정 (취약 > 수동 > 양호 / 메일 서비스 미사용 → 양호)
+    # 3. Exim 점검 (exiqgrep 일반 사용자 실행 권한 o-x 여부)
+    local exim_path="/usr/sbin/exiqgrep"
+    if [ -f "$exim_path" ]; then
+        mta_checked=true
+        local exim_perms
+        exim_perms=$(stat -c '%a' "$exim_path" 2>/dev/null || echo "")
+        if [ -n "$exim_perms" ]; then
+            local other_perm="${exim_perms: -1}"
+            if [ $(( other_perm & 1 )) -ne 0 ]; then
+                is_vulnerable=true
+                findings="${findings}[Exim] exiqgrep(${exim_path}) 일반 사용자 실행 권한(o+x) 존재: ${exim_perms} / "
+            else
+                findings="${findings}[Exim] exiqgrep(${exim_path}) 일반 사용자 실행 권한 제거됨(o-x): ${exim_perms} / "
+            fi
+        else
+            needs_manual=true
+            findings="${findings}[Exim] exiqgrep(${exim_path}) 권한 확인 불가 — 수동 점검 필요 / "
+        fi
+    fi
+
+    # 4. 최종 판정 (취약 > 수동 > 양호 / 메일 서비스 미사용 → 양호)
     if [ "$is_vulnerable" = true ]; then
         status="취약"
         diagnosis_result="VULNERABLE"
@@ -120,7 +140,7 @@ diagnose() {
     else
         status="양호"
         diagnosis_result="GOOD"
-        inspection_summary="메일 서비스(Sendmail/Postfix)가 사용되지 않습니다."
+        inspection_summary="메일 서비스(Sendmail/Postfix/Exim)가 사용되지 않습니다."
     fi
     command_result="${findings:-메일 서비스 미검출: sendmail.cf 부재, postfix 미설치/미실행}"
 

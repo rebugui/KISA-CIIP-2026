@@ -76,7 +76,7 @@ diagnose() {
 
         # 보안 설정 확인: root:root 600 또는 400
         if [ "${owner%%:*}" = "root" ]; then
-            if [ "$perms" = "600" ] || [ "$perms" = "400" ]; then
+            if [[ "$perms" =~ ^[0-7]{3,4}$ ]] && [ "$(( 8#$perms & ~8#600 & 07777 ))" -eq 0 ]; then
                 ((hosts_lpd_secure++)) || true
                 hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (보안 양호)"
             else

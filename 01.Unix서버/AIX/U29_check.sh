@@ -74,13 +74,13 @@ diagnose() {
         local perms=$(ls -ld "/etc/hosts.lpd" 2>/dev/null | awk '{print $1}' | cut -c2-10 | sed 's/rwx/7/g; s/rw-/6/g; s/r-x/5/g; s/r--/4/g; s/-wx/3/g; s/-w-/2/g; s/--x/1/g; s/---/0/g')
         local owner=$(ls -ld "/etc/hosts.lpd" 2>/dev/null | awk '{print $3":"$4}')
 
-        # 보안 설정 확인: root:root 600 또는 400
+        # 보안 설정 확인: root, 권한 600 이하
         if [ "${owner%%:*}" = "root" ]; then
-            if [ "$perms" = "600" ] || [ "$perms" = "400" ]; then
+            if [ "$(( 8#${perms} & ~8#600 & 07777 ))" -eq 0 ]; then
                 ((hosts_lpd_secure++)) || true
                 hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (보안 양호)"
             else
-                hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (권한 취약 - 600 또는 400 권장)"
+                hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner}, 권한: ${perms} (권한 취약 - 600 이하 권장)"
             fi
         else
             hosts_lpd_details="/etc/hosts.lpd: 존재, 소유자: ${owner} (root:root 아님 - 취약)"

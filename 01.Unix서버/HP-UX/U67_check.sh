@@ -138,7 +138,7 @@ diagnose() {
            # SUID/SGID(4755/2644)도 취약으로 판정 (쓰기 비트만 보는 기존 find 프리필터의 false_good 차단).
            # HP-UX find 에는 -printf 가 없으므로 파일 목록을 받아 perl stat 으로 권한/소유자를 확인한다.
            local insecure_files=""
-           local file_list=$(find "$log_dir" -type f 2>/dev/null) || true
+           local file_list=$(find "$log_dir" /var/adm -type f 2>/dev/null) || true
            local f_path="" f_perm="" f_owner=""
            while IFS= read -r f_path; do
                 [ -n "${f_path:-}" ] || continue

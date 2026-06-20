@@ -170,7 +170,7 @@ diagnose() {
         fi
     fi
 
-    # 4-3) SMTP(sendmail): SmtpGreetingMessage 설정 (버전 노출 매크로 $v 미사용)
+    # 4-3) SMTP(sendmail): SmtpGreetingMessage 설정 (경고 메시지 포함 확인)
     local smtp_on=false
     if svcs -H -o state svc:/network/smtp:sendmail 2>/dev/null | grep -q online; then
         smtp_on=true
@@ -180,8 +180,8 @@ diagnose() {
     if [ "$smtp_on" = true ] && [ -f /etc/mail/sendmail.cf ]; then
         local smtp_greeting=$(grep -E '^O[[:space:]]*SmtpGreetingMessage' /etc/mail/sendmail.cf 2>/dev/null | tail -1 || true)
         svc_evidence="${svc_evidence}[sendmail SmtpGreetingMessage] ${smtp_greeting:-미설정}${newline}"
-        if [ -z "$smtp_greeting" ] || echo "$smtp_greeting" | grep -q '\$v'; then
-            svc_missing="${svc_missing}SMTP(sendmail.cf SmtpGreetingMessage 미설정 또는 버전 노출) "
+        if [ -z "$smtp_greeting" ] || ! echo "$smtp_greeting" | grep -qiE "warning|unauthorized|access|prohibited|경고|무단|접속금지"; then
+            svc_missing="${svc_missing}SMTP(sendmail.cf SmtpGreetingMessage 미설정 또는 경고 메시지 없음) "
         fi
     fi
 

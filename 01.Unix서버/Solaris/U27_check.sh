@@ -67,6 +67,8 @@ diagnose() {
 
     local insecure_count=0
     local insecure_details=""
+    local manual_count=0
+    local manual_details=""
 
     # Capture raw find output for .rhosts files (Solaris 기본 홈 경로 /export/home 포함)
     local rhosts_find=$(find /export/home /home -name '.rhosts' 2>/dev/null)
@@ -91,8 +93,13 @@ diagnose() {
         if [ -z "$perms" ] || [ $(( 8#$perms & ~8#600 & 8#7777 )) -ne 0 ]; then
             he_issues="${he_issues}권한 600 초과 "
         fi
-        if grep -vE '^[[:space:]]*#' /etc/hosts.equiv 2>/dev/null | grep -qF '+'; then
-            he_issues="${he_issues}'+' 설정 존재 "
+        if [ -r "/etc/hosts.equiv" ]; then
+            if grep -vE '^[[:space:]]*#' /etc/hosts.equiv 2>/dev/null | grep -qF '+'; then
+                he_issues="${he_issues}'+' 설정 존재 "
+            fi
+        else
+            ((manual_count++)) || true
+            manual_details="${manual_details}/etc/hosts.equiv 내용 확인 불가(읽기 권한 없음). "
         fi
         if [ -n "$he_issues" ]; then
             ((insecure_count++)) || true
@@ -126,8 +133,13 @@ diagnose() {
                 if [ -z "$perms" ] || [ $(( 8#$perms & ~8#600 & 8#7777 )) -ne 0 ]; then
                     rh_issues="${rh_issues}권한 600 초과 "
                 fi
-                if grep -vE '^[[:space:]]*#' "$rhosts_path" 2>/dev/null | grep -qF '+'; then
-                    rh_issues="${rh_issues}'+' 설정 존재 "
+                if [ -r "$rhosts_path" ]; then
+                    if grep -vE '^[[:space:]]*#' "$rhosts_path" 2>/dev/null | grep -qF '+'; then
+                        rh_issues="${rh_issues}'+' 설정 존재 "
+                    fi
+                else
+                    ((manual_count++)) || true
+                    manual_details="${manual_details}${rhosts_path} 내용 확인 불가(읽기 권한 없음). "
                 fi
                 if [ -n "$rh_issues" ]; then
                     ((insecure_count++)) || true
@@ -144,16 +156,7 @@ diagnose() {
         inspection_summary=".rhosts 및 hosts.equiv 파일 없음 (r 계정 사용 제어 양호)"
         command_result="hosts.equiv: [not found], .rhosts: 0"
         command_executed="find /export/home /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
-    elif [ "$insecure_count" -eq 0 ]; then
-        # 파일은 존재하나 가이드 기준(소유자/권한 600 이하/'+' 없음)을 모두 충족 → 양호
-        diagnosis_result="GOOD"
-        status="양호"
-        details=""
-        [ "$hosts_equiv_exists" -gt 0 ] && details="${details}${hosts_equiv_details}. "
-        [ "$rhosts_count" -gt 0 ] && details="${details}.rhosts 파일 ${rhosts_count}개: ${rhosts_files%, }. "
-        inspection_summary="hosts.equiv/.rhosts 파일이 존재하나 소유자·권한(600 이하)·'+' 미설정 기준을 충족함: ${details}"
-        command_executed="find /export/home /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null; grep '^+' /etc/hosts.equiv ~/.rhosts 2>/dev/null"
-    else
+    elif [ "$insecure_count" -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         details="보안 기준 미충족 항목 ${insecure_count}개: ${insecure_details}"
@@ -168,6 +171,23 @@ diagnose() {
 
         inspection_summary="취약: ${details}"
         command_result="hosts.equiv: ${hosts_equiv_exists}, .rhosts: ${rhosts_count}, 기준 미충족: ${insecure_count}"
+        command_executed="find /export/home /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null; grep '^+' /etc/hosts.equiv ~/.rhosts 2>/dev/null"
+    elif [ "$manual_count" -gt 0 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        details="확인 불가 항목 ${manual_count}개: ${manual_details}"
+        [ "$hosts_equiv_exists" -gt 0 ] && details="${details}${hosts_equiv_details}. "
+        [ "$rhosts_count" -gt 0 ] && details="${details}.rhosts 파일 ${rhosts_count}개: ${rhosts_files%, }. "
+        inspection_summary="수동진단: ${details}"
+        command_executed="find /export/home /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null"
+    else
+        # 파일은 존재하나 가이드 기준(소유자/권한 600 이하/'+' 없음)을 모두 충족 → 양호
+        diagnosis_result="GOOD"
+        status="양호"
+        details=""
+        [ "$hosts_equiv_exists" -gt 0 ] && details="${details}${hosts_equiv_details}. "
+        [ "$rhosts_count" -gt 0 ] && details="${details}.rhosts 파일 ${rhosts_count}개: ${rhosts_files%, }. "
+        inspection_summary="hosts.equiv/.rhosts 파일이 존재하나 소유자·권한(600 이하)·'+' 미설정 기준을 충족함: ${details}"
         command_executed="find /export/home /home -name '.rhosts' 2>/dev/null; ls -l /etc/hosts.equiv 2>/dev/null; grep '^+' /etc/hosts.equiv ~/.rhosts 2>/dev/null"
     fi
 

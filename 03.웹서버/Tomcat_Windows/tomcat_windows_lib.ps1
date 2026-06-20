@@ -291,7 +291,9 @@ function Invoke-TomcatWindowsCheck {
             return New-TomcatResult 'GOOD' 'No broad local user ACL entries were found on tomcat-users.xml.' "Files: $($state.TomcatUsersXml -join ', ')" 'Get-Acl tomcat-users.xml'
         }
         'WEB-04' {
-            $listings = @([regex]::Matches($webText, '(?is)<param-name>\s*listings\s*</param-name>\s*<param-value>\s*(true|false)\s*</param-value>') | ForEach-Object { $_.Groups[1].Value })
+            # Strip XML comments before matching to avoid false VULNERABLE on commented-out listings=true
+            $webTextActive = [regex]::Replace($webText, '(?s)<!--.*?-->', '')
+            $listings = @([regex]::Matches($webTextActive, '(?is)<param-name>\s*listings\s*</param-name>\s*<param-value>\s*(true|false)\s*</param-value>') | ForEach-Object { $_.Groups[1].Value })
             if ($listings -contains 'true') { return New-TomcatResult 'VULNERABLE' 'Tomcat directory listings are enabled.' ($listings -join ', ') 'Parse web.xml listings init-param' }
             if ($listings -contains 'false') { return New-TomcatResult 'GOOD' 'Tomcat directory listings are explicitly disabled.' ($listings -join ', ') 'Parse web.xml listings init-param' }
             return New-TomcatResult 'MANUAL' 'No explicit Tomcat directory listing setting was found; verify DefaultServlet listings policy manually.' "web.xml files: $($state.WebXml -join ', ')" 'Parse web.xml listings init-param'
