@@ -209,11 +209,15 @@ diagnose() {
         command_result="PostgreSQL 버전: ${pg_version}\\n${check_results}"
         command_executed="psql -U ${DB_ADMIN_USER} -h ${DB_HOST} -p ${DB_PORT} -d postgres -c \"SELECT usename, passwd FROM pg_shadow WHERE usename='postgres';\""
     elif [ ${total_vulnerabilities} -eq 0 ]; then
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="모든 기본 계정의 비밀번호가 적절히 설정됨"
+        # PostgreSQL 의 pg_shadow.passwd 컬럼은 비밀번호 존재 시 항상 '********' 리터럴로
+        # 마스킹되어 출력되므로(실해시는 pg_authid.rolpassword 에 보관), 스크립트만으로는
+        # 기본 계정의 비밀번호가 설치/배포 기본값에서 변경되었는지(criteria_bad) 증명할 수 없다.
+        # 따라서 비밀번호가 존재하는 기본 계정에 대해서는 양호 단정 대신 수동진단으로 격하한다.
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="기본 계정에 비밀번호는 설정되어 있으나 pg_shadow.passwd 가 항상 '********' 로 마스킹되어 설치 시 기본 비밀번호에서 변경되었는지 증명할 수 없습니다. 기본 계정의 초기 비밀번호 변경 또는 계정 잠금 여부를 수동으로 확인하세요."
         command_result="PostgreSQL 버전: ${pg_version}\\n${check_results}"
-        command_executed="psql -U ${DB_ADMIN_USER} -h ${DB_HOST} -p ${DB_PORT} -d postgres -c \"SELECT usename, usepasswd FROM pg_shadow;\""
+        command_executed="psql -U ${DB_ADMIN_USER} -h ${DB_HOST} -p ${DB_PORT} -d postgres -c \"SELECT usename, passwd FROM pg_shadow;\""
     else
         diagnosis_result="VULNERABLE"
         status="취약"

@@ -109,7 +109,7 @@ diagnose() {
     for conf_pattern in "${apache_conf_locations[@]}"; do
         for conf_file in $conf_pattern; do
             if [ -f "${conf_file}" ]; then
-                local found_https=$(grep -E "(Listen.*443|VirtualHost.*:443)" "${conf_file}" 2>/dev/null | head -1 || true)
+                local found_https=$(grep -E "(Listen.*443|VirtualHost.*:443)" "${conf_file}" 2>/dev/null | grep -vE "^\s*#" | head -1 || true)
                 if [ -n "${found_https}" ]; then
                     has_https=true
                     break 2

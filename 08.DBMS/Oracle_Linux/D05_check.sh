@@ -107,13 +107,38 @@ diagnose() {
     # Query PASSWORD_REUSE_MAX and PASSWORD_REUSE_TIME from DBA_PROFILES
     local reuse_query="SELECT PROFILE, RESOURCE_NAME, LIMIT FROM DBA_PROFILES WHERE RESOURCE_NAME IN ('PASSWORD_REUSE_MAX', 'PASSWORD_REUSE_TIME') AND PROFILE='DEFAULT';"
     command_executed="${reuse_query}"
-    command_result=$(echo "${reuse_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" | tail -n +2 || echo "")
+    local raw_query_output
+    raw_query_output=$(echo "${reuse_query}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>&1 || true)
+    command_result=$(echo "${raw_query_output}" | grep -v "^$" | grep -v "SQL>" | tail -n +2 || echo "")
 
     echo "[DEBUG] Query result:\n${command_result}"
+
+    # Evidence-unobtainable guard: SQL/instance errors (e.g. ORA-00942 / ORA-01031 — no SELECT
+    # on DBA_PROFILES) must route to MANUAL, not to a false VULNERABLE on empty parse output.
+    if echo "${raw_query_output}" | grep -qiE 'ORA-[0-9]+|SP2-[0-9]+|TNS-[0-9]+'; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="DBA_PROFILES 조회 중 오류가 발생하여 PASSWORD_REUSE_MAX/PASSWORD_REUSE_TIME 값을 확인할 수 없습니다. DBA 권한으로 직접 확인이 필요합니다."
+        command_result="${raw_query_output}"
+        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
 
     # Check PASSWORD_REUSE_MAX
     local reuse_max=$(echo "${command_result}" | grep "PASSWORD_REUSE_MAX" | awk '{print $3}' | tr -d ' ')
     local reuse_time=$(echo "${command_result}" | grep "PASSWORD_REUSE_TIME" | awk '{print $3}' | tr -d ' ')
+
+    # If the query returned no rows at all for the DEFAULT profile, the value is unobtainable
+    # (DBA_PROFILES never returns "no rows" for DEFAULT in a healthy Oracle; treat as MANUAL).
+    if [ -z "${reuse_max}" ] && [ -z "${reuse_time}" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="DBA_PROFILES에서 PASSWORD_REUSE_MAX/PASSWORD_REUSE_TIME 행을 찾지 못했습니다. 권한 또는 환경 문제일 수 있으므로 DBA 권한으로 직접 확인이 필요합니다."
+        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
 
     echo "[INFO] PASSWORD_REUSE_MAX: ${reuse_max:-UNLIMITED}"
     echo "[INFO] PASSWORD_REUSE_TIME: ${reuse_time:-UNLIMITED}"

@@ -53,7 +53,15 @@ try {
 
     $commandOutput = $details -join "`n"
 
-    if ($ssiMappings.Count -gt 0) {
+    if (-not $sites -or $sites.Count -eq 0) {
+        # 사이트가 열거되지 않으면 사이트 범위에서는 매핑 점검 불가하며,
+        # 서버(applicationHost.config) 범위의 SSI 핸들러(SSINC-shtml/SSINC-shtm/SSINC-stm)
+        # 잔존 가능성을 정적 분석으로 단정할 수 없어 수동 확인이 필요함.
+        $finalResult = "MANUAL"
+        $summary = "점검할 웹 사이트가 없습니다. 서버 수준(applicationHost.config) SSI 핸들러 매핑(.shtml/.shtm/.stm) 잔존 여부에 대한 수동 확인이 필요합니다."
+        $status = "수동진단"
+        if ([string]::IsNullOrWhiteSpace($commandOutput)) { $commandOutput = "Get-Website 결과: 사이트 없음" }
+    } elseif ($ssiMappings.Count -gt 0) {
         $finalResult = "VULNERABLE"
         $summary = "SSI 확장자(.shtml/.shtm/.stm) 처리기 매핑이 존재합니다: " + ($ssiMappings -join "; ")
         $status = "취약"

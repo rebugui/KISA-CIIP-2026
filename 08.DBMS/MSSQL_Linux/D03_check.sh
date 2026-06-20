@@ -90,7 +90,31 @@ diagnose() {
 
     local policy_query="SELECT name, is_policy_checked, is_expiration_checked FROM sys.sql_logins WHERE type = 'S' AND name NOT LIKE '##%';"
     command_executed="sqlcmd -S localhost -E -Q \"${policy_query}\""
-    command_result=$(sqlcmd -S localhost -E -Q "${policy_query}" -h -1 -W 2>/dev/null || echo "")
+    # 인증 실패 등으로 stderr가 사라져 빈 결과가 GOOD으로 오판되는 것을 방지하기 위해
+    # -b 로 SQL 오류 시 비0 종료 코드를 받고 2>&1 로 오류 텍스트를 캡처한다 (D-04 패턴).
+    local policy_raw=""
+    local policy_rc=0
+    policy_raw=$(sqlcmd -S localhost -E -Q "${policy_query}" -h -1 -W -b 2>&1) || policy_rc=$?
+    command_result=$(echo "$policy_raw" | grep -viE "rows? affected" | grep -v "^[[:space:]]*$" || echo "")
+
+    # 쿼리 실패/권한 오류/인증 실패/빈 결과는 정적으로 양호를 단정할 수 없으므로 수동진단으로 라우팅
+    if [ $policy_rc -ne 0 ] || echo "$policy_raw" | grep -qiE "Msg [0-9]+|permission|denied|error|로그인|권한|Login failed|Cannot (open|authenticate)|sspi|kerberos"; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="sqlcmd 실행 실패 또는 인증/권한 오류로 비밀번호 정책(is_policy_checked, is_expiration_checked)을 수집할 수 없습니다. 적절한 자격증명(-U/-P)으로 직접 sys.sql_logins 를 조회하여 기관 정책 준수 여부를 수동으로 확인하세요. - ${command_result}"
+        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
+
+    if [ -z "$command_result" ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="sqlcmd 쿼리 결과가 비어 있어 sql_logins 정책 플래그를 수집할 수 없습니다. 인증 실패 또는 쿼리 비응답 가능성이 있으므로 수동으로 확인하세요."
+        save_dual_result "${ITEM_ID}" "${ITEM_NAME}" "${status}" "${diagnosis_result}" "${inspection_summary}" "${command_result}" "${command_executed}" "${GUIDELINE_PURPOSE}" "${GUIDELINE_THREAT}" "${GUIDELINE_CRITERIA_GOOD}" "${GUIDELINE_CRITERIA_BAD}" "${GUIDELINE_REMEDIATION}"
+        verify_result_saved "${ITEM_ID}"
+        return 0
+    fi
 
     if [ -n "$command_result" ]; then
         # sqlcmd -W -h -1 emits whitespace-separated columns (no -s separator set),

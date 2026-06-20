@@ -99,6 +99,7 @@ diagnose() {
     local command_result=""
     local command_executed=""
     local vulnerabilities_found=0
+    local query_error=0
 
     if ! pgrep -x "tnslsnr" &>/dev/null && ! pgrep -x "oracle" &>/dev/null; then
         diagnosis_result="MANUAL"
@@ -113,35 +114,53 @@ diagnose() {
 
     # 비밀번호 Profile 확인
     local profile_check="SELECT limit FROM dba_profiles WHERE profile='DEFAULT' AND resource_name='PASSWORD_VERIFY_FUNCTION';"
-    command_result=$(echo "${profile_check}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
+    local profile_raw
+    profile_raw=$(echo "${profile_check}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>&1 || true)
 
-    if [ -z "$command_result" ] || echo "$command_result" | grep -q "NULL"; then
-        ((vulnerabilities_found++)) || true
-        inspection_summary+="취약: 비밀번호 검증 함수 미설정; "
+    if echo "${profile_raw}" | grep -qiE 'ORA-[0-9]+|SP2-[0-9]+|TNS-[0-9]+|ERROR'; then
+        query_error=1
+        command_result="${profile_raw}"
     else
-        inspection_summary+=" 비밀번호 검증 함수 설정됨; "
+        command_result=$(echo "${profile_raw}" | grep -v "^$" | grep -v "SQL>" || echo "")
+        if [ -z "$command_result" ] || echo "$command_result" | grep -q "NULL"; then
+            ((vulnerabilities_found++)) || true
+            inspection_summary+="취약: 비밀번호 검증 함수 미설정; "
+        else
+            inspection_summary+=" 비밀번호 검증 함수 설정됨; "
+        fi
     fi
 
     # 비밀번호 정책 변수 확인
     local policy_vars="SELECT resource_name, limit FROM dba_profiles WHERE profile='DEFAULT' AND resource_type='PASSWORD' ORDER BY resource_name;"
-    command_result=$(echo "${policy_vars}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>/dev/null | grep -v "^$" | grep -v "SQL>" || echo "")
+    local policy_raw
+    policy_raw=$(echo "${policy_vars}" | sqlplus -s "${DBMS_USER}/${DBMS_PASSWORD}@${DBMS_HOST}:${DBMS_PORT}/${DBMS_SID}" 2>&1 || true)
 
-    if [ -n "$command_result" ]; then
-        local password_life=$(echo "$command_result" | grep "PASSWORD_LIFE_TIME" | awk '{print $2}' || echo "")
-        local reuse_time=$(echo "$command_result" | grep "PASSWORD_REUSE_TIME" | awk '{print $2}' || echo "")
+    if echo "${policy_raw}" | grep -qiE 'ORA-[0-9]+|SP2-[0-9]+|TNS-[0-9]+|ERROR'; then
+        query_error=1
+        command_result="${command_result}"$'\n'"${policy_raw}"
+    else
+        command_result=$(echo "${policy_raw}" | grep -v "^$" | grep -v "SQL>" || echo "")
+        if [ -n "$command_result" ]; then
+            local password_life=$(echo "$command_result" | grep "PASSWORD_LIFE_TIME" | awk '{print $2}' || echo "")
+            local reuse_time=$(echo "$command_result" | grep "PASSWORD_REUSE_TIME" | awk '{print $2}' || echo "")
 
-        if [ "${password_life:-UNLIMITED}" = "UNLIMITED" ]; then
-            ((vulnerabilities_found++)) || true
-            inspection_summary+="취약: 비밀번호 만료 기간 무제한; "
-        fi
+            if [ "${password_life:-UNLIMITED}" = "UNLIMITED" ]; then
+                ((vulnerabilities_found++)) || true
+                inspection_summary+="취약: 비밀번호 만료 기간 무제한; "
+            fi
 
-        if [ "${reuse_time:-UNLIMITED}" = "UNLIMITED" ]; then
-            ((vulnerabilities_found++)) || true
-            inspection_summary+="취약: 비밀번호 재사용 제한 없음; "
+            if [ "${reuse_time:-UNLIMITED}" = "UNLIMITED" ]; then
+                ((vulnerabilities_found++)) || true
+                inspection_summary+="취약: 비밀번호 재사용 제한 없음; "
+            fi
         fi
     fi
 
-    if [ $vulnerabilities_found -gt 0 ]; then
+    if [ "${query_error}" -eq 1 ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="Oracle 프로파일 쿼리 실행 실패로 자동 판단 불가 (수동진단 필요). 확인: dba_profiles(PASSWORD_VERIFY_FUNCTION, PASSWORD_LIFE_TIME, PASSWORD_REUSE_TIME). 권한 부족(SELECT_CATALOG_ROLE / SELECT ANY DICTIONARY) 가능성 점검 필요."
+    elif [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
     else

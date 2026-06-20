@@ -44,29 +44,68 @@ diagnose() {
     diagnosis_result="GOOD"
     local inspection_summary="NFS 접근 통제 설정이 적절하게 이루어져 있습니다."
     local command_result=""
-    local command_executed="cat /etc/exports; stat -c '%a %U' /etc/exports"
+    local command_executed="cat /etc/exports /etc/exports.d/*.exports 2>/dev/null; stat -c '%a %U' /etc/exports /etc/exports.d/*.exports 2>/dev/null; systemctl is-active nfs-server 2>/dev/null; ss -tuln 2>/dev/null | grep -E ':2049|:20048'"
 
     # 1. 실제 데이터 추출
-    local exports_file="/etc/exports"
-    if [ -f "$exports_file" ]; then
-        # 와일드카드(*)를 사용하여 모든 호스트에 개방된 설정 탐색
-        local unsafe_configs=$(grep -v "^#" "$exports_file" | grep "*" || echo "")
+    # exports 후보 파일 수집: /etc/exports 및 /etc/exports.d/*.exports (RHEL: exports(5) drop-in)
+    local exports_files=()
+    if [ -f /etc/exports ]; then
+        exports_files+=("/etc/exports")
+    fi
+    if [ -d /etc/exports.d ]; then
+        local _ef
+        for _ef in /etc/exports.d/*.exports; do
+            [ -f "$_ef" ] && exports_files+=("$_ef")
+        done
+    fi
 
-        # 설정 파일 권한 점검 (소유자 root + 644 초과 비트 없음)
-        local file_owner=$(stat -c '%U' "$exports_file" 2>/dev/null || echo "")
-        local file_perms=$(stat -c '%a' "$exports_file" 2>/dev/null || echo "")
+    # NFS 서비스/포트 활성 여부 (exports 파일 부재 시 fall-through 차단)
+    local nfs_daemon_active=false
+    if systemctl is-active nfs-server &>/dev/null || systemctl is-active nfs-kernel-server &>/dev/null; then
+        nfs_daemon_active=true
+    fi
+    local nfs_port_listening=false
+    if command -v ss &>/dev/null; then
+        if ss -tuln 2>/dev/null | grep -qE ':2049 |:20048 '; then
+            nfs_port_listening=true
+        fi
+    fi
+
+    if [ "${#exports_files[@]}" -gt 0 ]; then
+        local unsafe_configs=""
         local perm_issues=""
-        if [ "$file_owner" != "root" ]; then
-            perm_issues="소유자가 root가 아님(${file_owner:-확인불가})"
-        fi
-        if [ -n "$file_perms" ]; then
-            # 644(rw-r--r--)를 초과하는 비트(그룹/기타 쓰기, 실행, 특수비트) 존재 여부 (비트 연산)
-            if [ $(( 8#${file_perms} & 8#7133 )) -ne 0 ]; then
-                perm_issues="${perm_issues:+${perm_issues}, }파일 권한이 644를 초과함(${file_perms})"
+        local summary_owner_perm=""
+        local summary_share=""
+        local exports_file
+        for exports_file in "${exports_files[@]}"; do
+            # 와일드카드(*)를 사용하여 모든 호스트에 개방된 설정 탐색
+            local _unsafe
+            _unsafe=$(grep -v "^#" "$exports_file" | grep "*" || echo "")
+            if [ -n "$_unsafe" ]; then
+                unsafe_configs="${unsafe_configs:+${unsafe_configs}; }[${exports_file}] ${_unsafe}"
             fi
-        else
-            perm_issues="${perm_issues:+${perm_issues}, }파일 권한 확인 불가"
-        fi
+
+            # 설정 파일 권한 점검 (소유자 root + 644 초과 비트 없음)
+            local file_owner
+            file_owner=$(stat -c '%U' "$exports_file" 2>/dev/null || echo "")
+            local file_perms
+            file_perms=$(stat -c '%a' "$exports_file" 2>/dev/null || echo "")
+            if [ "$file_owner" != "root" ]; then
+                perm_issues="${perm_issues:+${perm_issues}, }[${exports_file}] 소유자가 root가 아님(${file_owner:-확인불가})"
+            fi
+            if [ -n "$file_perms" ]; then
+                # 644(rw-r--r--)를 초과하는 비트(그룹/기타 쓰기, 실행, 특수비트) 존재 여부 (비트 연산)
+                if [ $(( 8#${file_perms} & 8#7133 )) -ne 0 ]; then
+                    perm_issues="${perm_issues:+${perm_issues}, }[${exports_file}] 파일 권한이 644를 초과함(${file_perms})"
+                fi
+            else
+                perm_issues="${perm_issues:+${perm_issues}, }[${exports_file}] 파일 권한 확인 불가"
+            fi
+            summary_owner_perm="${summary_owner_perm:+${summary_owner_perm} | }${exports_file}: ${file_owner:-확인불가} ${file_perms:-확인불가}"
+            local _share
+            _share=$(grep -v "^#" "$exports_file" | xargs 2>/dev/null || echo "설정 없음")
+            summary_share="${summary_share:+${summary_share} | }${exports_file}: ${_share:-설정 없음}"
+        done
 
         # 2. 판정 로직 (접근 통제 + 설정 파일 권한)
         if [ -n "$unsafe_configs" ] || [ -n "$perm_issues" ]; then
@@ -76,12 +115,20 @@ diagnose() {
             [ -n "$unsafe_configs" ] && vuln_detail="NFS 공유가 모든 호스트(*)에 허용됨"
             [ -n "$perm_issues" ] && vuln_detail="${vuln_detail:+${vuln_detail}; }${perm_issues}"
             inspection_summary="NFS 접근 통제 미흡: ${vuln_detail}"
-            command_result="취약 설정 내역: [ ${unsafe_configs:-없음} ] / 파일 소유자·권한: [ ${file_owner:-확인불가} ${file_perms:-확인불가} ]"
+            command_result="취약 설정 내역: [ ${unsafe_configs:-없음} ] / 파일 소유자·권한: [ ${summary_owner_perm:-확인불가} ]"
         else
-            command_result="공유 설정 내역: [ $(grep -v "^#" "$exports_file" | xargs || echo "설정 없음") ] / 파일 소유자·권한: [ ${file_owner} ${file_perms} ]"
+            command_result="공유 설정 내역: [ ${summary_share} ] / 파일 소유자·권한: [ ${summary_owner_perm} ]"
         fi
     else
-        command_result="NFS 설정 파일(/etc/exports)이 존재하지 않습니다."
+        # exports 파일 없음 — NFS 데몬/포트가 활성이면 정적 판정 불가 → MANUAL
+        if [ "$nfs_daemon_active" = true ] || [ "$nfs_port_listening" = true ]; then
+            status="수동진단"
+            diagnosis_result="MANUAL"
+            inspection_summary="NFS 서비스/포트가 활성 상태이나 /etc/exports 및 /etc/exports.d/*.exports를 확인할 수 없어 접근 통제 설정의 정적 판정 불가 (수동 점검 필요: exportfs -v)"
+            command_result="NFS 설정 파일 미존재(/etc/exports, /etc/exports.d/*.exports) / NFS daemon active=${nfs_daemon_active}, port listening=${nfs_port_listening}"
+        else
+            command_result="NFS 설정 파일(/etc/exports, /etc/exports.d/*.exports)이 존재하지 않으며 NFS 서비스/포트도 비활성 상태입니다."
+        fi
     fi
 
     save_dual_result \

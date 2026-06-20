@@ -120,7 +120,7 @@ diagnose() {
     fi
 
     # 비슈퍼유저가 소유한 객체 확인 (KISA 가이드라인 참조)
-    local object_owner_query="SELECT DISTINCT relowner::regrole as owner, COUNT(*) as object_count FROM pg_class WHERE relowner NOT IN (SELECT usesysid FROM pg_user WHERE usesuper = TRUE) AND relkind IN ('r', 'v', 'm', 'f', 'p') GROUP BY relowner ORDER BY object_count DESC LIMIT 20;"
+    local object_owner_query="SELECT DISTINCT relowner::regrole as owner, COUNT(*) as object_count FROM pg_class WHERE relowner NOT IN (SELECT usesysid FROM pg_user WHERE usesuper = TRUE) GROUP BY relowner ORDER BY object_count DESC LIMIT 20;"
     command_executed="psql -h ${DB_HOST} -p ${DB_PORT} -U ${DB_ADMIN_USER} -d postgres -c \"${object_owner_query}\""
 
     # Try Unix socket connection first (peer authentication in Docker)

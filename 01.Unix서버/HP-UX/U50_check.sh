@@ -60,6 +60,7 @@ diagnose() {
     local dns_configured=false
     local is_secure=false
     local transfer_seen=false
+    local conf_parsed=false
     local dns_info=""
     local issues=()
 
@@ -109,6 +110,7 @@ diagnose() {
     for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
+            conf_parsed=true
             dns_info="${dns_info}${conf_file} 확인:\\n"
 
             # allow-transfer 설정 확인 (멀티라인 블록 대응: 주석 제거 후 평탄화하여 블록 전체 추출)
@@ -140,7 +142,8 @@ diagnose() {
     done || true
 
     # 모든 설정 파일에 allow-transfer가 전혀 없으면 기본값 any로 취약 (전역 1회 판정)
-    if [ "$dns_configured" = true ] && [ "$transfer_seen" = false ] && [ ${#issues[@]} -eq 0 ]; then
+    # conf_parsed 게이트: 표준 경로 설정 파일이 실제로 파싱된 경우에만 default-any 판정 부여
+    if [ "$conf_parsed" = true ] && [ "$transfer_seen" = false ] && [ ${#issues[@]} -eq 0 ]; then
         issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
     fi
 
@@ -170,6 +173,14 @@ diagnose() {
         inspection_summary="DNS Zone Transfer 제한 적절히 설정됨 (include 설정 포함 확인)"
         command_result="${dns_info}"
         command_executed="grep -v '^//' /etc/bind/named.conf* /etc/named.conf 2>/dev/null | tr -s '[:space:]' ' ' | grep -oiE 'allow-transfer[^{};]*\{[^}]*' || true"
+    elif [ "$conf_parsed" = false ]; then
+        # HP-UX의 경우 BIND가 비표준 경로(/etc/opt/bind 등, SD-UX 벤더 경로)에 배포될 수 있음
+        # 서비스는 실행 중이나 표준 경로에서 설정 파일을 확인할 수 없으면 수동 점검 필요
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="DNS 서비스 실행 중이나 표준 경로 BIND 설정 파일을 확인할 수 없어 수동 점검 필요"
+        command_result="${dns_info}${newline}[표준 경로 BIND 설정 파일 미확인 - HP-UX 비표준 경로(/etc/opt/bind 등) 점검 필요]"
+        command_executed="/sbin/init.d/named status 2>/dev/null; ls -la /etc/named.conf /etc/bind/named.conf* /etc/opt/bind/named.conf 2>/dev/null"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

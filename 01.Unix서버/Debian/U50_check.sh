@@ -113,9 +113,11 @@ diagnose() {
     done
 
     local transfer_seen=false
+    local conf_parsed=false
     for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
+            conf_parsed=true
             dns_info="${dns_info}${conf_file} 확인:${newline}"
 
             # allow-transfer 설정 확인 (멀티라인 블록 대응: 주석 제거 후 평탄화하여 블록 전체 추출)
@@ -157,7 +159,9 @@ diagnose() {
     fi
 
     # 전체 설정에서 allow-transfer가 전혀 발견되지 않으면 기본값(any)이 적용되므로 취약
-    if [ "$dns_configured" = true ] && [ "$transfer_seen" = false ]; then
+    # 단, 설정 파일을 하나라도 파싱한 경우(conf_parsed=true)에 한함 — 데몬만 실행되고
+    # 표준 경로에 설정 파일이 없는 경우(커스텀 prefix/chroot/권한 부족)는 MANUAL로 분기
+    if [ "$dns_configured" = true ] && [ "$conf_parsed" = true ] && [ "$transfer_seen" = false ]; then
         issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
     fi
 
@@ -168,6 +172,13 @@ diagnose() {
         inspection_summary="DNS 서비스 미설치됨"
         command_result="[DNS Service Status]${newline}$(systemctl is-active named 2>&1 || echo 'inactive')${newline}$(systemctl is-active bind9 2>&1 || echo 'inactive')"
         command_executed="systemctl is-active named bind9"
+    elif [ "$conf_parsed" = false ]; then
+        # 데몬 실행 중이지만 설정 파일을 읽을 수 없는 경우(커스텀 prefix/chroot/권한 부족 등): 자동 판정 불가
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="DNS 서비스가 동작 중이나 설정 파일(named.conf)을 읽을 수 없어 Zone Transfer 제한 여부 수동 확인 필요"
+        command_result="${dns_info}${newline}[표준 경로(/etc/bind/named.conf*, /etc/named.conf)에 설정 파일 없음 또는 접근 불가]"
+        command_executed="systemctl is-active named bind9; ls -la /etc/bind/named.conf* /etc/named.conf 2>/dev/null"
     elif [ "$is_secure" = true ] && [ ${#issues[@]} -eq 0 ] && [ "$include_unresolved" = true ]; then
         diagnosis_result="MANUAL"
         status="수동진단"

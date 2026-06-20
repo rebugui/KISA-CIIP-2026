@@ -106,9 +106,11 @@ diagnose() {
     fi
 
     local transfer_seen=false
+    local conf_parsed=false
     for conf_file in "${bind_conf_files[@]}"; do
         if [ -f "$conf_file" ]; then
             dns_configured=true
+            conf_parsed=true
             dns_info="${dns_info}${conf_file} 확인:${newline}"
 
             # allow-transfer 설정 확인 (멀티라인 블록 평탄화 후 판정)
@@ -150,7 +152,8 @@ diagnose() {
     fi
 
     # 전체 설정에서 allow-transfer가 전혀 발견되지 않으면 기본값(any)이 적용되므로 취약
-    if [ "$dns_configured" = true ] && [ "$transfer_seen" = false ]; then
+    # (단, 실제 설정 파일을 한 개라도 읽은 경우에만 판정 — 서비스만 감지된 경우는 별도 분기에서 MANUAL 처리)
+    if [ "$dns_configured" = true ] && [ "$conf_parsed" = true ] && [ "$transfer_seen" = false ]; then
         issues+=("allow-transfer 설정 미존재 (기본값 any, 취약)")
     fi
 
@@ -173,6 +176,14 @@ diagnose() {
         inspection_summary="DNS Zone Transfer 제한 적절히 설정됨 (include 설정 포함 확인)"
         command_result="${dns_info}"
         command_executed="grep -i 'allow-transfer' /etc/bind/named.conf* /etc/named.conf 2>/dev/null || true"
+    elif [ "$dns_configured" = true ] && [ "$conf_parsed" = false ]; then
+        # 서비스는 실행 중이나 표준 경로(/etc/named.conf, /etc/bind/named.conf*)에서 BIND 설정 파일을 찾을 수 없음
+        # (Solaris chroot /var/named/chroot/etc/, /opt/local/etc 등 비표준 경로 가능성) → 수동 점검 필요
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="BIND 서비스 실행 중이나 표준 경로에서 설정 파일 미발견, 수동 점검 필요"
+        command_result="${dns_info}${newline}[표준 경로에서 BIND 설정 파일을 찾을 수 없음 (chroot 또는 비표준 경로 가능성)]"
+        command_executed="svcs -H -o state svc:/network/dns/server; ps -ef | grep -w named; ls /etc/named.conf /etc/bind/named.conf* 2>/dev/null"
     else
         diagnosis_result="VULNERABLE"
         status="취약"

@@ -71,8 +71,8 @@ diagnose() {
         service_status="${service_status}${svc}: ${state}\\n"
     done || true
 
-    # 2) NFS 프로세스 확인
-    local nfs_procs=$(ps -ef 2>/dev/null | grep -Ei "nfsd|mountd|rpcbind|portmap" | grep -v grep || echo "")
+    # 2) NFS 프로세스 확인 (NFS 서버 데몬만: nfsd, rpc.mountd, rpcbind; automountd 등 클라이언트 데몬 제외)
+    local nfs_procs=$(ps -ef 2>/dev/null | grep -E '(^|/)nfsd( |$)|rpc\.mountd|rpc\.nfsd|(^|/)rpcbind( |$)|(^|/)portmap( |$)' | grep -vE 'automount(d)?|grep' || echo "")
     if [ -n "$nfs_procs" ]; then
         is_secure=false
         nfs_active=true

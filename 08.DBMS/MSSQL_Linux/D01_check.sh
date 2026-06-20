@@ -62,6 +62,8 @@ diagnose() {
     local command_executed=""
     local vulnerabilities_found=0
     local manual_review_needed=0
+    local query_success_count=0
+    local query_failure_evidence=""
 
     # MSSQL 서비스 확인 (Windows PowerShell 사용)
     if command -v powershell.exe &> /dev/null; then
@@ -94,54 +96,95 @@ diagnose() {
         return 0
     fi
 
+    # Helper: run sqlcmd with exit-code capture and error detection.
+    # Sets globals: __sqlcmd_out, __sqlcmd_rc, __sqlcmd_failed (1 on auth/connection/permission failure or non-zero rc).
+    run_sqlcmd_capture() {
+        local _q="$1"
+        local _rc=0
+        # -b: exit non-zero on SQL error; merge stderr to capture Login failed/Msg lines as evidence.
+        __sqlcmd_out=$(sqlcmd -S localhost -E -b -Q "${_q}" -h -1 -W 2>&1) || _rc=$?
+        __sqlcmd_rc=${_rc}
+        __sqlcmd_failed=0
+        if [ ${_rc} -ne 0 ]; then
+            __sqlcmd_failed=1
+        elif echo "${__sqlcmd_out}" | grep -E -q -i "Msg [0-9]+|Login failed|permission denied|Sqlcmd:|HYT00|cannot open|access is denied"; then
+            __sqlcmd_failed=1
+        fi
+    }
+
     # 1. 게스트 사용자 계정 확인
     local guest_query="SELECT name, type_desc FROM sys.server_principals WHERE name LIKE '%guest%' AND is_disabled = 0;"
-    command_executed="sqlcmd -S localhost -E -Q \"${guest_query}\""
-    command_result=$(sqlcmd -S localhost -E -Q "${guest_query}" -h -1 -W 2>/dev/null || echo "")
+    command_executed="sqlcmd -S localhost -E -b -Q \"${guest_query}\""
+    run_sqlcmd_capture "${guest_query}"
+    command_result="${__sqlcmd_out}"
 
-    if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "Rows affected"; then
-        ((vulnerabilities_found++)) || true
-        inspection_summary+="취약: 활성화된 게스트 사용자 계정 존재 - ${command_result}; "
+    if [ "${__sqlcmd_failed}" = "1" ]; then
+        manual_review_needed=1
+        query_failure_evidence+="게스트 계정 쿼리 실패(rc=${__sqlcmd_rc}): ${__sqlcmd_out}; "
+    else
+        query_success_count=$((query_success_count + 1))
+        if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "Rows affected"; then
+            ((vulnerabilities_found++)) || true
+            inspection_summary+="취약: 활성화된 게스트 사용자 계정 존재 - ${command_result}; "
+        fi
     fi
 
     # 2. 기본 로그인 확인 (sa, sysadmin 등)
     local default_login_query="SELECT name, is_disabled FROM sys.server_principals WHERE type = 'S' AND name IN ('sa', 'admin', 'administrator') AND is_disabled = 0;"
-    command_executed="sqlcmd -S localhost -E -Q \"${default_login_query}\""
-    command_result=$(sqlcmd -S localhost -E -Q "${default_login_query}" -h -1 -W 2>/dev/null || echo "")
+    command_executed="sqlcmd -S localhost -E -b -Q \"${default_login_query}\""
+    run_sqlcmd_capture "${default_login_query}"
+    command_result="${__sqlcmd_out}"
 
-    if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "Rows affected"; then
-        # sa 계정은 비밀번호가 설정되어 있는지 확인 필요
-        local sa_check=$(echo "$command_result" | grep -i "sa" || echo "")
-        if [ -n "$sa_check" ]; then
-            # 활성화된 sa(기본 계정)의 초기 비밀번호 변경/잠금 여부는 정적으로 증명할 수 없으므로
-            # 양호로 단정하지 않고 수동진단으로 격상한다. (Windows 헬퍼 D-01 동작과 일치)
-            manual_review_needed=1
-            inspection_summary+="수동진단 필요: sa 계정이 활성화됨 - 초기 비밀번호 변경 및 잠금 설정 여부 확인 필요; "
+    if [ "${__sqlcmd_failed}" = "1" ]; then
+        manual_review_needed=1
+        query_failure_evidence+="기본 로그인 쿼리 실패(rc=${__sqlcmd_rc}): ${__sqlcmd_out}; "
+    else
+        query_success_count=$((query_success_count + 1))
+        if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "Rows affected"; then
+            # sa 계정은 비밀번호가 설정되어 있는지 확인 필요
+            local sa_check=$(echo "$command_result" | grep -i "sa" || echo "")
+            if [ -n "$sa_check" ]; then
+                # 활성화된 sa(기본 계정)의 초기 비밀번호 변경/잠금 여부는 정적으로 증명할 수 없으므로
+                # 양호로 단정하지 않고 수동진단으로 격상한다. (Windows 헬퍼 D-01 동작과 일치)
+                manual_review_needed=1
+                inspection_summary+="수동진단 필요: sa 계정이 활성화됨 - 초기 비밀번호 변경 및 잠금 설정 여부 확인 필요; "
+            fi
         fi
     fi
 
     # 3. 빈 비밀번호를 가진 로그인 확인 (MSSQL 2012+)
     local empty_pwd_query="SELECT name FROM sys.sql_logins WHERE is_disabled = 0 AND PWDCOMPARE('', password_hash) = 1;"
-    command_executed="sqlcmd -S localhost -E -Q \"${empty_pwd_query}\""
-    command_result=$(sqlcmd -S localhost -E -Q "${empty_pwd_query}" -h -1 -W 2>/dev/null || echo "")
+    command_executed="sqlcmd -S localhost -E -b -Q \"${empty_pwd_query}\""
+    run_sqlcmd_capture "${empty_pwd_query}"
+    command_result="${__sqlcmd_out}"
 
-    if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "Rows affected"; then
-        ((vulnerabilities_found++)) || true
-        inspection_summary+="취약: 빈 비밀번호를 가진 계정 존재 - ${command_result}; "
+    if [ "${__sqlcmd_failed}" = "1" ]; then
+        manual_review_needed=1
+        query_failure_evidence+="빈 비밀번호 쿼리 실패(rc=${__sqlcmd_rc}): ${__sqlcmd_out}; "
+    else
+        query_success_count=$((query_success_count + 1))
+        if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "Rows affected"; then
+            ((vulnerabilities_found++)) || true
+            inspection_summary+="취약: 빈 비밀번호를 가진 계정 존재 - ${command_result}; "
+        fi
     fi
 
     # 결과 판정
+    # 안전 원칙: 한 건의 쿼리도 성공하지 못했다면 GOOD으로 판단할 수 없으므로 MANUAL로 격상.
     if [ $vulnerabilities_found -gt 0 ]; then
         diagnosis_result="VULNERABLE"
         status="취약"
         if [ -z "$inspection_summary" ]; then
             inspection_summary="DBMS 기본 계정 보안 취약 발견"
         fi
-    elif [ $manual_review_needed -gt 0 ]; then
+    elif [ $manual_review_needed -gt 0 ] || [ $query_success_count -eq 0 ]; then
         diagnosis_result="MANUAL"
         status="수동진단"
         if [ -z "$inspection_summary" ]; then
             inspection_summary="수동진단 필요: 활성화된 기본 계정의 초기 비밀번호 변경 및 잠금 설정 여부 확인 필요"
+        fi
+        if [ -n "$query_failure_evidence" ]; then
+            inspection_summary+="sqlcmd 인증/연결/권한 실패로 자동 판정 불가, 수동 점검 필요 - ${query_failure_evidence}"
         fi
     else
         diagnosis_result="GOOD"

@@ -65,8 +65,10 @@ diagnose() {
     local raw_output=""
 
     # NFS 관련 서비스 목록
-    local nfs_services=("nfs-server" "nfs-server.service" "nfs-kernel-server" "nfs" "nfsserver" "rpcbind" "rpc-statd" "rpc-mountd")
-    local nfs_daemons=("nfsd" "rpc.nfsd" "rpc.mountd" "rpc.statd" "rpcbind")
+    # 참고: rpcbind/portmapper는 NIS/ypbind/quota 등에도 사용되는 범용 RPC 포트매퍼이므로
+    # NFS 전용 데몬에서 제외 (가이드라인은 "NFS 관련" 데몬 비활성화를 요구)
+    local nfs_services=("nfs-server" "nfs-server.service" "nfs-kernel-server" "nfs" "nfsserver" "rpc-statd" "rpc-mountd")
+    local nfs_daemons=("nfsd" "rpc.nfsd" "rpc.mountd" "rpc.statd")
 
     # 1) systemctl 확인
     if command -v systemctl >/dev/null 2>&1 && systemctl --version >/dev/null 2>&1; then

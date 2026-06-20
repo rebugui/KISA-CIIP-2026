@@ -98,7 +98,8 @@ diagnose() {
     # - 점검 파일을 읽을 수 없으면 수동진단
     # - 잠금 활성화(LOCK_AFTER_RETRIES=YES)가 전제. 그 위에서 임계값 평가:
     #   * RETRIES 명시(1~10) → 양호 / RETRIES 명시(>10 또는 0) → 취약
-    #   * RETRIES 미설정 → Solaris 기본값(5, ≤10) 적용 → 양호 (5.9+ 가이드 권고 구성)
+    #   * RETRIES 미설정 → KISA 기준은 "설정되어 있지 않거나"를 취약으로 간주하므로
+    #     OS 내부 기본값(Solaris 5)에 의존하지 않고 수동진단으로 라우팅 (관리자 의도 확인 필요)
     # - LOCK_AFTER_RETRIES!=YES → 잠금 미적용 → 취약
     local solaris_default_retries=5
     if [ -n "$files_unreadable" ]; then
@@ -120,10 +121,11 @@ diagnose() {
             inspection_summary="계정 잠금 임계값 부적절 (RETRIES=${retries_val}, LOCK_AFTER_RETRIES=YES; RETRIES 1~10 필요)"
         fi
     else
-        # RETRIES 미설정: Solaris 기본 임계값(5회, ≤10) 적용 → 양호
-        diagnosis_result="GOOD"
-        status="양호"
-        inspection_summary="계정 잠금 활성화됨 (LOCK_AFTER_RETRIES=YES); RETRIES 미설정으로 Solaris 기본 임계값(${solaris_default_retries}회, 10회 이하) 적용됨"
+        # RETRIES 미설정: KISA criteria_bad("설정되어 있지 않거나")에 따라 OS 내부 기본값에 의존하지 않고
+        # 관리자가 의도적으로 임계값을 설정했는지 확인이 필요하므로 수동진단으로 라우팅
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="계정 잠금은 활성화됨 (LOCK_AFTER_RETRIES=YES) 이나 /etc/default/login에 RETRIES가 명시적으로 설정되어 있지 않음. Solaris 내부 기본값(${solaris_default_retries}회)이 적용될 수 있으나 KISA 기준상 임계값이 명시적으로 설정되지 않은 상태는 취약 가능성이 있어 관리자의 명시적 설정 여부 확인 필요(수동진단)"
     fi
 
     echo "" >&2
