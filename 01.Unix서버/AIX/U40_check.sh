@@ -59,12 +59,14 @@ diagnose() {
     # NFS 접근 통제 확인
     local nfs_installed=false
     local is_secure=true
+    local conf_checked=false
     local issues=()
     local exports_info=""
 
     # 1) NFS 서비스 설치 확인
     if [ -f /etc/exports ]; then
         nfs_installed=true
+        conf_checked=true
         exports_info="NFS exports 파일 존재\\n\\n"
 
         # /etc/exports 파일 권한 확인 (644 이하 요구)
@@ -146,8 +148,37 @@ diagnose() {
         fi
     fi
 
+    # 3-1) NFS 서비스는 활성이지만 /etc/exports 가 존재하지 않는 경우:
+    #      AIX는 exportfs -i (런타임, /etc/xtab 만) 또는 mknfsexp 로 /etc/exports 미보존 공유가 가능.
+    #      접근 통제/644 권한을 정적으로 입증할 수 없으므로 활성 공유를 수집하여 수동 판정으로 회부.
+    if [ "$nfs_installed" = true ] && [ "$conf_checked" = false ]; then
+        local active_shares=""
+        if command -v exportfs &>/dev/null; then
+            active_shares=$(exportfs -v 2>/dev/null || true)
+        fi
+        if [ -z "$active_shares" ] && [ -f /etc/xtab ]; then
+            active_shares=$(cat /etc/xtab 2>/dev/null || true)
+        fi
+        if [ -z "$active_shares" ] && command -v showmount &>/dev/null; then
+            active_shares=$(showmount -e 2>/dev/null || true)
+        fi
+        if [ -n "$active_shares" ]; then
+            exports_info="${exports_info}활성 공유 목록(/etc/exports 부재, 런타임 공유 추정):\\n${active_shares}\\n"
+        else
+            exports_info="${exports_info}NFS 서비스 활성 상태이나 /etc/exports 부재, 활성 공유 수집 실패\\n"
+        fi
+        issues+=("NFS 서비스 활성 상태이나 설정 파일(/etc/exports) 미존재 - 접근 통제 및 권한 정적 입증 불가 (수동 확인 필요)")
+        is_secure=false
+        diagnosis_result="MANUAL"
+    fi
+
     # 최종 판정
-    if [ "$nfs_installed" = false ]; then
+    if [ "$diagnosis_result" = "MANUAL" ]; then
+        status="수동진단"
+        inspection_summary="NFS 활성이나 /etc/exports 부재로 접근 통제/권한 입증 불가: ${issues[*]}"
+        command_result="${exports_info}"
+        command_executed="cat /etc/exports 2>/dev/null; lssrc -s nfsd 2>/dev/null; exportfs -v 2>/dev/null; cat /etc/xtab 2>/dev/null; showmount -e 2>/dev/null"
+    elif [ "$nfs_installed" = false ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="NFS 서비스 미사용"

@@ -71,12 +71,14 @@ diagnose() {
 
     local issues=""
     local evidence=""
+    local checked_any=false
 
     # ==========================================================================
     # 1. /etc/crontab 파일 권한 확인
     # ==========================================================================
     local cron_file="/etc/crontab"
     if [ -f "$cron_file" ]; then
+        checked_any=true
         local perm=$(stat -c "%a" "$cron_file" 2>/dev/null || echo "000")
         local owner=$(stat -c "%U" "$cron_file" 2>/dev/null || echo "unknown")
         evidence="${evidence}/etc/crontab: ${perm} ${owner}. "
@@ -98,6 +100,7 @@ diagnose() {
     # ==========================================================================
     for cron_ctrl in /etc/cron.allow /etc/cron.deny; do
         if [ -f "$cron_ctrl" ]; then
+            checked_any=true
             local perm=$(stat -c "%a" "$cron_ctrl" 2>/dev/null || echo "000")
             local owner=$(stat -c "%U" "$cron_ctrl" 2>/dev/null || echo "unknown")
             evidence="${evidence}${cron_ctrl}: ${perm} ${owner}. "
@@ -120,6 +123,7 @@ diagnose() {
     # ==========================================================================
     for at_ctrl in /etc/at.allow /etc/at.deny; do
         if [ -f "$at_ctrl" ]; then
+            checked_any=true
             local perm=$(stat -c "%a" "$at_ctrl" 2>/dev/null || echo "000")
             local owner=$(stat -c "%U" "$at_ctrl" 2>/dev/null || echo "unknown")
             evidence="${evidence}${at_ctrl}: ${perm} ${owner}. "
@@ -142,6 +146,7 @@ diagnose() {
     # ==========================================================================
     for cmd in /usr/bin/crontab /usr/bin/at /usr/bin/atq /usr/bin/atrm /usr/bin/batch; do
         if [ -f "$cmd" ]; then
+            checked_any=true
             local perm=$(stat -c "%a" "$cmd" 2>/dev/null || echo "000")
             evidence="${evidence}${cmd}: ${perm}. "
 
@@ -164,6 +169,7 @@ diagnose() {
                 if [ ! -f "$scan_file" ]; then
                     continue
                 fi
+                checked_any=true
                 local perm=$(stat -c "%a" "$scan_file" 2>/dev/null || echo "000")
                 local owner=$(stat -c "%U" "$scan_file" 2>/dev/null || echo "unknown")
                 evidence="${evidence}${scan_file}: ${perm} ${owner}. "
@@ -180,7 +186,11 @@ diagnose() {
     # ==========================================================================
     # 6. 판정
     # ==========================================================================
-    if [ "$diagnosis_result" = "GOOD" ]; then
+    if [ "$diagnosis_result" = "GOOD" ] && [ "$checked_any" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="cron/at 관련 파일 및 명령어가 모두 존재하지 않아 점검 불가 - 수동 점검 필요"
+    elif [ "$diagnosis_result" = "GOOD" ]; then
         inspection_summary="crontab 관련 파일의 권한 및 소유자 설정이 적절합니다."
     else
         inspection_summary="crontab 관련 파일 권한 문제: ${issues}"

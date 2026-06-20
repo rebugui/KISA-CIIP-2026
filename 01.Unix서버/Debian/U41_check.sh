@@ -85,16 +85,22 @@ diagnose() {
     fi
 
     # 3) automountd 서비스 확인 (legacy)
-    if systemctl list-unit-files | grep -q "automount"; then
+    # 주의: 커널/시스템이 기본 제공하는 *.automount 마운트 유닛
+    #       (예: proc-sys-fs-binfmt_misc.automount)은 KISA U-41이 지목하는
+    #       automountd RPC 데몬과 무관하므로 매칭에서 제외한다.
+    #       오라클(criteria/target/threat)은 autofs/amd/automountd 서비스 유닛만 대상.
+    if systemctl list-unit-files | grep -qE '^(autofs|amd|automountd)\.service'; then
         while read -r svc state; do
-            if [[ "$svc" =~ automount ]]; then
+            # *.automount 마운트 유닛은 건너뜀
+            [[ "$svc" =~ \.automount$ ]] && continue
+            if [[ "$svc" =~ ^(autofs|amd|automountd)\.service$ ]]; then
                 local active=$(systemctl is-active "$svc" 2>/dev/null || echo "inactive")
                 automount_info="${automount_info}${svc}: ${active}${newline}"
                 if [ "$active" = "active" ]; then
                     automount_running=true
                 fi
             fi
-        done < <(systemctl list-unit-files | grep automount) || true
+        done < <(systemctl list-unit-files | grep -E '^(autofs|amd|automountd)\.service') || true
     fi
 
     # 4) /etc/fstab 확인 (automount 엔트리)

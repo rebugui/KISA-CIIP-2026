@@ -48,6 +48,7 @@ diagnose() {
     local command_result=""
     local command_executed=""
     local has_vulnerable_perms=false
+    local _no_files_in_existing_dir=false
 
     # Process check - Apache must be running to check logs
     local apache_running=false
@@ -108,8 +109,14 @@ diagnose() {
             fi
 
             # Check log files in directory
-            for log_file in "${log_dir}"/*.log "${log_dir}"/*.log.*; do
+            # RHEL/CentOS Apache(httpd RPM) 기본 로그 파일명은 access_log/error_log (확장자 없음)
+            # Debian/Ubuntu Apache2는 access.log/error.log 형식이므로 두 패턴 모두 매칭
+            local _files_matched_in_dir=false
+            for log_file in "${log_dir}"/*.log "${log_dir}"/*.log.* \
+                            "${log_dir}"/access_log* "${log_dir}"/error_log* \
+                            "${log_dir}"/*_log; do
                 if [ -f "${log_file}" ]; then
+                    _files_matched_in_dir=true
                     local file_perm=$(stat -c "%a" "${log_file}" 2>/dev/null || echo "")
                     if [ -n "${file_perm}" ]; then
                         log_files_checked="${log_files_checked}"$'\n'"[FILE] ${log_file}: ${file_perm}"
@@ -121,6 +128,11 @@ diagnose() {
                     fi
                 fi
             done
+            # 디렉터리는 존재하지만 알려진 패턴의 로그 파일을 하나도 찾지 못한 경우 표시
+            if [ "${_files_matched_in_dir}" = false ]; then
+                log_dirs_checked="${log_dirs_checked}"$'\n'"[DIR-NO-FILES] ${log_dir}: no known log filenames matched (access_log*/error_log*/*.log*/*_log)"
+                _no_files_in_existing_dir=true
+            fi
         fi
     done
 
@@ -136,6 +148,11 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="로그 파일 또는 디렉터리 권한이 기준보다 취약합니다. 로그 파일은 600 또는 640, 로그 디렉터리는 700 또는 750 권한으로 설정하세요. chmod 명령어로 권한을 수정하세요."
+    elif [ "${_no_files_in_existing_dir}" = true ] && [ -z "${log_files_checked}" ]; then
+        # 디렉터리는 존재하지만 알려진 패턴의 로그 파일을 하나도 식별하지 못한 경우 — 파일 권한을 확인하지 못한 채 양호로 단정할 수 없음
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="로그 디렉터리는 존재하지만 알려진 패턴(access_log*/error_log*/*.log*/*_log)의 로그 파일을 찾지 못했습니다. httpd.conf의 ErrorLog/CustomLog 경로를 확인한 뒤, 해당 파일 권한이 600 또는 640인지 수동으로 점검하세요."
     else
         diagnosis_result="GOOD"
         status="양호"

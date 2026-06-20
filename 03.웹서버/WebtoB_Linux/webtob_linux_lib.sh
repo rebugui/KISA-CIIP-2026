@@ -359,7 +359,7 @@ invoke_webtob_linux_check() {
             # itself prove a redirect -> that case falls through to MANUAL below.
             lines="$(webtob_config_grep_active 'URLRewrite[[:space:]]*=[[:space:]]*[NY]|URLRewriteConfig|RewriteRule|https://' || true)"
             if printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*Y' \
-                && printf '%s' "${lines}" | grep -Eiq 'RewriteRule.*https://|https://'; then
+                && printf '%s' "${lines}" | grep -Eiq 'RewriteRule[[:space:]]+\S+[[:space:]]+\S*https://'; then
                 webtob_set_result "GOOD" "$(webtob_status_for_result GOOD)" "WebtoB HTTP-to-HTTPS redirection is enabled (URLRewrite=Y with an https redirect rule)." "${lines}" "grep rewrite http.m"
             elif printf '%s' "${lines}" | grep -Eiq 'URLRewrite[[:space:]]*=[[:space:]]*N'; then
                 webtob_set_result "VULNERABLE" "$(webtob_status_for_result VULNERABLE)" "WebtoB URL rewrite is disabled (URLRewrite=N); HTTPS redirection is not active." "${lines}" "grep rewrite http.m"

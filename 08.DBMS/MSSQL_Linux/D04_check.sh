@@ -144,13 +144,14 @@ diagnose() {
     local sysadmin_count=$(echo "$command_result" | grep -v "^\s*sa\s*" | grep -v "^$" | wc -l)
 
     # 2. server_principals에서 sysadmin 권한 확인
-    local sysadmin_check_query="SELECT name, type_desc FROM sys.server_principals WHERE IS_SRVROLEMEMBER('sysadmin', name) = 1 AND name NOT IN ('sa', '##MS_Agent', '##MS_PolicyEventProcessor', '##MS_PolicySqlExecution', '##MS_PolicyStoredProcUpdates', 'NT AUTHORITY\SYSTEM', 'NT SERVICE\MSSQLSERVER', 'NT SERVICE\SQLSERVERAGENT');"
+    local sysadmin_check_query="SET NOCOUNT ON; SELECT name, type_desc FROM sys.server_principals WHERE IS_SRVROLEMEMBER('sysadmin', name) = 1 AND name NOT IN ('sa', '##MS_Agent', '##MS_PolicyEventProcessor', '##MS_PolicySqlExecution', '##MS_PolicyStoredProcUpdates', 'NT AUTHORITY\SYSTEM', 'NT SERVICE\MSSQLSERVER', 'NT SERVICE\SQLSERVERAGENT');"
     command_executed="${sysadmin_check_query}"
     # 쿼리 성공 여부를 종료 코드와 오류 텍스트로 판별 (권한 부족/오류 시 빈 결과를 양호로 오판하지 않도록)
     local sysadmin_check_raw=""
     local sysadmin_check_rc=0
     sysadmin_check_raw=$(sqlcmd -S "${DB_HOST},${DB_PORT}" -U "${DB_USER}" -P "${DB_PASSWORD}" -Q "${sysadmin_check_query}" -h -1 -W -b 2>&1) || sysadmin_check_rc=$?
-    command_result=$(echo "$sysadmin_check_raw" | grep -v "^$" || echo "")
+    # 'rows affected' 트레일러 및 공백 라인 제거 (SET NOCOUNT ON 보강용 방어)
+    command_result=$(echo "$sysadmin_check_raw" | grep -viE "rows? affected" | grep -v "^[[:space:]]*$" || echo "")
 
     echo "[DEBUG] sysadmin check result:\n${command_result}"
 
@@ -165,7 +166,10 @@ diagnose() {
     fi
 
     # 3. excessive admin 확인 (sa 이외에 sysadmin 권한을 가진 계정)
-    if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "^\s*$"; then
+    # 실제 principal 행만 카운트 ('(N rows affected)' 트레일러/공백 제외, 두 컬럼 이상)
+    local principal_row_count
+    principal_row_count=$(echo "$command_result" | awk 'tolower($0) ~ /rows? affected/ {next} NF>=2 {c++} END {print c+0}')
+    if [ "${principal_row_count:-0}" -gt 0 ]; then
         ((vulnerabilities_found++)) || true
         inspection_summary+="취약: sa 이외에 sysadmin 권한을 가진 계정이 존재합니다 - ${command_result}; "
     fi

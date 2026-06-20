@@ -71,15 +71,17 @@ diagnose() {
         [ ! -f "$vsftpd_conf" ] && vsftpd_conf="/etc/vsftpd/vsftpd.conf"
 
         # vsftpd 접근 제어 확인
-        # 1) /etc/ftpusers 또는 /etc/vsftpd.ftpusers 확인 (주석/공백 라인 제외)
-        if [ -f /etc/ftpusers ]; then
-            local blocked_users=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' /etc/ftpusers 2>/dev/null | wc -l)
-            if [ "$blocked_users" -gt 0 ]; then
-                access_configured=true
-                access_details="/etc/ftpusers에 ${blocked_users}개 차단된 사용자"
-                config_files="${config_files}/etc/ftpusers "
+        # 1) /etc/ftpusers 또는 /etc/ftpd/ftpusers 또는 /etc/vsftpd.ftpusers 확인 (주석/공백 라인 제외)
+        for vsftpd_users_file in /etc/ftpusers /etc/ftpd/ftpusers; do
+            if [ -f "$vsftpd_users_file" ]; then
+                local blocked_users=$(grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$vsftpd_users_file" 2>/dev/null | wc -l)
+                if [ "$blocked_users" -gt 0 ]; then
+                    access_configured=true
+                    access_details="${access_details:+${access_details}, }${vsftpd_users_file}에 ${blocked_users}개 차단된 사용자"
+                    config_files="${config_files}${vsftpd_users_file} "
+                fi
             fi
-        fi
+        done || true
 
         # 2) vsftpd.conf에서 userlist_enable, userlist_file 확인
         # userlist_enable=YES만으로는 접근 제어로 인정하지 않고, 실제 리스트
@@ -117,8 +119,8 @@ diagnose() {
         config_files="${config_files}${proftpd_conf} "
     fi
 
-    # /etc/ftpusers 또는 /etc/ftpdusers 확인 (일반적인 FTP 차단 파일)
-    for users_file in /etc/ftpusers /etc/ftpdusers; do
+    # /etc/ftpusers, /etc/ftpd/ftpusers (Solaris 11 in.ftpd 표준 경로), 또는 /etc/ftpdusers 확인
+    for users_file in /etc/ftpusers /etc/ftpd/ftpusers /etc/ftpdusers; do
         if [ -f "$users_file" ]; then
             ftp_installed=true
             local user_count=$(grep -v "^#" "$users_file" 2>/dev/null | grep -v "^$" | wc -l)
@@ -157,12 +159,12 @@ diagnose() {
         diagnosis_result="VULNERABLE"
         status="취약"
         inspection_summary="FTP 접근 제어가 설정되지 않음 (root 등 관리자 계정 접근 가능)"
-        local ftp_access=$(cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} 2>/dev/null || echo "No FTP access control files found")
-        command_result="[Command: cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers}]\${newline}${ftp_access}"
+        local ftp_access=$(cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} /etc/ftpd/ftpusers 2>/dev/null || echo "No FTP access control files found")
+        command_result="[Command: cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} /etc/ftpd/ftpusers]\${newline}${ftp_access}"
         if [ -n "$running_detail" ]; then
             command_result="${command_result}${newline}[FTP daemon: ${running_detail}]"
         fi
-        command_executed="cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} 2>/dev/null"
+        command_executed="cat /etc/{vsftpd*,proftpd*,ftpusers,ftpdusers} /etc/ftpd/ftpusers 2>/dev/null"
     fi
 
     # echo ""

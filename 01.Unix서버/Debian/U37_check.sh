@@ -93,6 +93,7 @@ diagnose() {
     )
 
     local is_secure=true
+    local checked_any=false
     local issues=()
     local file_info=""
 
@@ -100,6 +101,7 @@ diagnose() {
     local cmd_file=""
     for cmd_file in /usr/bin/crontab /usr/bin/at; do
         if [ -f "$cmd_file" ]; then
+            checked_any=true
             local cmd_perms=$(stat -c "%a" "$cmd_file" 2>/dev/null || echo "000")
             local cmd_owner=$(stat -c "%U" "$cmd_file" 2>/dev/null || echo "unknown")
             file_info="${file_info}${cmd_file}: 권한=${cmd_perms}, 소유자=${cmd_owner}${newline}"
@@ -122,6 +124,7 @@ diagnose() {
 
     for file in "${crontab_files[@]}"; do
         if [ -f "$file" ]; then
+            checked_any=true
             local perms=$(stat -c "%a" "$file" 2>/dev/null || echo "000")
             local owner=$(stat -c "%U" "$file" 2>/dev/null || echo "unknown")
 
@@ -160,6 +163,7 @@ diagnose() {
         if [ -d "$scan_dir" ]; then
             file_info="${file_info}${newline}${scan_dir} 디렉토리 파일:${newline}"
             while IFS= read -r -d '' file; do
+                checked_any=true
                 local perms=$(stat -c "%a" "$file" 2>/dev/null || echo "000")
                 local owner=$(stat -c "%U" "$file" 2>/dev/null || echo "unknown")
                 file_info="${file_info}  $(basename "$file"): ${perms}, ${owner}${newline}"
@@ -173,7 +177,13 @@ diagnose() {
     done
 
     # 최종 판정
-    if [ "$is_secure" = true ]; then
+    if [ "$is_secure" = true ] && [ "$checked_any" = false ]; then
+        diagnosis_result="MANUAL"
+        status="수동진단"
+        inspection_summary="cron/at 관련 파일·명령어가 모두 존재하지 않아 권한 점검 불가 (수동 확인 필요)"
+        command_result="${file_info}점검 대상 파일/명령어를 찾지 못했습니다."
+        command_executed="stat -c '%a %U' /usr/bin/crontab /usr/bin/at /etc/crontab /etc/cron.deny /etc/cron.allow /etc/at.deny /etc/at.allow 2>/dev/null; find /etc/cron.d /var/spool/cron -type f -exec stat -c '%n %a %U' {} \\;"
+    elif [ "$is_secure" = true ]; then
         diagnosis_result="GOOD"
         status="양호"
         inspection_summary="crontab 관련 파일 권한 적절함"

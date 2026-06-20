@@ -100,8 +100,10 @@ diagnose() {
     command_result=$(sqlcmd -S localhost -E -Q "${shared_account_query}" -h -1 -W 2>/dev/null || echo "")
 
     if [ -n "$command_result" ] && echo "$command_result" | grep -q -v "Rows affected"; then
-        ((shared_accounts_found++)) || true
-        inspection_summary="의심스러운 공용 계정 발견 - ${command_result}; "
+        # 계정명 부분문자열(LIKE) 매칭만으로는 "공용 계정 사용"을 정적으로 입증할 수 없음
+        # (예: 'app_test_login', 'sharedreports_ro' 같은 개별 사용자 계정도 매칭됨)
+        # → 수동 판단 대상으로 기록 (Windows 헬퍼 mssql_windows_lib.ps1 D-06 보수적 경로와 동일)
+        inspection_summary="의심 명칭 패턴 일치 계정(수동 검토 필요) - ${command_result}; "
     fi
 
     # 2. 다중 사용자 연결 확인 (동일한 계정에서 여러 세션)

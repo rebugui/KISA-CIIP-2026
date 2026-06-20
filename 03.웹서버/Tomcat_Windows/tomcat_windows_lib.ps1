@@ -411,6 +411,9 @@ function Invoke-TomcatWindowsCheck {
             $linkText = [regex]::Replace($linkText, '(?s)<!--.*?-->', '')
             $allowLinking = @([regex]::Matches($linkText, '(?i)allowLinking\s*=\s*["'']true["'']') | ForEach-Object { $_.Value })
             if ($links.Count -gt 0 -or $allowLinking.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Tomcat webapps contain links/reparse points or allowLinking=true.' (($links + $allowLinking) -join "`n") 'Inspect Tomcat webapps links and context allowLinking' }
+            # webapps 디렉터리, server.xml, context.xml이 모두 부재/판독불가이면 링크/allowLinking 정책을 정적으로 확인할 수 없으므로
+            # 증거 부재를 GOOD으로 단정하지 말고 MANUAL 처리(Linux WEB12 peer 및 WEB-06/15/19 패턴과 동일).
+            if ($state.Webapps.Count -eq 0 -and [string]::IsNullOrWhiteSpace($serverText) -and [string]::IsNullOrWhiteSpace($contextText)) { return New-TomcatResult 'MANUAL' 'Tomcat was found, but no readable webapps directory, server.xml, or context.xml was located; allowLinking and link state cannot be confirmed. Verify manually.' $evidencePrefix 'Inspect Tomcat webapps links and context allowLinking' }
             return New-TomcatResult 'GOOD' 'No Tomcat webapp links/reparse points or allowLinking=true evidence was found.' "Webapps: $($state.Webapps -join ', ')" 'Inspect Tomcat webapps links and context allowLinking'
         }
         'WEB-13' {
@@ -425,6 +428,9 @@ function Invoke-TomcatWindowsCheck {
         }
         'WEB-14' {
             $targets = @($state.ServerXml + $state.TomcatUsersXml + $state.WebXml + $state.ContextXml + $state.Webapps | Select-Object -Unique)
+            # Tomcat is detected but no config files or webapps paths could be resolved (broken/partial install, stale service PathName,
+            # non-standard layout). Zero paths inspected cannot statically prove compliant ACLs — route to MANUAL (severity 상, mirrors WEB-26).
+            if ($targets.Count -eq 0) { return New-TomcatResult 'MANUAL' 'Tomcat installation detected but no inspectable config files or webapps paths were resolved; ACL state cannot be confirmed. Verify manually.' $evidencePrefix 'Get-Acl Tomcat config and web paths' }
             $acl = foreach ($path in $targets) { if (Test-Path -LiteralPath $path) { Get-TomcatBroadAclEvidence -Path $path -Role 'TomcatPath' } }
             $bad = @($acl | Where-Object { $_.Access -eq 'Write' })
             if ($bad.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Broad local write ACL evidence was found on Tomcat paths.' (($bad | ForEach-Object { "$($_.Path) => $($_.Principal) $($_.Access) ($($_.Rights))" }) -join "`n") 'Get-Acl Tomcat config and web paths' }
@@ -458,7 +464,11 @@ function Invoke-TomcatWindowsCheck {
         }
         'WEB-17' {
             $virtuals = @($state.Webapps | ForEach-Object { Get-ChildItem -LiteralPath $_ -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName })
-            $unnecessary = @($virtuals | Where-Object { $_ -match '(?i)\\(docs|examples|sample|samples|test|backup|tmp|old)(\\|$)' })
+            # Tomcat-shipped stock virtual directories only (mirroring WEB-07 lines 346-349 and Linux WEB17 peer).
+            # 'sample/samples/test/backup/tmp/old' are arbitrary user-chosen webapp context names (e.g. backup.war
+            # creates webapps/backup as a legitimate user context root) and must NOT be hard-flagged — leave them
+            # to the MANUAL fallback so operators confirm necessity.
+            $unnecessary = @($virtuals | Where-Object { $_ -match '(?i)\\(docs|examples|manager|host-manager)(\\|$)' })
             if ($unnecessary.Count -gt 0) { return New-TomcatResult 'VULNERABLE' 'Unnecessary Tomcat virtual directories were found.' ($unnecessary -join "`n") 'Inspect Tomcat webapps virtual directories' }
             if ($virtuals.Count -gt 0) { return New-TomcatResult 'MANUAL' 'Tomcat webapp directories exist. Confirm each deployed virtual directory is required.' ($virtuals -join "`n") 'Inspect Tomcat webapps virtual directories' }
             return New-TomcatResult 'GOOD' 'No Tomcat webapp virtual directories were found.' "Webapps: $($state.Webapps -join ', ')" 'Inspect Tomcat webapps virtual directories'

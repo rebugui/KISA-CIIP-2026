@@ -83,8 +83,8 @@ diagnose() {
 
             raw_output="${raw_output}${script_name}: ${file_owner} ${file_perms}${newline}"
 
-            # 소유자가 root가 아닌 경우
-            if [ "$file_owner" != "root:root" ]; then
+            # 소유자가 root가 아닌 경우 (가이드 기준: 소유자만 판정, 그룹은 무관)
+            if [ "${file_owner%%:*}" != "root" ]; then
                 ((vulnerable_count++)) || true
                 vulnerable_files="${vulnerable_files}${script_name} (소유자: ${file_owner}), "
             else
@@ -123,8 +123,8 @@ diagnose() {
 
             raw_output="${raw_output}${script_name}: ${file_owner} ${file_perms}${newline}"
 
-            # 소유자가 root가 아닌 경우
-            if [ "$file_owner" != "root:root" ]; then
+            # 소유자가 root가 아닌 경우 (가이드 기준: 소유자만 판정, 그룹은 무관)
+            if [ "${file_owner%%:*}" != "root" ]; then
                 ((vulnerable_count++)) || true
                 vulnerable_files="${vulnerable_files}${script_name} (소유자: ${file_owner}), "
             else
